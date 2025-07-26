@@ -1,0 +1,29 @@
+name: CI/CD to VPS
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy via SSH
+        run: |
+          ssh -o StrictHostKeyChecking=no root@${{ secrets.VPS_HOST }} << 'EOF'
+          cd /root/backend
+          git pull
+          docker stop qiu-container || true
+          docker rm qiu-container || true
+          docker build -t qiu-backend .
+          docker run -d --env-file /root/backend/config/.env -p 8080:8080 --name qiu-container qiu-backend
+          EOF
