@@ -41,3 +41,9 @@ app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
 @app.get("/")
 async def root():
     return {"message": "Welcome to FastAPI App"}
+
+
+
+@app.get("/iseng")
+async def iseng():
+    return {"message": "Welcome to FastAPI App"}
