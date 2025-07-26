@@ -22,7 +22,7 @@ def create_access_token(subject: Union[str, Any], expires_delta: int = None) -> 
         expires_delta = datetime.utcnow() + expires_delta
 
     else:
-        expires_delta = datetime.utcnow() + timedelta(minutes=os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+        expires_delta = datetime.utcnow() + timedelta(minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES",30)))
 
 
     to_encode = {"exp": expires_delta, "sub": str(subject)}
