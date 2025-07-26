@@ -60,5 +60,5 @@ def login(request: RequestDetails, db: Session = Depends(get_db)):
 @router.get("/test-ci")
 def testCI(db:Session = Depends(get_db)):
     return {
-        "message" : "HALLO"
+        "message" : "HALLO, TEST 123"
     }
