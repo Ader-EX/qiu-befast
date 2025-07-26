@@ -55,3 +55,10 @@ def login(request: RequestDetails, db: Session = Depends(get_db)):
         "access_token": access,
         "refresh_token": refresh,
     }
+
+
+@router.get("/test-ci")
+def testCI(db:Session = Depends(get_db)):
+    return {
+        "message" : "HALLO"
+    }
