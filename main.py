@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from database import Base, engine
 from routes import auth_routes
 
+
 # Load env (e.g., .env.office or .env.home)
 load_dotenv()
 
@@ -20,7 +21,8 @@ app = FastAPI()
 @app.on_event("startup")
 async def startup_event():
     Base.metadata.create_all(bind=engine)
-    print("Starting project")
+    print("✅ Database tables created.")
+    print("🚀 Starting FastAPI project")
 
 # Setup CORS (customize if needed)
 app.add_middleware(
