@@ -13,7 +13,7 @@ class Pembelian(Base):
     price_pembelian  = Column(Numeric(15,2), default=0.00)
     no_pembelian = Column(String(255), default="", nullable=True)
 
-    vendor_id = Column(Integer,ForeignKey("vendors.id"),nullable=False )
+    vendor_id = Column(String(50),ForeignKey("vendors.id"),nullable=False )
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False)
 
     # SALAH, KARENA HARUSNYA INI ITEM_IDS

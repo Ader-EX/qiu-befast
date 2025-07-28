@@ -24,7 +24,7 @@ class Item(Base):
     category_one = Column(Integer, ForeignKey("categories.id"), nullable=True)
     category_two = Column(Integer, ForeignKey("categories.id"), nullable=True)
     satuan_id = Column(Integer, ForeignKey("satuans.id"), nullable=False)
-    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False)
+    vendor_id = Column(String(50), ForeignKey("vendors.id"), nullable=False)
 
     
     # Relationships

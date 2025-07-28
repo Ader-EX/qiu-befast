@@ -19,7 +19,7 @@ class AllAttachment(Base):
     parent_type = Column(Enum(ParentType), nullable=False)
 
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
-    pembelian_id = Column(Integer, ForeignKey("pembelians.id"), nullable=True)
+    pembelian_id = Column(String(50), ForeignKey("pembelians.id"), nullable=True)
     # penjualan_id = Column(Integer, ForeignKey("penjualans.id"), nullable=True)
     # pembayaran_id = Column(Integer, ForeignKey("pembayarans.id"), nullable=True)
     # pengembalian_id = Column(Integer, ForeignKey("pengembalians.id"), nullable=True)
