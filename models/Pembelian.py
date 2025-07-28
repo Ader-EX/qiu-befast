@@ -21,7 +21,7 @@ class Pembelian(Base):
 
     vendor_rel = relationship("Vendor", back_populates="pembelians")
     warehouse_rel = relationship("Warehouse", back_populates="pembelians")
-    item_rel = relationship("Item", back_populates="pembelians")
+    # item_rel = relationship("Item", back_populates="pembelians")
 
     attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
 

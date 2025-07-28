@@ -34,5 +34,5 @@ class Item(Base):
     satuan_rel = relationship("Satuan", back_populates="items")
     vendor_rel = relationship("Vendor", back_populates="items")
     attachments = relationship("AllAttachment", back_populates="item_rel", cascade="all, delete-orphan")
-    pembelians  = relationship("Pembelian", back_populates="item_rel")
+    # pembelians  = relationship("Pembelian", back_populates="item_rel")
 
