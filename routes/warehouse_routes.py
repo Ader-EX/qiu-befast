@@ -1,19 +1,37 @@
-from typing import List
-from fastapi import APIRouter, Depends
+from typing import List, Optional
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from starlette import status
 from starlette.exceptions import HTTPException
 
 from models.Warehouse import Warehouse
+from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.WarehouseSchemas import WarehouseOut, WarehouseCreate, WarehouseUpdate
 from database import get_db
 
 router = APIRouter()
 
 # Get all
-@router.get("", response_model=List[WarehouseOut])
-async def get_all_warehouses(db: Session = Depends(get_db)):
-    return db.query(Warehouse).all()
+@router.get("", response_model=PaginatedResponse[WarehouseOut])
+async def get_all_warehouses(
+    db: Session = Depends(get_db),
+    skip: int = 0,
+    limit: int = 10,
+    search: Optional[str] = Query(None, description="Search warehouse by name"),
+):
+    query = db.query(Warehouse)
+
+    if search:
+        query = query.filter(Warehouse.name.ilike(f"%{search}%"))
+        
+    total_count = query.count()
+
+    paginated_data = query.offset(skip).limit(limit).all()
+
+    return {
+        "data": paginated_data,
+        "total": total_count
+    }
 
 # Get one
 @router.get("/{warehouse_id}", response_model=WarehouseOut)

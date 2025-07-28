@@ -23,7 +23,8 @@ async def startup_event():
 # Setup CORS (customize if needed)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["localhost:3000","https://qiu-system.vercel.app"],  # TODO :NEED TO UPDATE FOR PROD
+    # allow_origins=["localhost:3000","https://qiu-system.vercel.app"],  # TODO :NEED TO UPDATE FOR PROD
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

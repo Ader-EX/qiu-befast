@@ -5,7 +5,7 @@ from typing import Optional
 class WarehouseBase(BaseModel):
     name: str
     address: str
-    is_active: Optional[bool] = True
+    is_active: Optional[bool]
 
 
 class WarehouseCreate(WarehouseBase):
