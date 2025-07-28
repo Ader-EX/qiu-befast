@@ -40,7 +40,7 @@ def register_user(user: UserCreate, session: Session = Depends(get_db)):
 def login(request: RequestDetails, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == request.username).first()
     if user is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect email")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password atau username salah")
     hashed_pass = user.password
     if not verify_password(request.password, hashed_pass):
         raise HTTPException(

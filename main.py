@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 from database import Base, engine
-from routes import auth_routes,currency_routes, item_routes,vendor_routes,category_routes, satuan_routes,warehouse_routes, termofpayment_routes
+from routes import auth_routes,currency_routes,customer_routes, item_routes,vendor_routes,category_routes, satuan_routes,warehouse_routes, termofpayment_routes
 
 
 # Load env (e.g., .env or .env.home)
@@ -40,7 +40,7 @@ app.include_router(warehouse_routes.router, prefix="/warehouse", tags=["Warehous
 app.include_router(category_routes.router, prefix="/category", tags=["Category"])
 app.include_router(vendor_routes.router, prefix="/vendor", tags=["Vendor"])
 app.include_router(currency_routes.router, prefix="/currency", tags=["Currency"])
-
+app.include_router(customer_routes.router, prefix="/customer", tags=["Customer"])
 app.include_router(item_routes.router, prefix="/item", tags=["Item"])
 
 @app.get("/")

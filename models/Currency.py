@@ -9,7 +9,7 @@ from models.Customer import Customer
 class Currency(Base):
     __tablename__ = "currencies"
     
-    id = Column(String(50), primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
     symbol = Column(String(10), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)

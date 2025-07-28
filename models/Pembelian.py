@@ -17,7 +17,7 @@ class Pembelian(Base):
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False)
 
     # SALAH, KARENA HARUSNYA INI ITEM_IDS
-    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    # item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
 
     vendor_rel = relationship("Vendor", back_populates="pembelians")
     warehouse_rel = relationship("Warehouse", back_populates="pembelians")

@@ -18,10 +18,10 @@ from schemas.ItemSchema import ItemResponse, ItemTypeEnum
 
 router = APIRouter()
 
-UPLOAD_DIR = "uploads/items"
-LOCAL_UPLOAD_DIR = "local_uploads/items"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(LOCAL_UPLOAD_DIR, exist_ok=True)
+NEXT_PUBLIC_UPLOAD_DIR = os.getenv("UPLOAD_DIR" ,default="uploads/items")
+NEXT_PUBLIC_LOCAL_UPLOAD_DIR = "local_uploads/items"
+os.makedirs(NEXT_PUBLIC_UPLOAD_DIR, exist_ok=True)
+os.makedirs(NEXT_PUBLIC_LOCAL_UPLOAD_DIR, exist_ok=True)
 
 # CRUD Operations
 
@@ -37,7 +37,7 @@ async def create_item(
         category_one: Optional[int] = Form(None),
         category_two: Optional[int] = Form(None),
         satuan_id: int = Form(...),
-        vendor_id: int = Form(...),
+        vendor_id: str = Form(...),
         # Images (max 3)
         images: List[UploadFile] = File(default=[]),
         db: Session = Depends(get_db)
@@ -81,12 +81,12 @@ async def create_item(
                 unique_filename = f"{uuid.uuid4()}{file_extension}"
 
                 # Save to VPS (production path)
-                vps_file_path = os.path.join(UPLOAD_DIR, unique_filename)
+                vps_file_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
                 with open(vps_file_path, "wb") as buffer:
                     shutil.copyfileobj(image.file, buffer)
 
                 # Also save locally for backup
-                local_file_path = os.path.join(LOCAL_UPLOAD_DIR, unique_filename)
+                local_file_path = os.path.join(NEXT_PUBLIC_LOCAL_UPLOAD_DIR, unique_filename)
                 image.file.seek(0)  # Reset file pointer
                 with open(local_file_path, "wb") as buffer:
                     shutil.copyfileobj(image.file, buffer)
@@ -291,7 +291,7 @@ async def update_item(
                     if os.path.exists(attachment.file_path):
                         os.remove(attachment.file_path)
 
-                    local_path = attachment.file_path.replace(UPLOAD_DIR, LOCAL_UPLOAD_DIR)
+                    local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR, NEXT_PUBLIC_LOCAL_UPLOAD_DIR)
                     if os.path.exists(local_path):
                         os.remove(local_path)
 
@@ -318,15 +318,15 @@ async def update_item(
                 unique_filename = f"{uuid.uuid4()}{file_extension}"
 
                 # Save to VPS
-                vps_file_path = os.path.join(UPLOAD_DIR, unique_filename)
+                vps_file_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
                 with open(vps_file_path, "wb") as buffer:
                     shutil.copyfileobj(image.file, buffer)
 
                 # Save locally
-                local_file_path = os.path.join(LOCAL_UPLOAD_DIR, unique_filename)
-                image.file.seek(0)
-                with open(local_file_path, "wb") as buffer:
-                    shutil.copyfileobj(image.file, buffer)
+                # local_file_path = os.path.join(NEXT_PUBLIC_LOCAL_UPLOAD_DIR, unique_filename)
+                # image.file.seek(0)
+                # with open(local_file_path, "wb") as buffer:
+                #     shutil.copyfileobj(image.file, buffer)
 
                 # Create attachment record
                 attachment = AllAttachment(
@@ -390,7 +390,7 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
             if os.path.exists(attachment.file_path):
                 os.remove(attachment.file_path)
 
-            local_path = attachment.file_path.replace(UPLOAD_DIR, LOCAL_UPLOAD_DIR)
+            local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR, NEXT_PUBLIC_LOCAL_UPLOAD_DIR)
             if os.path.exists(local_path):
                 os.remove(local_path)
 
@@ -420,7 +420,7 @@ def get_item_image(item_id: int, attachment_id: int, db: Session = Depends(get_d
 
     if not os.path.exists(attachment.file_path):
         # Try local backup
-        local_path = attachment.file_path.replace(UPLOAD_DIR, LOCAL_UPLOAD_DIR)
+        local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR, NEXT_PUBLIC_LOCAL_UPLOAD_DIR)
         if os.path.exists(local_path):
             return FileResponse(local_path, media_type=attachment.mime_type)
         else:
@@ -440,7 +440,7 @@ def sync_items_to_vps(db: Session = Depends(get_db)):
         ).all()
 
         for attachment in attachments:
-            local_path = attachment.file_path.replace(UPLOAD_DIR, LOCAL_UPLOAD_DIR)
+            local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR,NEXT_PUBLIC_LOCAL_UPLOAD_DIR)
 
             # If VPS file doesn't exist but local does, copy it
             if not os.path.exists(attachment.file_path) and os.path.exists(local_path):

@@ -25,7 +25,7 @@ class ItemBase(BaseModel):
     category_one: Optional[int] = None
     category_two: Optional[int] = None
     satuan_id: int
-    vendor_id: int
+    vendor_id: str
 
 class ItemCreate(ItemBase):
     pass

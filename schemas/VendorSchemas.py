@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 
 class VendorBase(BaseModel):
+    id: str
     name: str
     address: str
     currency_id: int
@@ -14,7 +15,7 @@ class VendorUpdate(VendorBase):
     pass
 
 class VendorOut(VendorBase):
-    id: int
+    pass
 
     class Config:
         orm_mode = True
