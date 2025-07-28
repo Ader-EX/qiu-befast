@@ -12,10 +12,11 @@ class Vendor(Base):
     currency_id = Column(Integer, ForeignKey("currencies.id"), nullable=False)
     top_id = Column(Integer, ForeignKey("term_of_payments.id"), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
     
     # Relationships
-    currency = relationship("Currency", back_populates="vendors")
-    top_rel = relationship("TermOfPayment", back_populates="vendors")
+    curr_rel = relationship("Currency", back_populates="vend_rel")
+    top_rel = relationship("TermOfPayment", back_populates="vend_rel")
+    pembelians = relationship("Pembelian", back_populates="vendor_rel")
+
     items = relationship("Item", back_populates="vendor_rel")

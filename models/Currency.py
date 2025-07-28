@@ -3,6 +3,8 @@ from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
+from models.Customer import Customer
+
 
 class Currency(Base):
     __tablename__ = "currencies"
@@ -11,8 +13,8 @@ class Currency(Base):
     name = Column(String(100), nullable=False)
     symbol = Column(String(10), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
     
     # Relationships
-    vendors = relationship("Vendor", back_populates="currency")
+    vend_rel = relationship("Vendor", back_populates="curr_rel")
+    cust_rel = relationship("Customer", back_populates="curr_rel")
