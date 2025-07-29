@@ -10,7 +10,6 @@ from schemas.TopSchemas import TopOut, TopCreate, TopUpdate
 from starlette.exceptions import HTTPException
 
 from models.TermOfPayment import TermOfPayment
-from schemas.SatuanSchemas import SatuanOut, SatuanCreate, SatuanUpdate
 from database import Base, engine, SessionLocal, get_db
 
 

@@ -7,11 +7,12 @@ from starlette.exceptions import HTTPException
 from models.Category import Category
 from schemas.CategorySchemas import CategoryOut, CategoryCreate, CategoryUpdate
 from database import get_db
+from schemas.PaginatedResponseSchemas import PaginatedResponse
 
 router = APIRouter()
 
 # Get all
-@router.get("", response_model=List[CategoryOut])
+@router.get("", response_model=PaginatedResponse[CategoryOut])
 async def get_all_categories(
         cat_type: int = 0,
         is_active: Optional[bool] = None,
@@ -32,7 +33,15 @@ async def get_all_categories(
     if cat_type != 0:
         query = query.filter(Category.category_type == cat_type)
 
-    return query.offset(skip).limit(limit).all()
+    paginated_data =query.offset(skip).limit(limit).all()
+    total_count = query.count()
+
+    return {
+        "data": paginated_data,
+        "total": total_count
+    }
+
+
 
 @router.get("/{category_id}", response_model=CategoryOut)
 async def get_category(category_id: int, db: Session = Depends(get_db)):
