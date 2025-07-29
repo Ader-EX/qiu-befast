@@ -1,9 +1,9 @@
 import os
-from typing import List
+from typing import List, Optional
 
 from fastapi import FastAPI,  APIRouter
 
-from fastapi.params import Depends
+from fastapi.params import Depends, Query
 from sqlalchemy.orm import Session
 from starlette import status
 
@@ -16,18 +16,27 @@ from database import Base, engine, SessionLocal, get_db
 
 
 
-# id = Column(Integer, primary_key=True, index=True)
-# name = Column(String(100), nullable=False)
-# symbol = Column(String(10), nullable=False)
-# is_active = Column(Boolean, default=True, nullable=False)
-
 
 router =APIRouter()
 
 
 @router.get("", response_model=List[SatuanOut])
-async def get_all_satuan(db: Session = Depends(get_db)):
-    return db.query(Satuan).all()
+async def get_all_satuan(
+        db: Session = Depends(get_db),
+        is_active: Optional[bool] = None,
+        search_key: Optional[str] = None,
+        skip: int = Query(0, ge=0),
+        limit: int = Query(5, ge=1, le=1000)
+):
+    query = db.query(Satuan)
+
+    if is_active is not None:
+        query = query.filter(Satuan.is_active == is_active)
+
+    if search_key:
+        query = query.filter(Satuan.name.ilike(f"%{search_key}%"))
+
+    return query.offset(skip).limit(limit).all()
 
 # Get one
 @router.get("/{satuan_id}", response_model=SatuanOut)

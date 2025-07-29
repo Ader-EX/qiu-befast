@@ -1,9 +1,9 @@
 import os
-from typing import List
+from typing import List, Optional
 
 from fastapi import FastAPI,  APIRouter
 
-from fastapi.params import Depends
+from fastapi.params import Depends, Query
 from sqlalchemy.orm import Session
 from starlette import status
 from schemas.TopSchemas import TopOut, TopCreate, TopUpdate
@@ -17,8 +17,22 @@ from database import Base, engine, SessionLocal, get_db
 router =APIRouter()
 
 @router.get("", response_model=List[TopOut])
-async def getAllTOP(db : Session = Depends(get_db)):
-    return db.query(TermOfPayment).all()
+async def getAllTOP(db : Session = Depends(get_db),
+                    search_key : Optional[str] = None,
+                    is_active : Optional[bool] = None,
+                    skip: int = Query(0, ge=0),
+                    limit: int = Query(5, ge=1, le=1000)):
+
+
+    query = db.query(TermOfPayment)
+
+    if  is_active is not None:
+        query =  query.filter(TermOfPayment.is_active == is_active)
+
+    if search_key:
+        query = query.filter(TermOfPayment.name.ilike(f"%{search_key}%"))
+
+    return query.offset(skip).limit(limit).all()
 
 @router.get("/{top_id}", response_model=TopOut, status_code=status.HTTP_200_OK)
 async def getTOPById(top_id : int, db : Session = Depends(get_db)):

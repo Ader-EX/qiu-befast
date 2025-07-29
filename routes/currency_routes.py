@@ -1,5 +1,5 @@
-from typing import List
-from fastapi import APIRouter, Depends
+from typing import List, Optional
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from starlette import status
 from starlette.exceptions import HTTPException
@@ -12,8 +12,21 @@ router = APIRouter()
 
 # Get all
 @router.get("", response_model=List[CurrencyOut])
-async def get_all_currencies(db: Session = Depends(get_db)):
-    return db.query(Currency).all()
+async def get_all_currencies(db: Session = Depends(get_db),
+                             is_active : Optional[bool] = None,
+                             search_key : Optional[str] = None,
+                             skip: int = Query(0, ge=0),
+                             limit: int = Query(5, ge=1, le=1000)):
+    query = db.query(Currency)
+
+    if  is_active is not None:
+        query =  query.filter(Currency.is_active == is_active)
+
+    if search_key:
+        query = query.filter(Currency.name.ilike(f"%{search_key}%"))
+
+    return query.limit(limit).offset(skip).all()
+
 
 # Get one
 @router.get("/{currency_id}", response_model=CurrencyOut)

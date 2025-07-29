@@ -27,4 +27,3 @@ jobs:
           docker build -t qiu-backend .
           docker run -d --env-file /root/backend/config/.env -p 8080:8080 -v /root/backend/uploads:/root/backend/uploads --name qiu-container qiu-backend
           EOF
-

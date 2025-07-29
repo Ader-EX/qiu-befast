@@ -17,9 +17,12 @@ async def get_all_warehouses(
     db: Session = Depends(get_db),
     skip: int = 0,
     limit: int = 10,
+    is_active : bool = True,
     search: Optional[str] = Query(None, description="Search warehouse by name"),
 ):
-    query = db.query(Warehouse)
+    query = db.query(Warehouse).filter(Warehouse.is_active == is_active)
+
+
 
     if search:
         query = query.filter(Warehouse.name.ilike(f"%{search}%"))

@@ -19,9 +19,9 @@ from schemas.ItemSchema import ItemResponse, ItemTypeEnum
 router = APIRouter()
 
 NEXT_PUBLIC_UPLOAD_DIR = os.getenv("UPLOAD_DIR" ,default="uploads/items")
-NEXT_PUBLIC_LOCAL_UPLOAD_DIR = "local_uploads/items"
+# NEXT_PUBLIC_LOCAL_UPLOAD_DIR = "local_uploads/items"
 os.makedirs(NEXT_PUBLIC_UPLOAD_DIR, exist_ok=True)
-os.makedirs(NEXT_PUBLIC_LOCAL_UPLOAD_DIR, exist_ok=True)
+# os.makedirs(NEXT_PUBLIC_LOCAL_UPLOAD_DIR, exist_ok=True)
 
 # CRUD Operations
 
@@ -85,13 +85,11 @@ async def create_item(
                 with open(vps_file_path, "wb") as buffer:
                     shutil.copyfileobj(image.file, buffer)
 
-                # Also save locally for backup
-                local_file_path = os.path.join(NEXT_PUBLIC_LOCAL_UPLOAD_DIR, unique_filename)
+                # local_file_path = os.path.join(NEXT_PUBLIC_LOCAL_UPLOAD_DIR, unique_filename)
                 image.file.seek(0)  # Reset file pointer
-                with open(local_file_path, "wb") as buffer:
-                    shutil.copyfileobj(image.file, buffer)
+                # with open(local_file_path, "wb") as buffer:
+                #     shutil.copyfileobj(image.file, buffer)
 
-                # Create attachment record
                 attachment = AllAttachment(
                     parent_type=ParentType.ITEMS,
                     item_id=db_item.id,
@@ -291,7 +289,7 @@ async def update_item(
                     if os.path.exists(attachment.file_path):
                         os.remove(attachment.file_path)
 
-                    local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR, NEXT_PUBLIC_LOCAL_UPLOAD_DIR)
+                    local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR)
                     if os.path.exists(local_path):
                         os.remove(local_path)
 
@@ -377,7 +375,7 @@ async def update_item(
 
 @router.delete("/items/{item_id}")
 def delete_item(item_id: int, db: Session = Depends(get_db)):
-    """Delete an item and all its attachments"""
+
 
     db_item = db.query(Item).filter(Item.id == item_id).first()
     if not db_item:
@@ -390,7 +388,7 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
             if os.path.exists(attachment.file_path):
                 os.remove(attachment.file_path)
 
-            local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR, NEXT_PUBLIC_LOCAL_UPLOAD_DIR)
+            local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR)
             if os.path.exists(local_path):
                 os.remove(local_path)
 
@@ -420,7 +418,7 @@ def get_item_image(item_id: int, attachment_id: int, db: Session = Depends(get_d
 
     if not os.path.exists(attachment.file_path):
         # Try local backup
-        local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR, NEXT_PUBLIC_LOCAL_UPLOAD_DIR)
+        local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR)
         if os.path.exists(local_path):
             return FileResponse(local_path, media_type=attachment.mime_type)
         else:
@@ -440,7 +438,7 @@ def sync_items_to_vps(db: Session = Depends(get_db)):
         ).all()
 
         for attachment in attachments:
-            local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR,NEXT_PUBLIC_LOCAL_UPLOAD_DIR)
+            local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR)
 
             # If VPS file doesn't exist but local does, copy it
             if not os.path.exists(attachment.file_path) and os.path.exists(local_path):

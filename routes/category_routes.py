@@ -1,5 +1,5 @@
-from typing import List
-from fastapi import APIRouter, Depends
+from typing import List, Optional
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from starlette import status
 from starlette.exceptions import HTTPException
@@ -12,12 +12,28 @@ router = APIRouter()
 
 # Get all
 @router.get("", response_model=List[CategoryOut])
-async def get_all_categories(cat_type : int = 0,db: Session = Depends(get_db)):
-    if cat_type == 0:
-        return db.query(Category).all()
-    else:
-        return db.query(Category).filter(cat_type == Category.category_type).all()
-# Get one
+async def get_all_categories(
+        cat_type: int = 0,
+        is_active: Optional[bool] = None,
+        search_key : Optional[str] = None,
+        skip: int = Query(0, ge=0),
+        limit: int = Query(5, ge=1, le=1000),
+        db: Session = Depends(get_db)
+):
+
+    query = db.query(Category)
+
+    if  is_active is not None:
+        query =  query.filter(Category.is_active == is_active)
+
+    if search_key:
+        query = query.filter(Category.name.ilike(f"%{search_key}%"))
+
+    if cat_type != 0:
+        query = query.filter(Category.category_type == cat_type)
+
+    return query.offset(skip).limit(limit).all()
+
 @router.get("/{category_id}", response_model=CategoryOut)
 async def get_category(category_id: int, db: Session = Depends(get_db)):
     category = db.query(Category).filter(Category.id == category_id).first()
