@@ -42,7 +42,7 @@ async def create_item(
         images: List[UploadFile] = File(default=[]),
         db: Session = Depends(get_db)
 ):
-    """Create a new item with up to 3 images"""
+
 
     # Validate max 3 images
     if len(images) > 3:
@@ -111,7 +111,7 @@ async def create_item(
         # Refresh item with attachments
         db.refresh(db_item)
 
-        # Format response
+        print(f"Saving to: {NEXT_PUBLIC_UPLOAD_DIR}")
         item_dict = {
             "id": db_item.id,
             "type": db_item.type,

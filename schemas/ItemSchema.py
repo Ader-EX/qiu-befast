@@ -1,17 +1,8 @@
-from fastapi import FastAPI, Depends, HTTPException, File, UploadFile, Form
-from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
-from database import get_db, engine
 from typing import List, Optional
-import shutil
-import os
-import uuid
-import enum
+
 
 from datetime import datetime
 from pydantic import BaseModel
-from models import Item, AllAttachment
 
 from models.Item import ItemTypeEnum
 
