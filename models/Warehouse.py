@@ -12,4 +12,4 @@ class Warehouse(Base):
     address = Column(Text, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
 
-    pembelians  = relationship("Pembelian", back_populates="warehouse_rel")
+    pembelians  = relationship("Pembelian",cascade="all, delete", back_populates="warehouse_rel")

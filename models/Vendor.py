@@ -15,8 +15,8 @@ class Vendor(Base):
 
     
     # Relationships
-    curr_rel = relationship("Currency", back_populates="vend_rel")
-    top_rel = relationship("TermOfPayment", back_populates="vend_rel")
-    pembelians = relationship("Pembelian", back_populates="vendor_rel")
+    curr_rel = relationship("Currency",cascade="all, delete", back_populates="vend_rel")
+    top_rel = relationship("TermOfPayment",cascade="all, delete", back_populates="vend_rel")
+    pembelians = relationship("Pembelian",cascade="all, delete", back_populates="vendor_rel")
 
     items = relationship("Item", back_populates="vendor_rel")

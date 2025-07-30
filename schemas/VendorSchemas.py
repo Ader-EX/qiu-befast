@@ -1,5 +1,10 @@
 from pydantic import BaseModel
 
+from models.TermOfPayment import TermOfPayment
+from schemas.CurrencySchemas import CurrencyOut
+from schemas.TopSchemas import TopOut
+
+
 class VendorBase(BaseModel):
     id: str
     name: str
@@ -15,7 +20,11 @@ class VendorUpdate(VendorBase):
     pass
 
 class VendorOut(VendorBase):
+    top_rel : TopOut
+    curr_rel : CurrencyOut
     pass
 
     class Config:
-        orm_mode = True
+        model_config = {
+            "from_attributes": True
+        }
