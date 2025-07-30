@@ -10,6 +10,7 @@ from starlette import status
 from starlette.exceptions import HTTPException
 
 from models.Satuan import Satuan
+from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.SatuanSchemas import SatuanOut, SatuanCreate, SatuanUpdate
 from database import Base, engine, SessionLocal, get_db
 
@@ -20,7 +21,7 @@ from database import Base, engine, SessionLocal, get_db
 router =APIRouter()
 
 
-@router.get("", response_model=List[SatuanOut])
+@router.get("", response_model=PaginatedResponse[SatuanOut])
 async def get_all_satuan(
         db: Session = Depends(get_db),
         is_active: Optional[bool] = None,
@@ -36,7 +37,12 @@ async def get_all_satuan(
     if search_key:
         query = query.filter(Satuan.name.ilike(f"%{search_key}%"))
 
-    return query.offset(skip).limit(limit).all()
+    paginated_data =query.offset(skip).limit(limit).all()
+    total_data = query.count()
+    return {
+        "data" : paginated_data,
+        "total" : total_data
+    }
 
 # Get one
 @router.get("/{satuan_id}", response_model=SatuanOut)

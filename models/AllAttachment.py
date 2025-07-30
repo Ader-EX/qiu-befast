@@ -17,6 +17,8 @@ class AllAttachment(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     parent_type = Column(Enum(ParentType), nullable=False)
+    parent_id =      Column(String(50), nullable=False)
+
 
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
     pembelian_id = Column(String(50), ForeignKey("pembelians.id"), nullable=True)

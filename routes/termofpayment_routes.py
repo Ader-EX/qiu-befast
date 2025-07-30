@@ -6,6 +6,8 @@ from fastapi import FastAPI,  APIRouter
 from fastapi.params import Depends, Query
 from sqlalchemy.orm import Session
 from starlette import status
+
+from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.TopSchemas import TopOut, TopCreate, TopUpdate
 from starlette.exceptions import HTTPException
 
@@ -15,7 +17,7 @@ from database import Base, engine, SessionLocal, get_db
 
 router =APIRouter()
 
-@router.get("", response_model=List[TopOut])
+@router.get("", response_model=PaginatedResponse[TopOut])
 async def getAllTOP(db : Session = Depends(get_db),
                     search_key : Optional[str] = None,
                     is_active : Optional[bool] = None,
@@ -31,7 +33,14 @@ async def getAllTOP(db : Session = Depends(get_db),
     if search_key:
         query = query.filter(TermOfPayment.name.ilike(f"%{search_key}%"))
 
-    return query.offset(skip).limit(limit).all()
+
+    total_data = query.count()
+    paginated_data = query.offset(skip).limit(limit).all()
+
+    return {
+    "data" : paginated_data,
+    "total" : total_data
+    }
 
 @router.get("/{top_id}", response_model=TopOut, status_code=status.HTTP_200_OK)
 async def getTOPById(top_id : int, db : Session = Depends(get_db)):

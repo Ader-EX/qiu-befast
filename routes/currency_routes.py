@@ -7,11 +7,12 @@ from starlette.exceptions import HTTPException
 from models.Currency import Currency
 from schemas.CurrencySchemas import CurrencyOut, CurrencyCreate, CurrencyUpdate
 from database import get_db
+from schemas.PaginatedResponseSchemas import PaginatedResponse
 
 router = APIRouter()
 
 # Get all
-@router.get("", response_model=List[CurrencyOut])
+@router.get("", response_model=PaginatedResponse[CurrencyOut])
 async def get_all_currencies(db: Session = Depends(get_db),
                              is_active : Optional[bool] = None,
                              search_key : Optional[str] = None,
@@ -25,7 +26,14 @@ async def get_all_currencies(db: Session = Depends(get_db),
     if search_key:
         query = query.filter(Currency.name.ilike(f"%{search_key}%"))
 
-    return query.limit(limit).offset(skip).all()
+
+    totalCount = query.count()
+    paginated_data = query.limit(limit).offset(skip).all();
+
+    return {
+        "data" : paginated_data ,
+        "total" : totalCount
+    }
 
 
 # Get one
