@@ -1,13 +1,17 @@
 from pydantic import BaseModel
 from typing import Optional
 
+from schemas.CurrencySchemas import CurrencyOut
+from schemas.TopSchemas import TopOut
+
 
 class CustomerBase(BaseModel):
+    id:str
     name: str
     address: str
     is_active: Optional[bool] = True
-    top_id: Optional[int] = None
-    currency_id: Optional[int] = None
+    top_id: int
+    currency_id: int
 
 
 class CustomerCreate(CustomerBase):
@@ -19,7 +23,9 @@ class CustomerUpdate(CustomerBase):
 
 
 class CustomerOut(CustomerBase):
-    id: str
+    curr_rel : CurrencyOut
+    top_rel : TopOut
+    pass
 
     class Config:
         orm_mode = True
