@@ -23,8 +23,8 @@ class CustomerUpdate(CustomerBase):
 
 
 class CustomerOut(CustomerBase):
-    curr_rel : CurrencyOut
-    top_rel : TopOut
+    curr_rel: Optional[CurrencyOut] = None
+    top_rel: Optional[TopOut] = None
     pass
 
     class Config:

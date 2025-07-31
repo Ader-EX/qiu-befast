@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session, joinedload
 from starlette import status
 from starlette.exceptions import HTTPException
 
+from models.Currency import Currency
 from models.Customer import Customer
+from models.TermOfPayment import TermOfPayment
 from schemas.CustomerSchemas import CustomerOut, CustomerCreate, CustomerUpdate
 from database import get_db
 from schemas.PaginatedResponseSchemas import PaginatedResponse
@@ -55,14 +57,32 @@ async def get_customer(customer_id: str, db: Session = Depends(get_db)):
 # Create
 @router.post("", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
 async def create_customer(customer_data: CustomerCreate, db: Session = Depends(get_db)):
-    if db.query(Customer).filter(Customer.id == customer_data.id).first():
-        raise HTTPException(status_code=400, detail="Customer with this ID already exists")
+    existing_Customer = db.query(Customer).filter(Customer.id == customer_data.id).first()
+    if existing_Customer:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Customer with ID '{customer_data.id}' already exists."
+        )
 
+    currency = db.query(Currency).filter(Currency.id == customer_data.currency_id).first()
+    if not currency:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Currency with ID '{customer_data.currency_id}' not found."
+        )
+
+    # 3. Check if top_id exists
+    top = db.query(TermOfPayment).filter(TermOfPayment.id == customer_data.top_id).first()
+    if not top:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Term of Payment with ID '{customer_data.top_id}' not found."
+        )
     customer = Customer(**customer_data.dict())
     db.add(customer)
     db.commit()
     db.refresh(customer)
-    return customer
+    return Customer
 
 # Update
 @router.put("/{customer_id}", response_model=CustomerOut)
