@@ -57,32 +57,40 @@ async def get_customer(customer_id: str, db: Session = Depends(get_db)):
 # Create
 @router.post("", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
 async def create_customer(customer_data: CustomerCreate, db: Session = Depends(get_db)):
-    existing_Customer = db.query(Customer).filter(Customer.id == customer_data.id).first()
-    if existing_Customer:
+    existing_customer = db.query(Customer).filter(Customer.id == customer_data.id).first()
+    if existing_customer:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Customer with ID '{customer_data.id}' already exists."
         )
 
-    currency = db.query(Currency).filter(Currency.id == customer_data.currency_id).first()
+    currency = db.query(Currency).filter(
+        Currency.id == customer_data.currency_id,
+        Currency.is_active == True
+    ).first()
     if not currency:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Currency with ID '{customer_data.currency_id}' not found."
         )
 
-    # 3. Check if top_id exists
-    top = db.query(TermOfPayment).filter(TermOfPayment.id == customer_data.top_id).first()
+    top = db.query(TermOfPayment).filter(
+        TermOfPayment.id == customer_data.top_id,
+        TermOfPayment.is_active == True
+    ).first()
     if not top:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Term of Payment with ID '{customer_data.top_id}' not found."
         )
+
     customer = Customer(**customer_data.dict())
     db.add(customer)
     db.commit()
     db.refresh(customer)
-    return Customer
+
+    return customer
+
 
 # Update
 @router.put("/{customer_id}", response_model=CustomerOut)
@@ -101,7 +109,9 @@ async def update_customer(customer_id: str, customer_data: CustomerUpdate, db: S
 # Delete
 @router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_customer(customer_id: str, db: Session = Depends(get_db)):
+    is_used = db.query(Customer)
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
+
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 

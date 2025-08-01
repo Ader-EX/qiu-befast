@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Form, UploadFile, File
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from starlette import status
 from starlette.exceptions import HTTPException
 import shutil
@@ -13,8 +13,11 @@ from starlette.responses import FileResponse
 from models.Item import Item
 from database import get_db
 from models.AllAttachment import AllAttachment,ParentType
-from schemas.ItemSchema import ItemResponse, ItemTypeEnum
-
+from schemas.ItemSchema import ItemResponse, ItemTypeEnum, AttachmentResponse
+from schemas.PaginatedResponseSchemas import PaginatedResponse
+from schemas.SatuanSchemas import SatuanOut
+from schemas.TopSchemas import TopOut
+from schemas.VendorSchemas import VendorOut
 
 router = APIRouter()
 
@@ -120,7 +123,7 @@ async def create_item(
             "is_active": db_item.is_active,
             "category_one": db_item.category_one,
             "category_two": db_item.category_two,
-            "satuan_id": db_item.satuan_id,
+            "satuan_id": db_item.sat,
             "vendor_id": db_item.vendor_id,
             "attachments": [
                 {
@@ -139,27 +142,31 @@ async def create_item(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creating item: {str(e)}")
 
-@router.get("/items/", response_model=List[ItemResponse])
+@router.get("", response_model=PaginatedResponse[ItemResponse])
 def get_items(
-        skip: int = 0,
-        limit: int = 100,
-        search: Optional[str] = None,
+        db: Session = Depends(get_db),
+        page: int = 1,
+        rowsPerPage: int = 10,
+        search_key: Optional[str] = None,
         item_type: Optional[ItemTypeEnum] = None,
         is_active: Optional[bool] = None,
-        db: Session = Depends(get_db)
 ):
     """Get all items with filtering and pagination"""
 
-    query = db.query(Item)
+    query = db.query(Item).options(
+        joinedload(Item.category_one_rel),
+        joinedload(Item.category_two_rel),
+        joinedload(Item.satuan_rel),
+        joinedload(Item.vendor_rel),
+        joinedload(Item.attachments)
+    )
 
     # Apply filters
-    if search:
-        query = query.filter(
-            or_(
-                Item.name.contains(search),
-                Item.sku.contains(search)
-            )
-        )
+    if search_key:
+        query = query.filter(or_(
+            Item.name.ilike(f"%{search_key}%"),
+            Item.sku.ilike(f"%{search_key}%")
+        ))
 
     if item_type:
         query = query.filter(Item.type == item_type)
@@ -167,38 +174,20 @@ def get_items(
     if is_active is not None:
         query = query.filter(Item.is_active == is_active)
 
-    items = query.offset(skip).limit(limit).all()
+    total_count = query.count()
 
-    # Format response with attachments
-    result = []
-    for item in items:
-        item_dict = {
-            "id": item.id,
-            "type": item.type,
-            "name": item.name,
-            "sku": item.sku,
-            "total_item": item.total_item,
-            "price": float(item.price),
-            "is_active": item.is_active,
-            "category_one": item.category_one,
-            "category_two": item.category_two,
-            "satuan_id": item.satuan_id,
-            "vendor_id": item.vendor_id,
-            "attachments": [
-                {
-                    "id": att.id,
-                    "filename": att.filename,
-                    "file_path": att.file_path,
-                    "file_size": att.file_size,
-                    "mime_type": att.mime_type
-                } for att in item.attachments if att.is_active
-            ]
-        }
-        result.append(item_dict)
+    paginated_data = (
+        query.offset((page - 1) * rowsPerPage)
+        .limit(rowsPerPage)
+        .all()
+    )
 
-    return result
+    return {
+        "data": paginated_data,
+        "total": total_count,
+    }
 
-@router.get("/items/{item_id}", response_model=ItemResponse)
+@router.get("/{item_id}", response_model=ItemResponse)
 def get_item(item_id: int, db: Session = Depends(get_db)):
     """Get a specific item by ID"""
 
@@ -231,10 +220,9 @@ def get_item(item_id: int, db: Session = Depends(get_db)):
 
     return item_dict
 
-@router.put("/items/{item_id}", response_model=ItemResponse)
+@router.put("/{item_id}", response_model=ItemResponse)
 async def update_item(
         item_id: int,
-        # Item data
         type: ItemTypeEnum = Form(...),
         name: str = Form(...),
         sku: str = Form(...),
@@ -245,13 +233,11 @@ async def update_item(
         category_two: Optional[int] = Form(None),
         satuan_id: int = Form(...),
         vendor_id: int = Form(...),
-        # New images to add
         new_images: List[UploadFile] = File(default=[]),
-        # Images to remove (comma-separated attachment IDs)
         remove_image_ids: Optional[str] = Form(None),
         db: Session = Depends(get_db)
 ):
-    """Update an existing item and manage its images"""
+
 
     # Get existing item
     db_item = db.query(Item).filter(Item.id == item_id).first()
@@ -264,7 +250,7 @@ async def update_item(
         raise HTTPException(status_code=400, detail="SKU already exists")
 
     try:
-        # Update item fields
+
         db_item.type = type
         db_item.name = name
         db_item.sku = sku
@@ -373,7 +359,7 @@ async def update_item(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating item: {str(e)}")
 
-@router.delete("/items/{item_id}")
+@router.delete("/{item_id}")
 def delete_item(item_id: int, db: Session = Depends(get_db)):
 
 
