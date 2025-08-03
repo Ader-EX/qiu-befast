@@ -15,7 +15,7 @@ class AttachmentResponse(BaseModel):
     file_path: str
     file_size: Optional[int]
     mime_type: Optional[str]
-    is_active: bool
+   
     created_at: datetime
 
     class Config:
@@ -28,7 +28,7 @@ class ItemBase(BaseModel):
     sku: str
     total_item: int = 0
     price: float
-    is_active: bool = True
+
 
     category_one_rel: Optional[CategoryOut] = None
     category_two_rel: Optional[CategoryOut] = None

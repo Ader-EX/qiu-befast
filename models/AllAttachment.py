@@ -30,6 +30,6 @@ class AllAttachment(Base):
     file_path = Column(String(500), nullable=False)
     file_size = Column(Integer, nullable=True)
     mime_type = Column(String(100), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
+    
     created_at = Column(DateTime, default=datetime.now)
     

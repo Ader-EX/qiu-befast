@@ -19,14 +19,11 @@ from schemas.SatuanSchemas import SatuanOut
 from schemas.TopSchemas import TopOut
 from schemas.VendorSchemas import VendorOut
 
+
 router = APIRouter()
 
 NEXT_PUBLIC_UPLOAD_DIR = os.getenv("UPLOAD_DIR" ,default="uploads/items")
-# NEXT_PUBLIC_LOCAL_UPLOAD_DIR = "local_uploads/items"
 os.makedirs(NEXT_PUBLIC_UPLOAD_DIR, exist_ok=True)
-# os.makedirs(NEXT_PUBLIC_LOCAL_UPLOAD_DIR, exist_ok=True)
-
-# CRUD Operations
 
 @router.post("", response_model=ItemResponse)
 async def create_item(
@@ -100,7 +97,7 @@ async def create_item(
                     file_path=vps_file_path,
                     file_size=os.path.getsize(vps_file_path),
                     mime_type=image.content_type,
-                    is_active=True,
+                    
                     created_at=datetime.now()
                 )
 
@@ -123,7 +120,7 @@ async def create_item(
             "is_active": db_item.is_active,
             "category_one": db_item.category_one,
             "category_two": db_item.category_two,
-            "satuan_id": db_item.sat,
+            "satuan_id": db_item.satuan_id,
             "vendor_id": db_item.vendor_id,
             "attachments": [
                 {
@@ -131,7 +128,8 @@ async def create_item(
                     "filename": att.filename,
                     "file_path": att.file_path,
                     "file_size": att.file_size,
-                    "mime_type": att.mime_type
+                    "mime_type": att.mime_type,
+                    "created_at": att.created_at,
                 } for att in db_item.attachments
             ]
         }
@@ -142,11 +140,12 @@ async def create_item(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creating item: {str(e)}")
 
+
 @router.get("", response_model=PaginatedResponse[ItemResponse])
 def get_items(
         db: Session = Depends(get_db),
         page: int = 1,
-        rowsPerPage: int = 10,
+        rowsPerPage: int = 5,
         search_key: Optional[str] = None,
         item_type: Optional[ItemTypeEnum] = None,
         is_active: Optional[bool] = None,
@@ -173,6 +172,9 @@ def get_items(
 
     if is_active is not None:
         query = query.filter(Item.is_active == is_active)
+        
+    
+    total_data  = query.count()
 
     total_count = query.count()
 
@@ -388,7 +390,7 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error deleting item: {str(e)}")
 
-@router.get("/items/{item_id}/images/{attachment_id}")
+@router.get("/{item_id}/images/{attachment_id}")
 def get_item_image(item_id: int, attachment_id: int, db: Session = Depends(get_db)):
     """Get a specific image for an item"""
 
@@ -412,7 +414,7 @@ def get_item_image(item_id: int, attachment_id: int, db: Session = Depends(get_d
 
     return FileResponse(attachment.file_path, media_type=attachment.mime_type)
 
-@router.post("/items/bulk-sync")
+@router.post("/bulk-sync")
 def sync_items_to_vps(db: Session = Depends(get_db)):
     """Sync all local images to VPS location (utility endpoint)"""
 
@@ -437,7 +439,7 @@ def sync_items_to_vps(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sync error: {str(e)}")
 
-@router.get("/items/stats/summary")
+@router.get("/stats/summary")
 def get_items_stats(db: Session = Depends(get_db)):
     """Get summary statistics for items"""
 
