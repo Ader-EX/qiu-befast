@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Path
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -69,7 +69,11 @@ app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
 
 
 os.makedirs("uploads/items", exist_ok=True)  
-app.mount("/static", StaticFiles(directory=os.getenv("STATIC_URL")), name="static")
+# Load the static dir correctly
+static_dir = os.getenv("STATIC_URL") or "uploads"
+
+# Must match where files physically are: /root/backend/uploads
+app.mount("/static", StaticFiles(directory=Path(static_dir)), name="static")
 
 # app.include_router(satuan_routes.router, prefix="/satuan", tags=["Satuan"], dependencies=[Depends(verify_access_token)])
 # app.include_router(termofpayment_routes.router, prefix="/top", tags=["Term of Payment"], dependencies=[Depends(verify_access_token)])

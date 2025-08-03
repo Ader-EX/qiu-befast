@@ -28,9 +28,9 @@ class AttachmentResponse(BaseModel):
     @computed_field
     @property
     def url(self) -> str:
-        base_url = os.environ.get("BASE_URL", "http://localhost:8000/static")
+        base_url = os.environ.get("BASE_URL", "http://localhost:8000")
         clean_path = self.file_path.replace("\\", "/").replace("uploads/", "")
-        return f"{base_url}/static/{clean_path}"
+        return f"https://{base_url}/static/{clean_path}"
 
 
 
