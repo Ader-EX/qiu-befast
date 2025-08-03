@@ -1,6 +1,8 @@
 from datetime import datetime
-from typing import List, Optional
-from fastapi import APIRouter, Depends, Form, UploadFile, File
+from typing import Any, Dict, List, Literal, Optional
+from fastapi import Request
+
+from fastapi import APIRouter, Depends, Form, Request, UploadFile, File
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from starlette import status
@@ -9,14 +11,15 @@ import shutil
 import os
 import uuid
 from starlette.responses import FileResponse
-
+from fastapi.responses import JSONResponse
 from models.Item import Item
 from database import get_db
 from models.AllAttachment import AllAttachment,ParentType
+from routes.helper import generate_attachment_url
+from schemas.CategorySchemas import CategoryOut
 from schemas.ItemSchema import ItemResponse, ItemTypeEnum, AttachmentResponse
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.SatuanSchemas import SatuanOut
-from schemas.TopSchemas import TopOut
 from schemas.VendorSchemas import VendorOut
 
 
@@ -24,7 +27,6 @@ router = APIRouter()
 
 NEXT_PUBLIC_UPLOAD_DIR = os.getenv("UPLOAD_DIR" ,default="uploads/items")
 os.makedirs(NEXT_PUBLIC_UPLOAD_DIR, exist_ok=True)
-
 @router.post("", response_model=ItemResponse)
 async def create_item(
         # Item data
@@ -141,16 +143,22 @@ async def create_item(
         raise HTTPException(status_code=500, detail=f"Error creating item: {str(e)}")
 
 
+
+
 @router.get("", response_model=PaginatedResponse[ItemResponse])
 def get_items(
+        request: Request,
         db: Session = Depends(get_db),
         page: int = 1,
         rowsPerPage: int = 5,
         search_key: Optional[str] = None,
+        vendor: Optional[str] = None,
         item_type: Optional[ItemTypeEnum] = None,
         is_active: Optional[bool] = None,
+        sortBy: Optional[Literal["name", "price", "sku", "created_at"]] = None,
+        sortOrder: Optional[Literal["asc", "desc"]] = "asc",
 ):
-    """Get all items with filtering and pagination"""
+    """Get all items with filtering, sorting and pagination"""
 
     query = db.query(Item).options(
         joinedload(Item.category_one_rel),
@@ -167,14 +175,23 @@ def get_items(
             Item.sku.ilike(f"%{search_key}%")
         ))
 
+    if vendor and vendor != "all":
+        query = query.filter(Item.vendor_id == vendor)
+        
     if item_type:
         query = query.filter(Item.type == item_type)
 
     if is_active is not None:
         query = query.filter(Item.is_active == is_active)
-        
     
-    total_data  = query.count()
+    # Apply sorting
+    if sortBy:
+        sort_column = getattr(Item, sortBy)
+        if sortOrder == "desc":
+            query = query.order_by(sort_column.desc())
+        else:
+            query = query.order_by(sort_column.asc())
+        
 
     total_count = query.count()
 
@@ -184,10 +201,16 @@ def get_items(
         .all()
     )
 
+    items_out = []
+    for item in paginated_data:
+        items_out.append(construct_item_response(item, request))
+    
     return {
-        "data": paginated_data,
+        "data": items_out,
         "total": total_count,
     }
+
+
 
 @router.get("/{item_id}", response_model=ItemResponse)
 def get_item(item_id: int, db: Session = Depends(get_db)):
@@ -221,27 +244,24 @@ def get_item(item_id: int, db: Session = Depends(get_db)):
     }
 
     return item_dict
-
 @router.put("/{item_id}", response_model=ItemResponse)
 async def update_item(
-        item_id: int,
-        type: ItemTypeEnum = Form(...),
-        name: str = Form(...),
-        sku: str = Form(...),
-        total_item: int = Form(0),
-        price: float = Form(...),
-        is_active: bool = Form(True),
-        category_one: Optional[int] = Form(None),
-        category_two: Optional[int] = Form(None),
-        satuan_id: int = Form(...),
-        vendor_id: int = Form(...),
-        new_images: List[UploadFile] = File(default=[]),
-        remove_image_ids: Optional[str] = Form(None),
-        db: Session = Depends(get_db)
+    request: Request,  # Add this parameter
+    item_id: int,
+    type: ItemTypeEnum = Form(...),
+    name: str = Form(...),
+    sku: str = Form(...),
+    total_item: int = Form(0),
+    price: float = Form(...),
+    is_active: bool = Form(True),
+    category_one: Optional[int] = Form(None),
+    category_two: Optional[int] = Form(None),
+    satuan_id: int = Form(...),
+    vendor_id: str = Form(...),
+    new_images: List[UploadFile] = File(default=[]),
+    remove_image_ids: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
 ):
-
-
-    # Get existing item
     db_item = db.query(Item).filter(Item.id == item_id).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -252,7 +272,7 @@ async def update_item(
         raise HTTPException(status_code=400, detail="SKU already exists")
 
     try:
-
+        # Update item fields
         db_item.type = type
         db_item.name = name
         db_item.sku = sku
@@ -273,23 +293,18 @@ async def update_item(
                     AllAttachment.item_id == item_id
                 ).first()
                 if attachment:
-                    # Remove files from both locations
-                    if os.path.exists(attachment.file_path):
-                        os.remove(attachment.file_path)
-
-                    local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR)
-                    if os.path.exists(local_path):
-                        os.remove(local_path)
-
+                    file_path = attachment.file_path.replace("\\", "/")
+                    
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    
                     db.delete(attachment)
 
-        # Check current image count after removal
+        # Check current image count
         current_images = db.query(AllAttachment).filter(
-            AllAttachment.item_id == item_id,
-            AllAttachment.is_active == True
+            AllAttachment.item_id == item_id,                 
         ).count()
 
-        # Validate new images don't exceed limit
         if current_images + len(new_images) > 3:
             raise HTTPException(
                 status_code=400,
@@ -299,88 +314,67 @@ async def update_item(
         # Handle new image uploads
         for image in new_images:
             if image.filename:
-                # Generate unique filename
-                file_extension = os.path.splitext(image.filename)[1]
-                unique_filename = f"{uuid.uuid4()}{file_extension}"
+                ext = os.path.splitext(image.filename)[1].lower()
+                unique_filename = f"{uuid.uuid4()}{ext}"
+                save_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
+                save_path = save_path.replace("\\", "/")
 
-                # Save to VPS
-                vps_file_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
-                with open(vps_file_path, "wb") as buffer:
+                # Save to disk
+                with open(save_path, "wb") as buffer:
                     shutil.copyfileobj(image.file, buffer)
 
-                # Save locally
-                # local_file_path = os.path.join(NEXT_PUBLIC_LOCAL_UPLOAD_DIR, unique_filename)
-                # image.file.seek(0)
-                # with open(local_file_path, "wb") as buffer:
-                #     shutil.copyfileobj(image.file, buffer)
-
-                # Create attachment record
+                # Save DB record
                 attachment = AllAttachment(
                     parent_type=ParentType.ITEMS,
                     item_id=db_item.id,
                     filename=image.filename,
-                    file_path=vps_file_path,
-                    file_size=os.path.getsize(vps_file_path),
-                    mime_type=image.content_type,
-                    is_active=True,
+                    file_path=save_path,
+                    file_size=os.path.getsize(save_path),
+                    mime_type=image.content_type,                                     
                     created_at=datetime.now()
                 )
-
                 db.add(attachment)
 
         db.commit()
         db.refresh(db_item)
 
-        # Format response
-        item_dict = {
-            "id": db_item.id,
-            "type": db_item.type,
-            "name": db_item.name,
-            "sku": db_item.sku,
-            "total_item": db_item.total_item,
-            "price": float(db_item.price),
-            "is_active": db_item.is_active,
-            "category_one": db_item.category_one,
-            "category_two": db_item.category_two,
-            "satuan_id": db_item.satuan_id,
-            "vendor_id": db_item.vendor_id,
-            "attachments": [
-                {
-                    "id": att.id,
-                    "filename": att.filename,
-                    "file_path": att.file_path,
-                    "file_size": att.file_size,
-                    "mime_type": att.mime_type
-                } for att in db_item.attachments if att.is_active
-            ]
-        }
-
-        return item_dict
+        # Manually construct the response like in your GET endpoint
+        base_url = f"{request.url.scheme}://{request.url.netloc}"
+        
+        # Reload the item with relationships for the response
+        updated_item = db.query(Item).options(
+            joinedload(Item.category_one_rel),
+            joinedload(Item.category_two_rel),
+            joinedload(Item.satuan_rel),
+            joinedload(Item.vendor_rel),
+            joinedload(Item.attachments)
+        ).filter(Item.id == item_id).first()
+        
+        # Construct enriched attachments with URL
+        return construct_item_response(updated_item, request)
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating item: {str(e)}")
-
+        
 @router.delete("/{item_id}")
 def delete_item(item_id: int, db: Session = Depends(get_db)):
-
-
     db_item = db.query(Item).filter(Item.id == item_id).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Item not found")
 
     try:
-        # Delete all associated images
         for attachment in db_item.attachments:
-            # Remove files from both locations
-            if os.path.exists(attachment.file_path):
-                os.remove(attachment.file_path)
+            file_path = attachment.file_path.replace("\\", "/")
 
-            local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR)
-            if os.path.exists(local_path):
-                os.remove(local_path)
+            # Handle relative and absolute paths
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"Deleted file: {file_path}")
+            else:
+                print(f"File not found (skipped): {file_path}")
 
-        # Delete item (cascades to attachments)
+        # Delete the item (assuming cascade deletes attachments)
         db.delete(db_item)
         db.commit()
 
@@ -465,4 +459,39 @@ def get_items_stats(db: Session = Depends(get_db)):
         "inactive_items": inactive_items,
         "type_distribution": type_counts,
         "total_images": total_images
+    }
+    
+    
+
+def construct_item_response(item: Item, request: Request) -> Dict[str, Any]:
+    """Helper function to construct item response with URLs"""
+    static_url = os.environ.get("BASE_URL", "http://localhost:8000/static")
+
+    enriched_attachments = []
+    for att in item.attachments:
+        clean_path = att.file_path.replace("\\", "/").replace("uploads/", "")
+        enriched_attachments.append({
+            "id": att.id,
+            "filename": att.filename,
+            "file_path": att.file_path,
+            "file_size": att.file_size,
+            "mime_type": att.mime_type,
+            "created_at": att.created_at,
+            "url": f"{static_url}/{clean_path}"
+        })
+    
+    # Create response dict
+    return {
+        "id": item.id,
+        "type": item.type,
+        "name": item.name,
+        "sku": item.sku,
+        "total_item": item.total_item,
+        "price": item.price,
+        "created_at": getattr(item, 'created_at', None),
+        "category_one_rel": CategoryOut.model_validate(item.category_one_rel).model_dump() if item.category_one_rel else None,
+        "category_two_rel": CategoryOut.model_validate(item.category_two_rel).model_dump() if item.category_two_rel else None,
+        "satuan_rel": SatuanOut.model_validate(item.satuan_rel).model_dump() if item.satuan_rel else None,
+        "vendor_rel": VendorOut.model_validate(item.vendor_rel).model_dump() if item.vendor_rel else None,
+        "attachments": enriched_attachments
     }

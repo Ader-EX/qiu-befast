@@ -8,8 +8,8 @@ from routes import (
     category_routes, satuan_routes, warehouse_routes, termofpayment_routes
 )
 from dependencies import verify_access_token
-
-
+from fastapi.staticfiles import StaticFiles
+import os
 
 
 load_dotenv()
@@ -65,15 +65,29 @@ app.add_middleware(
 # Public routes
 app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
 
-# Protected routes — add dependency here
-app.include_router(satuan_routes.router, prefix="/satuan", tags=["Satuan"], dependencies=[Depends(verify_access_token)])
-app.include_router(termofpayment_routes.router, prefix="/top", tags=["Term of Payment"], dependencies=[Depends(verify_access_token)])
-app.include_router(warehouse_routes.router, prefix="/warehouse", tags=["Warehouse"], dependencies=[Depends(verify_access_token)])
-app.include_router(category_routes.router, prefix="/category", tags=["Category"], dependencies=[Depends(verify_access_token)])
-app.include_router(vendor_routes.router, prefix="/vendor", tags=["Vendor"], dependencies=[Depends(verify_access_token)])
-app.include_router(currency_routes.router, prefix="/currency", tags=["Currency"], dependencies=[Depends(verify_access_token)])
-app.include_router(customer_routes.router, prefix="/customer", tags=["Customer"], dependencies=[Depends(verify_access_token)])
-app.include_router(item_routes.router, prefix="/item", tags=["Item"], dependencies=[Depends(verify_access_token)])
+
+
+os.makedirs("uploads/items", exist_ok=True)  
+
+app.mount("/static", StaticFiles(directory="uploads"), name="static")
+
+# app.include_router(satuan_routes.router, prefix="/satuan", tags=["Satuan"], dependencies=[Depends(verify_access_token)])
+# app.include_router(termofpayment_routes.router, prefix="/top", tags=["Term of Payment"], dependencies=[Depends(verify_access_token)])
+# app.include_router(warehouse_routes.router, prefix="/warehouse", tags=["Warehouse"], dependencies=[Depends(verify_access_token)])
+# app.include_router(category_routes.router, prefix="/category", tags=["Category"], dependencies=[Depends(verify_access_token)])
+# app.include_router(vendor_routes.router, prefix="/vendor", tags=["Vendor"], dependencies=[Depends(verify_access_token)])
+# app.include_router(currency_routes.router, prefix="/currency", tags=["Currency"], dependencies=[Depends(verify_access_token)])
+# app.include_router(customer_routes.router, prefix="/customer", tags=["Customer"], dependencies=[Depends(verify_access_token)])
+# app.include_router(item_routes.router, prefix="/item", tags=["Item"], dependencies=[Depends(verify_access_token)])
+
+app.include_router(satuan_routes.router, prefix="/satuan", tags=["Satuan"])
+app.include_router(termofpayment_routes.router, prefix="/top", tags=["Term of Payment"])
+app.include_router(warehouse_routes.router, prefix="/warehouse", tags=["Warehouse"])
+app.include_router(category_routes.router, prefix="/category", tags=["Category"])
+app.include_router(vendor_routes.router, prefix="/vendor", tags=["Vendor"])
+app.include_router(currency_routes.router, prefix="/currency", tags=["Currency"])
+app.include_router(customer_routes.router, prefix="/customer", tags=["Customer"])
+app.include_router(item_routes.router, prefix="/item", tags=["Item"])
 
 @app.get("/")
 async def root():

@@ -1,6 +1,7 @@
+import os
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from models.Item import ItemTypeEnum
 from schemas.CategorySchemas import CategoryOut
@@ -15,11 +16,24 @@ class AttachmentResponse(BaseModel):
     file_path: str
     file_size: Optional[int]
     mime_type: Optional[str]
-   
     created_at: datetime
+    # url:str
 
     class Config:
         from_attributes = True
+
+    def to_url(self):
+        return f"/static/{self.file_path}"
+    
+    @computed_field
+    @property
+    def url(self) -> str:
+        base_url = os.environ.get("BASE_URL", "http://localhost:8000/static")
+        clean_path = self.file_path.replace("\\", "/").replace("uploads/", "")
+        return f"{base_url}/static/{clean_path}"
+
+
+
 
 
 class ItemBase(BaseModel):

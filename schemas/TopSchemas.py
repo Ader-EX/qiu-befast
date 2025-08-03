@@ -13,4 +13,4 @@ class TopUpdate(TopCreate):
 class TopOut(TopCreate):
     id: int
     class Config:
-        orm_mode = True
+         from_attributes = True

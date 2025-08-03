@@ -25,6 +25,4 @@ class VendorOut(VendorBase):
     pass
 
     class Config:
-        model_config = {
-            "from_attributes": True
-        }
+        from_attributes = True
