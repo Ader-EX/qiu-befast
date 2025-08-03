@@ -29,9 +29,14 @@ class AttachmentResponse(BaseModel):
     @property
     def url(self) -> str:
         base_url = os.environ.get("BASE_URL", "http://localhost:8000")
-        clean_path = self.file_path.replace("\\", "/").replace("uploads/", "")
-        return f"https://{base_url}/static/{clean_path}"
+        
+        # Misal file_path = "uploads/items/abc.jpg" atau "items/abc.jpg"
+        relative_path = self.file_path.replace("\\", "/")
 
+        # Remove leading "uploads/" or absolute path if any
+        relative_path = relative_path.replace("uploads/", "").replace("/root/backend/", "")
+
+        return f"{base_url}/static/{relative_path}"
 
 
 
