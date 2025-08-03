@@ -67,9 +67,9 @@ app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
 
 
 
-os.makedirs("uploads/items", exist_ok=True)  
 
-app.mount("/static", StaticFiles(directory="uploads"), name="static")
+os.makedirs("uploads/items", exist_ok=True)  
+app.mount("/static", StaticFiles(directory=os.getenv("STATIC_URL")), name="static")
 
 # app.include_router(satuan_routes.router, prefix="/satuan", tags=["Satuan"], dependencies=[Depends(verify_access_token)])
 # app.include_router(termofpayment_routes.router, prefix="/top", tags=["Term of Payment"], dependencies=[Depends(verify_access_token)])
