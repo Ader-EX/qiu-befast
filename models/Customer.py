@@ -14,6 +14,7 @@ class Customer(Base):
 
     top_id = Column(Integer, ForeignKey("term_of_payments.id"), nullable=False)
     currency_id = Column(Integer, ForeignKey("currencies.id"),nullable=False)
+    created_at = Column(DateTime, default=datetime.now(), nullable=False)
 
     top_rel = relationship("TermOfPayment",back_populates="cust_rel")
     curr_rel = relationship("Currency", back_populates="cust_rel")

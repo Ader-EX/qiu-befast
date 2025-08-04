@@ -48,6 +48,7 @@ class Pembelian(Base):
     customer_name = Column(String(255), nullable=True)
     top_name = Column(String(255), nullable=True)
     currency_name  = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.now(), nullable=False)
 
     # Relationships (only active in draft mode)
     customer_rel = relationship("Customer", back_populates="pembelians")

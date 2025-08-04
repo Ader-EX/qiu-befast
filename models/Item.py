@@ -21,6 +21,7 @@ class Item(Base):
     total_item = Column(Integer, default=0, nullable=False)
     price = Column(Numeric(15,7), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now(), nullable=False)
     
     # Foreign Keys
     category_one = Column(Integer, ForeignKey("categories.id"), nullable=True)

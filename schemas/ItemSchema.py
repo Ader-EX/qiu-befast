@@ -39,8 +39,6 @@ class AttachmentResponse(BaseModel):
         return f"{base_url}/static/{relative_path}"
 
 
-
-
 class ItemBase(BaseModel):
     type: ItemTypeEnum
     name: str

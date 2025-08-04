@@ -11,6 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from database import get_db
+from models.Customer import Customer
 from models.Item import Item
 from models.Pembelian import Pembelian, StatusPembelianEnum,PembelianItem, StatusPembayaranEnum
 from models.AllAttachment import ParentType, AllAttachment
@@ -51,7 +52,7 @@ def validate_item_stock(db: Session, item_id: str, requested_qty: int) -> None:
     if available_stock < requested_qty:
         raise HTTPException(
             status_code=400,
-            detail=f"Insufficient stock for item '{item.name}'. Available: {available_stock}, Requested: {requested_qty}"
+            detail=f"Stock untuk item '{item.name}' tidak tersedia. Available: {available_stock}, Requested: {requested_qty}"
         )
 
     # Check if stock would go negative after deduction
@@ -59,7 +60,7 @@ def validate_item_stock(db: Session, item_id: str, requested_qty: int) -> None:
     if remaining_after_deduction < 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot process request. Stock would be negative for item '{item.name}'. Available: {available_stock}, Requested: {requested_qty}"
+            detail=f"Stock akan menjadi < 0 untuk item '{item.name}'. Available: {available_stock}, Requested: {requested_qty}"
         )
 
 def validate_pembelian_items_stock(db: Session, items_data: List) -> None:
@@ -278,7 +279,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
     # Check if no_pembelian already exists
     existing = db.query(Pembelian).filter(Pembelian.no_pembelian == request.no_pembelian).first()
     if existing:
-        raise HTTPException(status_code=400, detail="No pembelian already exists")
+        raise HTTPException(status_code=400, detail="No pembelian sudah ada")
 
     # STOCK VALIDATION - Check stock availability for all items
     validate_pembelian_items_stock(db, request.items)
@@ -332,8 +333,9 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
     # Calculate totals
     calculate_pembelian_totals(db, pembelian_id)
 
-    # Return fresh data
-    return await get_pembelian(pembelian_id, db)
+    return {
+        "detail" : "Pembelian created successfully",
+    }
 
 @router.put("/{pembelian_id}", response_model=PembelianResponse)
 async def update_pembelian(

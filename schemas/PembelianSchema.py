@@ -1,4 +1,4 @@
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, field_validator
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
@@ -13,13 +13,13 @@ class PembelianItemBase(BaseModel):
     qty: int
     unit_price: Decimal
 
-    @validator('qty')
+    @field_validator('qty')
     def validate_qty(cls, v):
         if v <= 0:
             raise ValueError('Quantity must be greater than 0')
         return v
 
-    @validator('unit_price')
+    @field_validator('unit_price')
     def validate_unit_price(cls, v):
         if v < 0:
             raise ValueError('Unit price cannot be negative')
