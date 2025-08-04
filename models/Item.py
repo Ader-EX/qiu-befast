@@ -4,6 +4,8 @@ from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
+
+
 class ItemTypeEnum(enum.Enum):
     FINISH_GOOD = "FINISH_GOOD"
     RAW_MATERIAL = "RAW_MATERIAL"
@@ -17,7 +19,7 @@ class Item(Base):
     name = Column(String(100), nullable=False)
     sku = Column(String(100), unique=True, nullable=False, index=True)
     total_item = Column(Integer, default=0, nullable=False)
-    price = Column(Numeric(15, 2), nullable=False)
+    price = Column(Numeric(15,7), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     
     # Foreign Keys
@@ -34,5 +36,5 @@ class Item(Base):
     satuan_rel = relationship("Satuan", back_populates="items")
     vendor_rel = relationship("Vendor", back_populates="items")
     attachments = relationship("AllAttachment", back_populates="item_rel", cascade="all, delete-orphan")
-    # pembelians  = relationship("Pembelian", back_populates="item_rel")
+    pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
 

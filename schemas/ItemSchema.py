@@ -47,6 +47,7 @@ class ItemBase(BaseModel):
     sku: str
     total_item: int = 0
     price: float
+    is_active: bool
 
 
     category_one_rel: Optional[CategoryOut] = None

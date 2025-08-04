@@ -158,7 +158,6 @@ def get_items(
         sortBy: Optional[Literal["name", "price", "sku", "created_at"]] = None,
         sortOrder: Optional[Literal["asc", "desc"]] = "asc",
 ):
-    """Get all items with filtering, sorting and pagination"""
 
     query = db.query(Item).options(
         joinedload(Item.category_one_rel),
@@ -184,7 +183,6 @@ def get_items(
     if is_active is not None:
         query = query.filter(Item.is_active == is_active)
     
-    # Apply sorting
     if sortBy:
         sort_column = getattr(Item, sortBy)
         if sortOrder == "desc":
@@ -214,7 +212,6 @@ def get_items(
 
 @router.get("/{item_id}", response_model=ItemResponse)
 def get_item(item_id: int, db: Session = Depends(get_db)):
-    """Get a specific item by ID"""
 
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
@@ -246,21 +243,20 @@ def get_item(item_id: int, db: Session = Depends(get_db)):
     return item_dict
 @router.put("/{item_id}", response_model=ItemResponse)
 async def update_item(
-    request: Request,  # Add this parameter
-    item_id: int,
-    type: ItemTypeEnum = Form(...),
-    name: str = Form(...),
-    sku: str = Form(...),
-    total_item: int = Form(0),
-    price: float = Form(...),
-    is_active: bool = Form(True),
-    category_one: Optional[int] = Form(None),
-    category_two: Optional[int] = Form(None),
-    satuan_id: int = Form(...),
-    vendor_id: str = Form(...),
-    new_images: List[UploadFile] = File(default=[]),
-    remove_image_ids: Optional[str] = Form(None),
-    db: Session = Depends(get_db)
+        request: Request,
+        item_id: int,
+        type: ItemTypeEnum = Form(...),
+        name: str = Form(...),
+        sku: str = Form(...),
+        total_item: int = Form(0),
+        price: float = Form(...),
+        is_active: bool = Form(True),
+        category_one: Optional[int] = Form(None),
+        category_two: Optional[int] = Form(None),
+        satuan_id: int = Form(...),
+        vendor_id: str = Form(...),
+        images: List[UploadFile] = File(default=[]),  # Changed from new_images to images
+        db: Session = Depends(get_db)
 ):
     db_item = db.query(Item).filter(Item.id == item_id).first()
     if not db_item:
@@ -284,63 +280,53 @@ async def update_item(
         db_item.satuan_id = satuan_id
         db_item.vendor_id = vendor_id
 
-        # Handle image removal
-        if remove_image_ids:
-            remove_ids = [int(id.strip()) for id in remove_image_ids.split(',') if id.strip()]
-            for attachment_id in remove_ids:
-                attachment = db.query(AllAttachment).filter(
-                    AllAttachment.id == attachment_id,
-                    AllAttachment.item_id == item_id
-                ).first()
-                if attachment:
-                    file_path = attachment.file_path.replace("\\", "/")
-                    
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    
-                    db.delete(attachment)
-
-        # Check current image count
-        current_images = db.query(AllAttachment).filter(
-            AllAttachment.item_id == item_id,                 
-        ).count()
-
-        if current_images + len(new_images) > 3:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot add {len(new_images)} images. Current: {current_images}, Max: 3"
-            )
-
-        # Handle new image uploads
-        for image in new_images:
-            if image.filename:
-                ext = os.path.splitext(image.filename)[1].lower()
-                unique_filename = f"{uuid.uuid4()}{ext}"
-                save_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
-                save_path = save_path.replace("\\", "/")
-
-                # Save to disk
-                with open(save_path, "wb") as buffer:
-                    shutil.copyfileobj(image.file, buffer)
-
-                # Save DB record
-                attachment = AllAttachment(
-                    parent_type=ParentType.ITEMS,
-                    item_id=db_item.id,
-                    filename=image.filename,
-                    file_path=save_path,
-                    file_size=os.path.getsize(save_path),
-                    mime_type=image.content_type,                                     
-                    created_at=datetime.now()
+        # Handle images: if new images are provided, replace all existing ones
+        if images and any(img.filename for img in images):
+            # Validate image count
+            if len(images) > 3:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Maximum 3 images allowed. You provided {len(images)}"
                 )
-                db.add(attachment)
+
+            # Remove all existing images
+            existing_attachments = db.query(AllAttachment).filter(
+                AllAttachment.item_id == item_id
+            ).all()
+
+            for attachment in existing_attachments:
+                file_path = attachment.file_path.replace("\\", "/")
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                db.delete(attachment)
+
+            # Add new images
+            for image in images:
+                if image.filename:
+                    ext = os.path.splitext(image.filename)[1].lower()
+                    unique_filename = f"{uuid.uuid4()}{ext}"
+                    save_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
+                    save_path = save_path.replace("\\", "/")
+
+                    # Save to disk
+                    with open(save_path, "wb") as buffer:
+                        shutil.copyfileobj(image.file, buffer)
+
+                    # Save DB record
+                    attachment = AllAttachment(
+                        parent_type=ParentType.ITEMS,
+                        item_id=db_item.id,
+                        filename=image.filename,
+                        file_path=save_path,
+                        file_size=os.path.getsize(save_path),
+                        mime_type=image.content_type,
+                        created_at=datetime.now()
+                    )
+                    db.add(attachment)
 
         db.commit()
         db.refresh(db_item)
 
-        # Manually construct the response like in your GET endpoint
-        base_url = f"{request.url.scheme}://{request.url.netloc}"
-        
         # Reload the item with relationships for the response
         updated_item = db.query(Item).options(
             joinedload(Item.category_one_rel),
@@ -349,8 +335,7 @@ async def update_item(
             joinedload(Item.vendor_rel),
             joinedload(Item.attachments)
         ).filter(Item.id == item_id).first()
-        
-        # Construct enriched attachments with URL
+
         return construct_item_response(updated_item, request)
 
     except Exception as e:
@@ -386,7 +371,6 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{item_id}/images/{attachment_id}")
 def get_item_image(item_id: int, attachment_id: int, db: Session = Depends(get_db)):
-    """Get a specific image for an item"""
 
     attachment = db.query(AllAttachment).filter(
         AllAttachment.id == attachment_id,
@@ -399,7 +383,6 @@ def get_item_image(item_id: int, attachment_id: int, db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail="Image not found")
 
     if not os.path.exists(attachment.file_path):
-        # Try local backup
         local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR)
         if os.path.exists(local_path):
             return FileResponse(local_path, media_type=attachment.mime_type)
@@ -410,8 +393,6 @@ def get_item_image(item_id: int, attachment_id: int, db: Session = Depends(get_d
 
 @router.post("/bulk-sync")
 def sync_items_to_vps(db: Session = Depends(get_db)):
-    """Sync all local images to VPS location (utility endpoint)"""
-
     try:
         synced_count = 0
         attachments = db.query(AllAttachment).filter(
@@ -435,7 +416,7 @@ def sync_items_to_vps(db: Session = Depends(get_db)):
 
 @router.get("/stats/summary")
 def get_items_stats(db: Session = Depends(get_db)):
-    """Get summary statistics for items"""
+
 
     total_items = db.query(Item).count()
     active_items = db.query(Item).filter(Item.is_active == True).count()
@@ -488,6 +469,7 @@ def construct_item_response(item: Item, request: Request) -> Dict[str, Any]:
         "sku": item.sku,
         "total_item": item.total_item,
         "price": item.price,
+        "is_active": item.is_active,
         "created_at": getattr(item, 'created_at', None),
         "category_one_rel": CategoryOut.model_validate(item.category_one_rel).model_dump() if item.category_one_rel else None,
         "category_two_rel": CategoryOut.model_validate(item.category_two_rel).model_dump() if item.category_two_rel else None,

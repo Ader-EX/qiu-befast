@@ -16,3 +16,4 @@ class TermOfPayment(Base):
     # Relationships
     vend_rel = relationship("Vendor", back_populates="top_rel")
     cust_rel = relationship("Customer", back_populates="top_rel")
+    pembelians = relationship("Pembelian", cascade="all, delete", back_populates="top_rel")

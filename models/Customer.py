@@ -17,4 +17,6 @@ class Customer(Base):
 
     top_rel = relationship("TermOfPayment",back_populates="cust_rel")
     curr_rel = relationship("Currency", back_populates="cust_rel")
+    pembelians = relationship("Pembelian",cascade="all, delete", back_populates="customer_rel")
+
 
