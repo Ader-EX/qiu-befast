@@ -189,7 +189,7 @@ def save_uploaded_file(file: UploadFile, pembelian_id: str) -> str:
 
 # API Endpoints
 
-@router.get("/", response_model=PaginatedResponse[PembelianListResponse])
+@router.get("", response_model=PaginatedResponse[PembelianListResponse])
 async def get_all_pembelian(
         status_pembelian: Optional[StatusPembelianEnum] = Query(None),
         status_pembayaran: Optional[StatusPembayaranEnum] = Query(None),
@@ -272,7 +272,7 @@ async def get_pembelian(pembelian_id: str, db: Session = Depends(get_db)):
 
     return pembelian
 
-@router.post("", response_model=PembelianResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_db)):
     """Create new pembelian in DRAFT status"""
 
