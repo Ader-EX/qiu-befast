@@ -28,8 +28,8 @@ ALLOWED_FILE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/jpg"]
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 # Utility Functions
-def generate_pembelian_id() -> str:
-    return f"PO-{uuid.uuid4().hex[:8].upper()}"
+def generate_pembelian_id() -> int:
+    return f"{uuid.uuid4().hex[:8].upper()}"
 
 def calculate_item_total(qty: int, unit_price: Decimal) -> Decimal:
     """Calculate total price for an item"""
@@ -73,7 +73,7 @@ def validate_pembelian_items_stock(db: Session, items_data: List) -> None:
             # For dictionary data
             validate_item_stock(db, item_data['item_id'], item_data['qty'])
 
-def calculate_pembelian_totals(db: Session, pembelian_id: str) -> TotalsResponse:
+def calculate_pembelian_totals(db: Session, pembelian_id: int) -> TotalsResponse:
     """Calculate and update pembelian totals"""
     pembelian = db.query(Pembelian).filter(Pembelian.id == pembelian_id).first()
 
@@ -285,11 +285,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
     validate_pembelian_items_stock(db, request.items)
 
     # Generate unique ID
-    pembelian_id = generate_pembelian_id()
-
-    # Create pembelian
     pembelian = Pembelian(
-        id=pembelian_id,
         no_pembelian=request.no_pembelian,
         warehouse_id=request.warehouse_id,
         customer_id=request.customer_id,
@@ -304,7 +300,6 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
 
     db.add(pembelian)
     db.flush()
-
     # Add items - get unit_price from Item model instead of request
     for item_request in request.items:
         # Fetch the item to get its price
@@ -320,7 +315,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         total_price = calculate_item_total(item_request.qty, unit_price)
 
         pembelian_item = PembelianItem(
-            pembelian_id=pembelian_id,
+            pembelian_id=pembelian.id,
             item_id=item_request.item_id,
             qty=item_request.qty,
             unit_price=unit_price,  # Use item's price
@@ -331,7 +326,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
     db.commit()
 
     # Calculate totals
-    calculate_pembelian_totals(db, pembelian_id)
+    calculate_pembelian_totals(db, pembelian.id)
 
     return {
         "detail" : "Pembelian created successfully",

@@ -120,7 +120,7 @@ class PembelianUpdate(BaseModel):
         return v
 
 class PembelianResponse(BaseModel):
-    id: str
+    id: int
     no_pembelian: str
     status_pembayaran: StatusPembayaranEnum
     status_pembelian: StatusPembelianEnum
@@ -158,7 +158,7 @@ class PembelianStatusUpdate(BaseModel):
     status_pembayaran: Optional[StatusPembayaranEnum] = None
 
 class PembelianListResponse(BaseModel):
-    id: str
+    id: int
     no_pembelian: str
     status_pembayaran: StatusPembayaranEnum
     status_pembelian: StatusPembelianEnum

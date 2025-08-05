@@ -38,4 +38,6 @@ class Item(Base):
     vendor_rel = relationship("Vendor", back_populates="items")
     attachments = relationship("AllAttachment", back_populates="item_rel", cascade="all, delete-orphan")
     pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
+    penjualan_items  = relationship("PenjualanItem", back_populates="item_rel")
+    pembayaran_items  = relationship("PembayaranItem", back_populates="item_rel")
 

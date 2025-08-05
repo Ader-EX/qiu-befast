@@ -7,6 +7,6 @@ from models import Vendor
 from models import Satuan
 from models import TermOfPayment
 from models import Warehouse
-
 from models import Pembelian
-
+from models import Pembayaran
+from models import Penjualan
