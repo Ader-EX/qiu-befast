@@ -330,6 +330,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
 
     return {
         "detail" : "Pembelian created successfully",
+        "id" : pembelian.id,
     }
 
 @router.put("/{pembelian_id}", response_model=PembelianResponse)
