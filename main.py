@@ -94,10 +94,3 @@ app.include_router(pembelian_routes.router, prefix="/pembelian", tags=["Pembelia
 
 app.include_router(upload_routes.router, prefix="/upload", tags=["Upload"])
 
-@app.get("/")
-async def root():
-    return {"message": "Welcome to FastAPI App"}
-
-@app.get("/iseng")
-async def iseng():
-    return {"message": "Testing public route"}

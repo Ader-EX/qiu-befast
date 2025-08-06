@@ -11,6 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from database import get_db
+from models.Pembayaran import  Pembayaran
 from models.Customer import Customer
 from models.Item import Item
 from models.Pembelian import Pembelian, StatusPembelianEnum,PembelianItem, StatusPembayaranEnum
@@ -259,8 +260,9 @@ async def get_all_pembelian(
 async def get_pembelian(pembelian_id: str, db: Session = Depends(get_db)):
     """Get specific pembelian by ID"""
 
+    # Fixed: Added proper eager loading for all relationships
     pembelian = db.query(Pembelian).options(
-        selectinload(Pembelian.pembelian_items),
+        selectinload(Pembelian.pembelian_items).selectinload(PembelianItem.item_rel),
         selectinload(Pembelian.attachments),
         selectinload(Pembelian.customer_rel),
         selectinload(Pembelian.warehouse_rel),
@@ -549,23 +551,39 @@ async def recalculate_totals(pembelian_id: str, db: Session = Depends(get_db)):
 async def delete_pembelian(pembelian_id: str, db: Session = Depends(get_db)):
     """Delete pembelian (only allowed in DRAFT status)"""
 
-    pembelian = db.query(Pembelian).filter(Pembelian.id == pembelian_id).first()
+    # Load pembelian with all relationships
+    pembelian = db.query(Pembelian).options(
+        selectinload(Pembelian.pembelian_items),
+        selectinload(Pembelian.attachments)
+    ).filter(Pembelian.id == pembelian_id).first()
+
     if not pembelian:
         raise HTTPException(status_code=404, detail="Pembelian not found")
 
     validate_draft_status(pembelian)
 
-    # Delete associated files
-    for attachment in pembelian.attachments:
-        if os.path.exists(attachment.file_path):
-            os.remove(attachment.file_path)
+    try:
+        for attachment in pembelian.attachments:
+            if os.path.exists(attachment.file_path):
+                os.remove(attachment.file_path)
 
-    # Delete from database (cascade will handle items and attachments)
-    db.delete(pembelian)
-    db.commit()
+        db.query(PembelianItem).filter(PembelianItem.pembelian_id == pembelian_id).delete()
+        db.query(AllAttachment).filter(AllAttachment.pembelian_id == pembelian_id).delete()
 
-    return SuccessResponse(message="Pembelian deleted successfully")
+        db.query(Pembayaran).filter(Pembayaran.pembelian_id == pembelian_id).delete()
 
+
+        db.delete(pembelian)
+        db.commit()
+
+        return SuccessResponse(message="Pembelian deleted successfully")
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting pembelian: {str(e)}"
+        )
 # Statistics endpoints
 @router.get("/stats/summary")
 async def get_pembelian_summary(db: Session = Depends(get_db)):
