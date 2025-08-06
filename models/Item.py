@@ -23,7 +23,7 @@ class Item(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.now(), nullable=False)
     
-    # Foreign Keys
+    # Foreign Ke
     category_one = Column(Integer, ForeignKey("categories.id"), nullable=True)
     category_two = Column(Integer, ForeignKey("categories.id"), nullable=True)
     satuan_id = Column(Integer, ForeignKey("satuans.id"), nullable=False)

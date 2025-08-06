@@ -47,7 +47,7 @@ def upload_image(
 ):
     filename, filepath = save_upload_file(file, UPLOAD_DIR)
     attachment = AllAttachment(
-        parent_type=parent_type,
+        parent_type=parent_type.value,
         filename=filename,
         file_path=filepath,
         file_size=os.path.getsize(filepath),

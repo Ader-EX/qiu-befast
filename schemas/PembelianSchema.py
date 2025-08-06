@@ -1,4 +1,4 @@
-from pydantic import BaseModel, validator, field_validator
+from pydantic import BaseModel, Field, validator, field_validator
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
@@ -33,7 +33,7 @@ class PembelianItemUpdate(PembelianItemBase):
 
 class PembelianItemResponse(BaseModel):
     id: int
-    pembelian_id: str
+    pembelian_id: int
 
     # Draft mode fields
     item_id: Optional[int] = None
@@ -58,6 +58,8 @@ class AttachmentResponse(BaseModel):
     filename: str
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
+    file_path: Optional[str] = None
+    
     created_at: datetime
 
     class Config:
@@ -147,8 +149,8 @@ class PembelianResponse(BaseModel):
     currency_name: Optional[str] = None
 
     # Related data
-    items: List[PembelianItemResponse] = []
-    attachments: List[AttachmentResponse] = []
+    items: List[PembelianItemResponse] = Field(default_factory=list, alias="pembelian_items")
+    attachments: List[AttachmentResponse] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -165,6 +167,7 @@ class PembelianListResponse(BaseModel):
     sales_date: Optional[datetime] = None
     total_qty: int
     total_price: Decimal
+    total_paid: Decimal
 
     # Customer info (draft or finalized)
     customer_name: Optional[str] = None
