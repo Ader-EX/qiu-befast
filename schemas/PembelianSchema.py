@@ -12,6 +12,7 @@ class PembelianItemBase(BaseModel):
     item_id: Optional[int] = None
     qty: int
     unit_price: Decimal
+    tax_percentage : Optional[int] = 0
 
     @field_validator('qty')
     def validate_qty(cls, v):
@@ -49,6 +50,7 @@ class PembelianItemResponse(BaseModel):
     qty: int
     unit_price: Decimal
     total_price: Decimal
+    tax_percentage: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -149,7 +151,7 @@ class PembelianResponse(BaseModel):
     customer_name: Optional[str] = None
     top_name: Optional[str] = None
     currency_name: Optional[str] = None
-    tax : Optional[int] = 0
+
 
     # Related data
     items: List[PembelianItemResponse] = Field(default_factory=list, alias="pembelian_items")
