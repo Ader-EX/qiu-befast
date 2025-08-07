@@ -1,3 +1,5 @@
+import random
+
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, selectinload
@@ -30,7 +32,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 # Utility Functions
 def generate_pembelian_id() -> int:
-    return f"{uuid.uuid4().hex[:8].upper()}"
+    return random.randint(10000000, 99999999)
 
 def calculate_item_total(qty: int, unit_price: Decimal) -> Decimal:
     """Calculate total price for an item"""
@@ -210,9 +212,9 @@ async def get_all_pembelian(
     )
 
     # Apply filters
-    if status_pembelian:
+    if status_pembelian is not None and status_pembelian != StatusPembelianEnum.ALL:
         query = query.filter(Pembelian.status_pembelian == status_pembelian)
-    if status_pembayaran:
+    if status_pembayaran is not None and status_pembayaran != StatusPembayaranEnum.ALL:
         query = query.filter(Pembelian.status_pembayaran == status_pembayaran)
     if customer_id:
         query = query.filter(Pembelian.customer_id == customer_id)
@@ -289,6 +291,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
 
     # Generate unique ID
     pembelian = Pembelian(
+        id=generate_pembelian_id(),
         no_pembelian=request.no_pembelian,
         warehouse_id=request.warehouse_id,
         customer_id=request.customer_id,
@@ -296,6 +299,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         sales_date=request.sales_date,
         sales_due_date=request.sales_due_date,
         discount=request.discount,
+        tax = request.tax,
         additional_discount=request.additional_discount,
         expense=request.expense,
         status_pembelian=StatusPembelianEnum.DRAFT

@@ -7,10 +7,13 @@ import shutil
 from uuid import uuid4
 import enum
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from starlette.requests import Request
+from starlette.responses import HTMLResponse
 
 from database import get_db
 from models.AllAttachment import AllAttachment
+from models.Pembelian import Pembelian
 
 router = APIRouter()
 
@@ -71,3 +74,64 @@ def upload_image(
         "file_path": attachment.file_path,
         "url": f"/static/items/{filename}"
     }
+
+
+@router.get("/invoice/{invoice_id}", response_class=HTMLResponse)
+def invoice_report(
+        request: Request,
+        invoice_id: int,
+        db: Session = Depends(get_db),
+):
+    invoice = (
+        db.query(Pembelian)
+        .options(
+            joinedload(Pembelian.pembelian_items),
+            joinedload(Pembelian.customer_rel)  # optional, in case you want phone/email
+        )
+        .filter(Pembelian.id == invoice_id)
+        .first()
+    )
+    if not invoice:
+        raise HTTPException(404, "Invoice not found")
+
+    # build the context exactly as your template expects:
+    return templates.TemplateResponse(
+        "invoice.html",       # your Jinja2 file
+        {
+            "request": request,  # always pass the request
+            "invoice": {
+                "number":       invoice.no_pembelian,
+                "date":         invoice.sales_date.strftime("%d %B %Y"),
+                "due_date":     invoice.sales_due_date.strftime("%d %B %Y"),
+                "status":       invoice.status_pembayaran.value,
+                "items": [
+                    {
+                        "description": item.item_name,
+                        "quantity":    item.qty,
+                        "unit":        item.satuan_name,
+                        "tax_percent": item.tax_percentage,
+                        "unit_price":  float(item.unit_price),
+                        "total":       float(item.total_price),
+                        "image_url":   item.item_rel.image_url if item.item_rel else None,
+                    }
+                    for item in invoice.pembelian_items
+                ],
+                "subtotal":            float(invoice.total_price),
+                "discount":            float(invoice.discount),
+                "additional_discount": float(invoice.additional_discount),
+                "tax_amount":          float(invoice.total_price) * 0.1,  # or your formula
+                "expense":             float(invoice.expense),
+                "total":               float(invoice.total_price)
+                                       - float(invoice.discount)
+                                       - float(invoice.additional_discount),
+                "grand_total":         float(invoice.total_price)
+                                       - float(invoice.discount)
+                                       - float(invoice.additional_discount)
+                                       + float(invoice.expense),
+            },
+            "customer": {
+                "name":  invoice.customer_display,
+                "phone": invoice.customer_rel.phone if invoice.customer_rel else "–",
+            },
+        },
+    )

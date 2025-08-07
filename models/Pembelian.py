@@ -1,16 +1,20 @@
 import enum
 
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime, DECIMAL, Enum
+from sqlalchemy.ext.hybrid import hybrid_property
+
 from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta
 
 class StatusPembayaranEnum(enum.Enum):
+    ALL = "ALL"
     UNPAID = "UNPAID"
     HALF_PAID = "HALF_PAID"
     PAID = "PAID"
 
 class StatusPembelianEnum(enum.Enum):
+    ALL = "ALL"
     DRAFT = "DRAFT"
     ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
@@ -62,6 +66,15 @@ class Pembelian(Base):
 
     attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
 
+    @hybrid_property
+    def customer_display(self) -> str:
+        # draft‐mode name always wins; but if it’s empty, try the live FK
+        if self.customer_name:
+            return self.customer_name
+        if self.customer_rel:
+            return self.customer_rel.name
+        return "—"
+
 class PembelianItem(Base):
     __tablename__ = "pembelian_items"
 
@@ -75,12 +88,10 @@ class PembelianItem(Base):
     item_type = Column(String(50), nullable=True)  # FINISH_GOOD, RAW_MATERIAL, SERVICE
     satuan_name = Column(String(100), nullable=True)
     vendor_name = Column(String(255), nullable=True)
-
+    tax_percentage = Column(Integer, nullable=True, default=0)
     qty = Column(Integer, nullable=False, default=0)
     unit_price = Column(Numeric(15, 7), nullable=False, default=0.00)
     total_price = Column(Numeric(15, 7), nullable=False, default=0.00)  # qty * unit_price
-
-
 
     # Relationships
     pembelian = relationship("Pembelian", back_populates="pembelian_items")

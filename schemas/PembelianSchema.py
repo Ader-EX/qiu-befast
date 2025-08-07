@@ -74,6 +74,7 @@ class PembelianBase(BaseModel):
     sales_due_date: Optional[datetime] = None
     discount: Optional[Decimal] = Decimal('0.00')
     additional_discount: Optional[Decimal] = Decimal('0.00')
+    tax : Optional[int] = 0
     expense: Optional[Decimal] = Decimal('0.00')
 
     @validator('no_pembelian')
@@ -105,6 +106,7 @@ class PembelianUpdate(BaseModel):
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
     discount: Optional[Decimal] = None
+    tax : Optional[int] = None
     additional_discount: Optional[Decimal] = None
     expense: Optional[Decimal] = None
     items: Optional[List[PembelianItemUpdate]] = None
@@ -147,6 +149,7 @@ class PembelianResponse(BaseModel):
     customer_name: Optional[str] = None
     top_name: Optional[str] = None
     currency_name: Optional[str] = None
+    tax : Optional[int] = 0
 
     # Related data
     items: List[PembelianItemResponse] = Field(default_factory=list, alias="pembelian_items")
