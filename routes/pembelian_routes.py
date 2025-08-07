@@ -299,7 +299,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         sales_date=request.sales_date,
         sales_due_date=request.sales_due_date,
         discount=request.discount,
-        tax = request.tax,
+        
         additional_discount=request.additional_discount,
         expense=request.expense,
         status_pembelian=StatusPembelianEnum.DRAFT
@@ -324,8 +324,10 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         pembelian_item = PembelianItem(
             pembelian_id=pembelian.id,
             item_id=item_request.item_id,
+            item_name=item.name,
             qty=item_request.qty,
-            unit_price=unit_price,  # Use item's price
+            unit_price=unit_price,
+            tax_percentage = item_request.tax_percentage,
             total_price=total_price
         )
         db.add(pembelian_item)

@@ -33,10 +33,9 @@ class Penjualan(Base):
     # For finalized: store names to preserve data even if master gets deleted
 
     # Draft mode - foreign keys (nullable when finalized)
-    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)
-    customer_id = Column(String(50), ForeignKey("customers.id"), nullable=True)
-
-    top_id = Column(Integer, ForeignKey("term_of_payments.id"), nullable=True)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
+    customer_id = Column(String(50), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
+    top_id = Column(Integer, ForeignKey("term_of_payments.id", ondelete="SET NULL"), nullable=True)
 
     warehouse_name = Column(String(255), nullable=True)
     customer_name = Column(String(255), nullable=True)
@@ -57,10 +56,8 @@ class PenjualanItem(Base):
     __tablename__ = "penjualan_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    penjualan_id = Column(Integer, ForeignKey("penjualans.id"), nullable=False)
-
-    # Draft mode - foreign key to item
-    item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
+    penjualan_id = Column(Integer, ForeignKey("penjualans.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id", ondelete="SET NULL"), nullable=True)
 
     # Finalized mode - stored item data
     item_name = Column(String(255), nullable=True)

@@ -76,7 +76,6 @@ class PembelianBase(BaseModel):
     sales_due_date: Optional[datetime] = None
     discount: Optional[Decimal] = Decimal('0.00')
     additional_discount: Optional[Decimal] = Decimal('0.00')
-    tax : Optional[int] = 0
     expense: Optional[Decimal] = Decimal('0.00')
 
     @validator('no_pembelian')

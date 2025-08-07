@@ -42,10 +42,9 @@ class Pembelian(Base):
     # For finalized: store names to preserve data even if master gets deleted
 
     # Draft mode - foreign keys (nullable when finalized)
-    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)
-    customer_id = Column(String(50), ForeignKey("customers.id"), nullable=True)
-
-    top_id = Column(Integer, ForeignKey("term_of_payments.id"), nullable=True)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
+    customer_id = Column(String(50), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
+    top_id = Column(Integer, ForeignKey("term_of_payments.id", ondelete="SET NULL"), nullable=True)
 
     # Finalized mode - stored names (nullable when draft)
     warehouse_name = Column(String(255), nullable=True)
@@ -79,10 +78,8 @@ class PembelianItem(Base):
     __tablename__ = "pembelian_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    pembelian_id = Column(Integer, ForeignKey("pembelians.id"), nullable=False)
-
-    item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
-
+    pembelian_id = Column(Integer, ForeignKey("pembelians.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id", ondelete="SET NULL"), nullable=True)
     item_name = Column(String(255), nullable=True)
     item_sku = Column(String(100), nullable=True)
     item_type = Column(String(50), nullable=True)  # FINISH_GOOD, RAW_MATERIAL, SERVICE
