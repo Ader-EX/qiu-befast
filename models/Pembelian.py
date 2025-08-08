@@ -37,6 +37,7 @@ class Pembelian(Base):
     total_qty = Column(Integer, nullable=False, default=0)
     total_price = Column(Numeric(15,7), default=0.00)
     total_paid = Column(Numeric(15,7), default=0.00)
+    total_return = Column(Numeric(15,7), default=0.00)
 
     # For DRAFT: store foreign keys to allow editing
     # For finalized: store names to preserve data even if master gets deleted
@@ -49,6 +50,7 @@ class Pembelian(Base):
     # Finalized mode - stored names (nullable when draft)
     warehouse_name = Column(String(255), nullable=True)
     customer_name = Column(String(255), nullable=True)
+    customer_address = Column(Text, nullable=True)
     top_name = Column(String(255), nullable=True)
     currency_name  = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.now(), nullable=False)
@@ -61,8 +63,6 @@ class Pembelian(Base):
     # Items relationship
     pembelian_items = relationship("PembelianItem", back_populates="pembelian", cascade="all, delete-orphan")
     pembayaran_rel = relationship("Pembayaran", back_populates="pembelian_rel", cascade="all, delete-orphan")
-
-
     attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
 
     @hybrid_property
@@ -74,6 +74,16 @@ class Pembelian(Base):
             return self.customer_rel.name
         return "—"
 
+
+    @hybrid_property
+    def customer_address_display(self) -> str:
+        # draft‐mode name always wins; but if it’s empty, try the live FK
+        if self.customer_address:
+            return self.customer_address
+        if self.customer_rel:
+            return self.customer_rel.address
+        return "—"
+
 class PembelianItem(Base):
     __tablename__ = "pembelian_items"
 
@@ -82,7 +92,8 @@ class PembelianItem(Base):
     item_id = Column(Integer, ForeignKey("items.id", ondelete="SET NULL"), nullable=True)
     item_name = Column(String(255), nullable=True)
     item_sku = Column(String(100), nullable=True)
-    item_type = Column(String(50), nullable=True)  # FINISH_GOOD, RAW_MATERIAL, SERVICE
+    item_type = Column(String(50), nullable=True)
+    # FINISH_GOOD, RAW_MATERIAL, SERVICE
     satuan_name = Column(String(100), nullable=True)
     vendor_name = Column(String(255), nullable=True)
     tax_percentage = Column(Integer, nullable=True, default=0)
@@ -92,4 +103,20 @@ class PembelianItem(Base):
 
     # Relationships
     pembelian = relationship("Pembelian", back_populates="pembelian_items")
+    # attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
     item_rel = relationship("Item", back_populates="pembelian_items")
+
+    @property
+    def image_url(self) -> str | None:
+        """
+        Prefer the first attachment uploaded for this Item (ParentType.ITEMS).
+        Falls back to None if no item image exists.
+        """
+        if self.item_rel and self.item_rel.attachments:
+            # optionally filter by parent_type == ParentType.ITEMS
+            for att in self.item_rel.attachments:
+                if att.parent_type.name == "ITEMS":
+                    return att.url
+            # if you don't care about type filtering, just:
+            # return self.item_rel.attachments[0].url
+        return None

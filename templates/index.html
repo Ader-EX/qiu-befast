@@ -3,357 +3,147 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Invoice {{ invoice.number }}</title>
+  <title>Invoice {{ pembelian.no_pembelian }}</title>
   <style>
-    /* reset */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: Geist, sans-serif;
-      color: #020617;
-      background: #fff;
-      display: flex;
-      justify-content: center;
-      padding: 20px;
-    }
-
-    .invoice-container {
-      width: 100%;
-      max-width: 800px;
-      display: flex;
-      flex-direction: column;
-      gap: 24px;           /* jarak antar section */
-    }
-
-    /* HEADER */
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .header-right {
-      text-align: right;
-      line-height: 1.2;
-      font-size: 14px;
-    }
-
-    /* DIVIDER */
-    .divider {
-      border: none;
-      border-top: 2px solid #FB440F;
-      margin-top: 8px;
-    }
-
-    /* TITLE */
-    h1 {
-      font-size: 32px;
-      font-weight: 700;
-      line-height: 40px;
-      color: #FC440E;
-    }
-
-    /* INFO SECTION */
-    .info-section {
-      display: flex;
-      gap: 20px;
-    }
-    .info-block {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .info-block .title {
-      font-size: 14px;
-      font-weight: 700;
-    }
-    .info-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 14px;
-      line-height: 1.2;
-    }
-    .info-row .label {
-      color: #64748B;
-      font-weight: 500;
-    }
-    .info-row .value {
-      color: #020617;
-      font-weight: 400;
-      width: 120px;
-      text-align: right;
-    }
-
-    /* TABLE */
-    .table-wrapper {
-      overflow-x: auto;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 600px;
-    }
-    thead tr {
-      background: rgba(251,68,15,0.12);
-    }
-    th, td {
-      padding: 12px 16px;
-      font-size: 14px;
-      border-bottom: 1px solid #E2E8F0;
-      vertical-align: middle;
-    }
-    th {
-      font-weight: 500;
-      text-align: left;
-    }
-    td img {
-      display: block;
-      border-radius: 6px;
-      object-fit: cover;
-    }
-    /* column widths */
-    th:nth-child(1), td:nth-child(1) { width: 50px; text-align: center; }
-    th:nth-child(2), td:nth-child(2) { width: 350px; }
-    th:nth-child(3), td:nth-child(3),
-    th:nth-child(4), td:nth-child(4),
-    th:nth-child(5), td:nth-child(5) {
-      width: 60px; text-align: center;
-    }
-    th:nth-child(6), td:nth-child(6) { width: 200px; text-align: right; }
-    th:nth-child(7), td:nth-child(7) { text-align: right; }
-
-    /* TOTALS & SUMMARY */
-    .totals-section {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .totals-title {
-      font-size: 14px;
-      font-weight: 700;
-    }
-    .totals-row, .summary-row {
-      display: flex;
-      justify-content: space-between;
-    }
-    .totals-row .label {
-      color: #64748B;
-      font-weight: 500;
-      font-size: 14px;
-    }
-    .totals-row .value {
-      color: #020617;
-      font-weight: 400;
-      font-size: 14px;
-    }
-    .totals-row .destructive {
-      color: #DC2626;
-    }
-    .summary-row {
-      font-size: 18px;
-      font-weight: 600;
-    }
-    .summary-row[style] {
-      font-size: 14px;
-      font-weight: 400;
-    }
-    .summary-row .destructive {
-      color: #DC2626;
-    }
-
-    /* PAYMENT INFO */
-    .payment {
-      font-size: 14px;
-      color: #64748B;
-      line-height: 1.4;
-    }
-
-    /* SIGNATURE */
-    .signature {
-      display: flex;
-      justify-content: flex-end;
-    }
-    .signature-block {
-      width: 266px;
-      text-align: center;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .signature-block .line1 {
-      font-size: 14px;
-      font-weight: 700;
-    }
-    .signature-block .line2 {
-      color: #64748B;
-      font-size: 14px;
-      font-weight: 500;
-    }
-    .signature-block .line3 {
-      font-size: 14px;
-      font-weight: 400;
-    }
-
-    /* RESPONSIVE */
-    @media (max-width: 600px) {
-      .info-section {
-        flex-direction: column;
-      }
-      .info-row .value {
-        width: 100px;
-      }
-      h1 {
-        font-size: 28px;
-      }
-      .signature-block {
-        width: 100%;
-      }
-    }
+    {{ css|safe }}
   </style>
+
 </head>
 <body>
-
-  <div class="invoice-container">
-
-    <!-- HEADER -->
-    <div class="header">
-      <img src="logo.png" alt="Logo" style="width:150px; height:auto;">
-      <div class="header-right">
-        <div>Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340</div>
-        <div>www.qiupart.com</div>
-      </div>
+<div class="invoice-container">
+  <!-- HEADER -->
+  <div class="header">
+    <img src="{{ company.logo_url }}" alt="Logo" style="width:150px; height:auto;">
+    <div class="header-right">
+      <div>{{ company.address }}</div>
+      <div>{{ company.website }}</div>
     </div>
-
-    <!-- DIVIDER -->
-    <hr class="divider">
-
-    <!-- TITLE -->
-    <h1>Invoice</h1>
-
-    <!-- INFO SECTION -->
-    <div class="info-section">
-      <div class="info-block">
-        <div class="title">Informasi Invoice</div>
-        <div class="info-row">
-          <div class="label">Nomor Faktur</div>
-          <div class="value">{{ invoice.number }}</div>
-        </div>
-        <div class="info-row">
-          <div class="label">Tanggal Terbit</div>
-          <div class="value">{{ invoice.date }}</div>
-        </div>
-        <div class="info-row">
-          <div class="label">Tanggal Jatuh Tempo</div>
-          <div class="value">{{ invoice.due_date }}</div>
-        </div>
-      </div>
-      <div class="info-block">
-        <div class="title">Kpd Yth.</div>
-        <div class="info-row">
-          <div class="label">Nama Customer</div>
-          <div class="value">{{ customer.name }}</div>
-        </div>
-        <div class="info-row">
-          <div class="label">Nomor Telepon</div>
-          <div class="value">{{ customer.phone }}</div>
-        </div>
-        <div class="info-row">
-          <div class="label">Status</div>
-          <div class="value">{{ invoice.status }}</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ITEMS TABLE -->
-    <div class="table-wrapper">
-      <table>
-        <thead>
-          <tr>
-            <th>No</th>
-            <th>Nama Barang</th>
-            <th>QTY</th>
-            <th>Satuan</th>
-            <th>Pajak (%)</th>
-            <th>Harga Satuan (IDR)</th>
-            <th>Nominal (IDR)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in invoice.items %}
-          <tr>
-            <td>{{ loop.index }}</td>
-            <td style="display:flex; align-items:center; gap:12px;">
-              <img
-                src="{{ item.image_url|default('Image.png') }}"
-                alt="Product"
-                style="width:60px; height:60px;">
-              <span>{{ item.description|default('item product name') }}</span>
-            </td>
-            <td style="text-align:center;">{{ item.quantity }}</td>
-            <td style="text-align:center;">{{ item.unit }}</td>
-            <td style="text-align:center;">{{ item.tax_percent }}</td>
-            <td style="text-align:right;">Rp {{ "{:,.0f}".format(item.unit_price) }}</td>
-            <td style="text-align:right;">Rp {{ "{:,.0f}".format(item.total) }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- TOTALS & SUMMARY -->
-    <div class="totals-section">
-      <div class="totals-title">Total Invoice</div>
-      <div class="totals-row">
-        <div class="label">Sub Total</div>
-        <div class="value">Rp {{ "{:,.0f}".format(subtotal) }}</div>
-      </div>
-      <div class="totals-row">
-        <div class="label">Discount</div>
-        <div class="value">Rp {{ "{:,.0f}".format(discount) }}</div>
-      </div>
-      <div class="totals-row">
-        <div class="label">Additional Discount</div>
-        <div class="value destructive">Rp {{ "{:,.0f}".format(additional_discount) }}</div>
-      </div>
-
-      <div style="height:16px;"></div>
-
-      <div class="summary-row">
-        <div>Total</div>
-        <div>Rp {{ "{:,.0f}".format(total) }}</div>
-      </div>
-      <div class="summary-row" style="font-weight:400; font-size:14px;">
-        <div>Pajak</div>
-        <div>Rp {{ "{:,.0f}".format(tax_amount) }}</div>
-      </div>
-      <div class="summary-row" style="font-weight:400; font-size:14px;">
-        <div>Expense</div>
-        <div>Rp {{ "{:,.0f}".format(expense) }}</div>
-      </div>
-
-      <div class="summary-row">
-        <div>Grand Total</div>
-        <div>Rp {{ "{:,.0f}".format(grand_total) }}</div>
-      </div>
-    </div>
-
-    <!-- PAYMENT INFO -->
-    <div class="payment">
-      Mohon melakukan pembayaran ke rekening berikut:<br>
-      • Nama Bank: Bank Mandiri<br>
-      • Nama Penerima: PT. JAYAGIRI INDO ASIA<br>
-      • No. Rekening: 167-00-07971095
-    </div>
-
-    <!-- SIGNATURE -->
-    <div class="signature">
-      <div class="signature-block">
-        <div class="line1">Hormat kami,</div>
-        <div class="line2">PT. Jayagiri Indo Asia</div>
-        <div class="line3">AMAR</div>
-      </div>
-    </div>
-
   </div>
+
+  <hr class="divider">
+  <h1>Invoice</h1>
+
+  <!-- INFO SECTION -->
+  <div class="info-section">
+    <div class="info-block">
+      <div class="title">Informasi Invoice</div>
+      <div class="info-row">
+        <div class="label">Nomor Faktur</div>
+        <div class="value">{{ pembelian.no_pembelian }}</div>
+      </div>
+      <div class="info-row">
+        <div class="label">Tanggal Terbit</div>
+        <div class="value">{{ pembelian.sales_date.strftime('%d-%m-%Y') }}</div>
+      </div>
+      <div class="info-row">
+        <div class="label">Tanggal Jatuh Tempo</div>
+        <div class="value">{{ pembelian.sales_due_date.strftime('%d-%m-%Y') }}</div>
+      </div>
+    </div>
+
+    <div class="info-block">
+      <div class="title">Kpd Yth.</div>
+      <div class="info-row">
+        <div class="label">Nama Customer</div>
+        <div class="value">{{ pembelian.customer_display }}</div>
+      </div>
+      <div class="info-row">
+        <div class="label">Alamat</div>
+        <div class="value">{{ pembelian.customer_address_display if pembelian.customer_address_display else '-' }}</div>
+      </div>
+      <div class="info-row">
+        <div class="label">Status</div>
+        <div class="value">{{ pembelian.status_pembayaran.value }}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ITEMS TABLE -->
+  <div class="table-wrapper">
+    <table>
+      <thead>
+      <tr>
+        <th>No</th>
+        <th>Nama Barang</th>
+        <th>QTY</th>
+        <th>Satuan</th>
+        <th>Pajak (%)</th>
+        <th>Harga Satuan (IDR)</th>
+        <th>Nominal (IDR)</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for item in pembelian.pembelian_items %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td style="display:flex; align-items:center; gap:12px;">
+          <img src="{{ item.image_url or 'Image.png' }}" alt="Product" style="width:60px; height:60px;">
+          <span>{{ item.item_name }}</span>
+        </td>
+        <td style="text-align:center;">{{ item.qty }}</td>
+        <td style="text-align:center;">{{ item.satuan_name or '-' }}</td>
+        <td style="text-align:center;">{{ item.tax_percentage or 0 }}</td>
+        <td style="text-align:right;">Rp {{ "{:,.0f}".format(item.unit_price) }}</td>
+        <td style="text-align:right;">Rp {{ "{:,.0f}".format(item.total_price) }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- TOTALS -->
+  <div class="totals-section">
+    <div class="totals-title">Total Invoice</div>
+    <div class="totals-row">
+      <div class="label">Sub Total</div>
+      <div class="value">Rp {{ "{:,.0f}".format(totals.subtotal) }}</div>
+    </div>
+    <div class="totals-row">
+      <div class="label">Discount</div>
+      <div class="value">Rp {{ "{:,.0f}".format(pembelian.discount) }}</div>
+    </div>
+    <div class="totals-row">
+      <div class="label">Additional Discount</div>
+      <div class="value destructive">Rp {{ "{:,.0f}".format(pembelian.additional_discount) }}</div>
+    </div>
+
+    <div style="height:16px;"></div>
+
+    <div class="summary-row">
+      <div>Total</div>
+      <div>Rp {{ "{:,.0f}".format(totals.final_total) }}</div>
+    </div>
+    <div class="summary-row" style="font-weight:400; font-size:14px;">
+      <div>Pajak</div>
+      <div>Rp {{ "{:,.0f}".format(totals.tax_amount) }}</div>
+    </div>
+    <div class="summary-row" style="font-weight:400; font-size:14px;">
+      <div>Expense</div>
+      <div>Rp {{ "{:,.0f}".format(pembelian.expense) }}</div>
+    </div>
+
+    <div class="summary-row">
+      <div>Grand Total</div>
+      <div>Rp {{ "{:,.0f}".format(totals.grand_total) }}</div>
+    </div>
+  </div>
+
+  <!-- PAYMENT INFO -->
+  <div class="payment">
+    Mohon melakukan pembayaran ke rekening berikut:<br>
+    • Nama Bank: {{ company.bank_name }}<br>
+    • Nama Penerima: {{ company.account_name }}<br>
+    • No. Rekening: {{ company.account_number }}
+  </div>
+
+  <!-- SIGNATURE -->
+  <div class="signature">
+    <div class="signature-block">
+      <div class="line1">Hormat kami,</div>
+      <div class="line2">{{ company.name }}</div>
+      <div class="line3">{{ company.representative }}</div>
+    </div>
+  </div>
+</div>
 </body>
 </html>

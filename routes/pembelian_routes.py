@@ -96,13 +96,20 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int) -> TotalsResponse
 
     db.commit()
 
+    tax_amount = sum(
+        (item.total_price * Decimal(item.tax_percentage or 0) / 100)
+        for item in pembelian.pembelian_items
+    )
+
     return TotalsResponse(
         subtotal=subtotal,
         discount=pembelian.discount,
         additional_discount=pembelian.additional_discount,
         expense=pembelian.expense,
         total_qty=total_qty,
-        final_total=final_total
+        final_total=final_total,
+        tax_amount=tax_amount,
+        grand_total=final_total + tax_amount
     )
 
 def finalize_pembelian(db: Session, pembelian_id: str):
@@ -135,6 +142,7 @@ def finalize_pembelian(db: Session, pembelian_id: str):
         pembelian.warehouse_name = pembelian.warehouse_rel.name
     if pembelian.customer_rel:
         pembelian.customer_name = pembelian.customer_rel.name
+        pembelian.customer_address = pembelian.customer_rel.address
 
         # Get currency name from customer's currency relationship
         if pembelian.customer_rel.curr_rel:

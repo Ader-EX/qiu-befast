@@ -196,7 +196,6 @@ class UploadResponse(BaseModel):
     message: str
     files: List[FileUploadResponse]
 
-# Error response
 class ErrorResponse(BaseModel):
     detail: str
     error_code: Optional[str] = None
@@ -210,6 +209,8 @@ class SuccessResponse(BaseModel):
 class TotalsResponse(BaseModel):
     subtotal: Decimal  # Sum of all item totals
     discount: Decimal
+    grand_total : Decimal  # subtotal - discount
+    tax_amount : Decimal
     additional_discount: Decimal
     expense: Decimal
     total_qty: int

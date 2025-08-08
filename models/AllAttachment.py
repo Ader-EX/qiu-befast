@@ -35,4 +35,9 @@ class AllAttachment(Base):
     mime_type = Column(String(100), nullable=True)
     
     created_at = Column(DateTime, default=datetime.now)
-    
+
+    @property
+    def url(self) -> str:
+        # match your upload path scheme
+        # if you ever split dirs per parent, adjust here
+        return f"/static/items/{self.filename}"

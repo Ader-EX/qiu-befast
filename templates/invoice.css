@@ -1,0 +1,213 @@
+/* ========== Invoice CSS (static/invoice.css) ========== */
+
+/* (Optional) If you host Geist, import it here */
+/* @import url('/static/fonts/geist.css'); */
+
+/* CSS Variables for easy theming */
+:root{
+    --ink:#020617;
+    --muted:#64748B;
+    --brand:#FC440E;
+    --brand-12:rgba(251,68,15,0.12);
+    --line:#E2E8F0;
+    --danger:#DC2626;
+    --bg:#fff;
+}
+
+/* Reset */
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+
+/* Base */
+html { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+body{
+    font-family: Geist, Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji";
+    color:var(--ink);
+    background:var(--bg);
+    display:flex;
+    justify-content:center;
+    padding:20px;
+    line-height:1.45;
+    font-size:14px;
+}
+
+/* Container */
+.invoice-container{
+    width:100%;
+    max-width:800px;
+    display:flex;
+    flex-direction:column;
+    gap:24px;           /* jarak antar section */
+}
+
+/* Header */
+.header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+.header-right{
+    text-align:right;
+    line-height:1.2;
+    font-size:14px;
+}
+
+/* Divider */
+.divider{
+    border:none;
+    border-top:2px solid #FB440F;
+    margin-top:8px;
+}
+
+/* Title */
+h1{
+    font-size:32px;
+    font-weight:700;
+    line-height:40px;
+    color:var(--brand);
+}
+
+/* Info section */
+.info-section{
+    display:flex;
+    gap:20px;
+}
+.info-block{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+}
+.info-block .title{
+    font-size:14px;
+    font-weight:700;
+}
+.info-row{
+    display:flex;
+    justify-content:space-between;
+    font-size:14px;
+    line-height:1.2;
+    gap:12px;
+}
+.info-row .label{
+    color:var(--muted);
+    font-weight:500;
+}
+.info-row .value{
+    color:var(--ink);
+    font-weight:400;
+    width:120px;
+    text-align:right;
+    word-break:break-word;
+}
+
+/* Table */
+.table-wrapper{ overflow-x:auto; }
+table{
+    width:100%;
+    border-collapse:collapse;
+    min-width:600px;
+    table-layout:auto;
+}
+thead tr{ background:var(--brand-12); }
+th, td{
+    padding:12px 16px;
+    font-size:14px;
+    border-bottom:1px solid var(--line);
+    vertical-align:middle;
+}
+th{ font-weight:500; text-align:left; }
+td img{
+    display:block;
+    border-radius:6px;
+    object-fit:cover;
+}
+/* column widths */
+th:nth-child(1), td:nth-child(1){ width:50px; text-align:center; }
+th:nth-child(2), td:nth-child(2){ width:350px; }
+th:nth-child(3), td:nth-child(3),
+th:nth-child(4), td:nth-child(4),
+th:nth-child(5), td:nth-child(5){ width:60px; text-align:center; }
+th:nth-child(6), td:nth-child(6){ width:200px; text-align:right; }
+th:nth-child(7), td:nth-child(7){ text-align:right; }
+
+/* Totals & Summary */
+.totals-section{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+}
+.totals-title{
+    font-size:14px;
+    font-weight:700;
+}
+.totals-row, .summary-row{
+    display:flex;
+    justify-content:space-between;
+}
+.totals-row .label{
+    color:var(--muted);
+    font-weight:500;
+    font-size:14px;
+}
+.totals-row .value{
+    color:var(--ink);
+    font-weight:400;
+    font-size:14px;
+}
+.totals-row .destructive{ color:var(--danger); }
+
+.summary-row{
+    font-size:18px;
+    font-weight:600;
+}
+.summary-row[style]{
+    font-size:14px;
+    font-weight:400;
+}
+.summary-row .destructive{ color:var(--danger); }
+
+/* Payment info */
+.payment{
+    font-size:14px;
+    color:var(--muted);
+    line-height:1.4;
+}
+
+/* Signature */
+.signature{ display:flex; justify-content:flex-end; }
+.signature-block{
+    width:266px;
+    text-align:center;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+.signature-block .line1{ font-size:14px; font-weight:700; }
+.signature-block .line2{ color:var(--muted); font-size:14px; font-weight:500; }
+.signature-block .line3{ font-size:14px; font-weight:400; }
+
+/* Responsive */
+@media (max-width:600px){
+    body{ padding:12px; }
+    .info-section{ flex-direction:column; }
+    .info-row .value{ width:100px; }
+    h1{ font-size:28px; line-height:34px; }
+    .signature-block{ width:100%; }
+    th, td{ padding:10px 12px; }
+}
+
+/* Print styles */
+@media print{
+    body{ padding:0; background:#fff; }
+    .invoice-container{ max-width:unset; gap:16px; }
+    .table-wrapper{ overflow:visible; }
+    a{ color:inherit; text-decoration:none; }
+    /* Avoid page breaks in awkward spots */
+    .header, .totals-section, .payment, .signature { break-inside:avoid; }
+    table, tr, td, th{ break-inside:avoid; }
+    /* Remove box-shadows or effects if you add any later */
+}
+
+/* Utility (optional) */
+.text-right{ text-align:right; }
+.text-center{ text-align:center; }
