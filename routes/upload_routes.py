@@ -39,8 +39,7 @@ class ParentType(enum.Enum):
 
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR" ,default="uploads/items")
-os.makedirs(UPLOAD_DIR, exist_ok=True)  # Ensure dir exists
-# routes/upload.py
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 
@@ -100,7 +99,7 @@ async def view_invoice_html(pembelian_id: int, request: Request, db: Session = D
         .options(
             joinedload(Pembelian.pembelian_items)
             .joinedload(PembelianItem.item_rel)
-            .joinedload(Item.attachments)  # so image_url resolves without extra queries
+            .joinedload(Item.attachments)
         )
         .filter(Pembelian.id == pembelian_id)
         .first()

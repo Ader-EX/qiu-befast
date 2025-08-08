@@ -29,7 +29,6 @@ class Item(Base):
     satuan_id = Column(Integer, ForeignKey("satuans.id"), nullable=False)
     vendor_id = Column(String(50), ForeignKey("vendors.id"), nullable=False)
 
-    
     # Relationships
     category_one_rel = relationship("Category", foreign_keys=[category_one])
     category_two_rel = relationship("Category", foreign_keys=[category_two])
@@ -40,4 +39,13 @@ class Item(Base):
     pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
     penjualan_items  = relationship("PenjualanItem", back_populates="item_rel")
     pembayaran_items  = relationship("PembayaranItem", back_populates="item_rel")
+
+    @property
+    def primary_image_url(self) -> str | None:
+        if self.attachments:
+            for att in self.attachments:
+                if att.parent_type.name == "ITEMS":
+                    return att.url
+            return self.attachments[0].url
+        return None
 
