@@ -1,4 +1,5 @@
 import enum
+from typing import Optional
 
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime, DECIMAL, Enum
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -106,7 +107,7 @@ class PembelianItem(Base):
     item_rel = relationship("Item", back_populates="pembelian_items")
 
     @property
-    def image_url(self) -> str | None:
+    def image_url(self) -> Optional[str]:
         """
         Prefer the first attachment uploaded for this Item (ParentType.ITEMS).
         Falls back to None if no item image exists.
