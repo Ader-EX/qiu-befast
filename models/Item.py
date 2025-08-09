@@ -1,4 +1,5 @@
 
+from typing import Optional
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime,Enum
 from database import Base
 from sqlalchemy.orm import relationship
@@ -41,7 +42,7 @@ class Item(Base):
     pembayaran_items  = relationship("PembayaranItem", back_populates="item_rel")
 
     @property
-    def primary_image_url(self) -> str | None:
+    def primary_image_url(self) -> Optional[str]:
         if self.attachments:
             for att in self.attachments:
                 if att.parent_type.name == "ITEMS":
