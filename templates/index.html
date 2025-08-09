@@ -141,6 +141,10 @@
           <div>Expense</div>
           <div>Rp {{ "{:,.0f}".format(pembelian.expense) }}</div>
         </div>
+        <div class="summary-row" style="font-weight: 400; font-size: 14px">
+          <div>Remaining</div>
+          <div>Rp {{ "{:,.0f}".format(pembelian.remaining) }}</div>
+        </div>
 
         <div class="summary-row">
           <div>Grand Total</div>
@@ -161,6 +165,8 @@
         <div class="signature-block">
           <div class="line1">Hormat kami,</div>
           <div class="line2">{{ company.name }}</div>
+          <br />
+          <br />
           <div class="line3">{{ company.representative }}</div>
         </div>
       </div>

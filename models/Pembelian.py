@@ -1,3 +1,4 @@
+from decimal import Decimal
 import enum
 from typing import Optional
 
@@ -73,6 +74,10 @@ class Pembelian(Base):
         if self.customer_rel:
             return self.customer_rel.name
         return "—"
+    
+    @hybrid_property
+    def remaining(self) -> Decimal:
+        return self.total_price - (self.total_paid + self.total_return)
 
 
     @hybrid_property

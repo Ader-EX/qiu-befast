@@ -49,38 +49,18 @@ class Item(Base):
         if not self.attachments:
             return None
 
-        # 1) prefer an image attachment for ITEMS
-        chosen = None
-       
+        chosen = self.attachments[0]  # or your custom selection logic
 
-        # 2) fallback to the first attachment if none matched
-        if chosen is None:
-            chosen = self.attachments[0]
-
-        # 3) get a path-like string
         raw_path = getattr(chosen, "file_path", None) or getattr(chosen, "path", None) or getattr(chosen, "filename", None)
         if raw_path is None:
             return None
 
-        # 4) strip leading slashes
-        normalized = raw_path.lstrip("/")
+        # Normalize path
+        relative_path = raw_path.replace("\\", "/")
+        relative_path = relative_path.lstrip("/")
+        relative_path = relative_path.replace("uploads/", "").replace("/root/backend/", "")
 
-        # 5) map DB path to /static URL
-        static_dir = (os.getenv("STATIC_URL") or "").rstrip("/")
-
-        if static_dir:
-            if normalized.startswith(static_dir + "/"):
-                relative = normalized[len(static_dir) + 1 :]
-                return f"/static/{relative}"
-            if normalized == static_dir:
-                return "/static/"
-        
-        # common case: "uploads/..." -> "/static/..."
-        if normalized.startswith("uploads/"):
-            relative = normalized.split("uploads/", 1)[1]
-            return f"/static/{relative}"
-
-        # fallback
-        return f"/static/{normalized}"
+        base_url = os.environ.get("BASE_URL", "http://localhost:8000")
+        return f"{base_url}/static/{relative_path}"
 
 

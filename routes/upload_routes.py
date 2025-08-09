@@ -104,9 +104,15 @@ async def view_invoice_html(pembelian_id: int, request: Request, db: Session = D
     if not pembelian:
         raise HTTPException(status_code=404, detail="Pembelian not found")
 
+    BASE_URL = os.getenv("BASE_URL", "")
+
     # Create enhanced items data with image URLs
     enhanced_items = []
     for item in pembelian.pembelian_items:
+        for item in pembelian.pembelian_items:
+            img_url = item.item_rel.primary_image_url
+            if img_url and not img_url.startswith("http"):
+                img_url = f"{BASE_URL}{img_url}"
         enhanced_item = {
             'item': item,
             'image_url': item.item_rel.primary_image_url,
@@ -124,7 +130,7 @@ async def view_invoice_html(pembelian_id: int, request: Request, db: Session = D
         {
             "request": request,
             "pembelian": pembelian,
-            "enhanced_items": enhanced_items,  # Use this in template instead
+            "enhanced_items": enhanced_items,  
             "totals": calculate_pembelian_totals(db, pembelian_id),
             "company": {
                 "name": "PT. Jayagiri Indo Asia",

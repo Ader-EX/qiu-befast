@@ -27,9 +27,12 @@ class PembelianItemBase(BaseModel):
         return v
 
 class PembelianItemCreate(PembelianItemBase):
+
+    item_id: int
     pass
 
 class PembelianItemUpdate(PembelianItemBase):
+    item_id: int
     pass
 
 class PembelianItemResponse(BaseModel):
