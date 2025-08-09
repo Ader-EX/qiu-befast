@@ -2,6 +2,7 @@ from decimal import Decimal
 import enum
 from typing import Optional
 
+from pydantic import validator
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime, DECIMAL, Enum
 from sqlalchemy.ext.hybrid import hybrid_property
 
@@ -54,7 +55,7 @@ class Pembelian(Base):
     customer_address = Column(Text, nullable=True)
     top_name = Column(String(255), nullable=True)
     currency_name  = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=datetime.now(), nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)  
 
     # Relationships (only active in draft mode)
     customer_rel = relationship("Customer", back_populates="pembelians")
@@ -88,6 +89,8 @@ class Pembelian(Base):
         if self.customer_rel:
             return self.customer_rel.address
         return "—"
+    
+   
 
 class PembelianItem(Base):
     __tablename__ = "pembelian_items"

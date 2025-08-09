@@ -76,41 +76,57 @@ def validate_pembelian_items_stock(db: Session, items_data: List) -> None:
             # For dictionary data
             validate_item_stock(db, item_data['item_id'], item_data['qty'])
 
-def calculate_pembelian_totals(db: Session, pembelian_id: int) -> TotalsResponse:
-    """Calculate and update pembelian totals"""
+def calculate_pembelian_totals(db: Session, pembelian_id: int):
+    items = (
+        db.query(PembelianItem)
+        .filter(PembelianItem.pembelian_id == pembelian_id)
+        .all()
+    )
+
+    q = Decimal('0')
+    sum_before = Decimal('0')
+    sum_after  = Decimal('0')
+
+    for it in items:
+        qty = Decimal(it.qty or 0)
+        unit_after = Decimal(it.unit_price or 0)
+        tax_pct = Decimal(it.tax_percentage or 0)
+
+        # unit price before tax = after / (1 + tax%)
+        before_unit = unit_after / (Decimal(1) + (tax_pct / Decimal(100)))
+
+        q += qty
+        sum_before += qty * before_unit
+        sum_after  += qty * unit_after
+
     pembelian = db.query(Pembelian).filter(Pembelian.id == pembelian_id).first()
 
-    if not pembelian:
-        raise HTTPException(status_code=404, detail="Pembelian not found")
+    discount_percent = Decimal(pembelian.discount or 0)            # % (0..100)
+    additional_discount = Decimal(pembelian.additional_discount or 0)
+    expense = Decimal(pembelian.expense or 0)
 
-    # Calculate subtotal from items
-    subtotal = sum(item.total_price for item in pembelian.pembelian_items)
-    total_qty = sum(item.qty for item in pembelian.pembelian_items)
+    tax_amount = sum_after - sum_before
+    discount_amount = (sum_before * discount_percent) / Decimal(100)
 
-    # Calculate final total: subtotal - discounts + expense
-    final_total = subtotal - pembelian.discount - pembelian.additional_discount + pembelian.expense
+    grand_total = sum_before - discount_amount - additional_discount + tax_amount + expense
 
-    # Update pembelian totals
-    pembelian.total_qty = total_qty
-    pembelian.total_price = final_total
-
+    # Persist high-level rollups if you want
+    pembelian.total_qty = int(q)
+    pembelian.total_price = grand_total
     db.commit()
 
-    tax_amount = sum(
-        (item.total_price * Decimal(item.tax_percentage or 0) / 100)
-        for item in pembelian.pembelian_items
-    )
-
-    return TotalsResponse(
-        subtotal=subtotal,
-        discount=pembelian.discount,
-        additional_discount=pembelian.additional_discount,
-        expense=pembelian.expense,
-        total_qty=total_qty,
-        final_total=final_total,
-        tax_amount=tax_amount,
-        grand_total=final_total + tax_amount
-    )
+    # IMPORTANT: return the NEW field names
+    return {
+        "subtotal_before_tax": sum_before,
+        "subtotal_after_tax": sum_after,
+        "tax_amount": tax_amount,
+        "discount_percent": discount_percent,
+        "discount_amount": discount_amount,
+        "additional_discount": additional_discount,
+        "expense": expense,
+        "total_qty": int(q),
+        "grand_total": grand_total,
+    }
 
 def finalize_pembelian(db: Session, pembelian_id: str):
     pembelian = db.query(Pembelian).options(
@@ -284,84 +300,7 @@ async def get_pembelian(pembelian_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Pembelian not found")
 
     return pembelian
-    
-@router.put("/{pembelian_id}", response_model=PembelianResponse)
-async def update_pembelian(
-        pembelian_id: str,
-        request: PembelianUpdate,
-        db: Session = Depends(get_db)
-):
-    """Update pembelian (only allowed in DRAFT status)"""
 
-    pembelian = db.query(Pembelian).filter(Pembelian.id == pembelian_id).first()
-    if not pembelian:
-        raise HTTPException(status_code=404, detail="Pembelian not found")
-
-    validate_draft_status(pembelian)
-
-    # Check unique no_pembelian if changed
-    if request.no_pembelian and request.no_pembelian != pembelian.no_pembelian:
-        existing = db.query(Pembelian).filter(
-            and_(
-                Pembelian.no_pembelian == request.no_pembelian,
-                Pembelian.id != pembelian_id
-            )
-        ).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="No pembelian already exists")
-
-    # Update pembelian fields
-    update_data = request.dict(exclude_unset=True)
-    items_data = update_data.pop('items', None)
-
-    # STOCK VALIDATION - If items are being updated, validate stock
-    if items_data is not None:
-        validate_pembelian_items_stock(db, items_data)
-
-    for field, value in update_data.items():
-        setattr(pembelian, field, value)
-
-    # Update items if provided
-    if items_data is not None:
-        # Delete existing items
-        db.query(PembelianItem).filter(PembelianItem.pembelian_id == pembelian_id).delete()
-
-        # Add new items - USE USER-PROVIDED PRICES
-        for item_request in items_data:
-            # Fetch the item to get its name and validate existence
-            item = db.query(Item).filter(Item.id == item_request.get('item_id')).first()
-            if not item:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Item with ID {item_request.get('item_id')} not found"
-                )
-
-            # USE USER-PROVIDED UNIT PRICE (don't override with item.price)
-            unit_price = Decimal(str(item_request.get('unit_price', item.price)))
-            qty = item_request['qty']
-            tax_percentage = item_request.get('tax_percentage', 0)
-            
-            # Calculate total price
-            total_price = calculate_item_total(qty, unit_price)
-
-            pembelian_item = PembelianItem(
-                pembelian_id=pembelian_id,
-                item_id=item_request.get('item_id'),
-                item_name=item.name,
-                qty=qty,
-                unit_price=unit_price,  # ← USE USER INPUT, DON'T OVERRIDE!
-                total_price=total_price,
-                tax_percentage=tax_percentage
-            )
-            db.add(pembelian_item)
-
-    db.commit()
-
-    # Recalculate totals
-    calculate_pembelian_totals(db, pembelian_id)
-
-
-    return await get_pembelian(pembelian_id, db)
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_db)):
@@ -404,7 +343,11 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
             )
 
         # USE USER-PROVIDED UNIT PRICE (with fallback to item price)
-        unit_price = item_request.unit_price if item_request.unit_price else item.price
+        unit_price = (
+        Decimal(str(item_request.unit_price))
+        if item_request.unit_price is not None
+        else Decimal(str(item.price))
+)
         total_price = calculate_item_total(item_request.qty, unit_price)
 
         pembelian_item = PembelianItem(
@@ -428,81 +371,69 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         "id": pembelian.id,
     }
 
-
 @router.put("/{pembelian_id}", response_model=PembelianResponse)
 async def update_pembelian(
-        pembelian_id: str,
-        request: PembelianUpdate,
-        db: Session = Depends(get_db)
+    pembelian_id: int,
+    request: PembelianUpdate,
+    db: Session = Depends(get_db),
 ):
-    """Update pembelian (only allowed in DRAFT status)"""
-
+    # 1) Load + guard
     pembelian = db.query(Pembelian).filter(Pembelian.id == pembelian_id).first()
     if not pembelian:
         raise HTTPException(status_code=404, detail="Pembelian not found")
-
     validate_draft_status(pembelian)
 
-    # Check unique no_pembelian if changed
+    # 2) Unique no_pembelian check
     if request.no_pembelian and request.no_pembelian != pembelian.no_pembelian:
-        existing = db.query(Pembelian).filter(
-            and_(
-                Pembelian.no_pembelian == request.no_pembelian,
-                Pembelian.id != pembelian_id
-            )
+        exists = db.query(Pembelian).filter(
+            and_(Pembelian.no_pembelian == request.no_pembelian,
+                 Pembelian.id != pembelian_id)
         ).first()
-        if existing:
+        if exists:
             raise HTTPException(status_code=400, detail="No pembelian already exists")
 
-    # Update pembelian fields
-    update_data = request.dict(exclude_unset=True)
-    items_data = update_data.pop('items', None)
-
-    # STOCK VALIDATION - If items are being updated, validate stock
-    if items_data is not None:
-        validate_pembelian_items_stock(db, items_data)
-
+    # 3) Apply simple field updates
+    update_data = request.dict(exclude_unset=True)  # or request.model_dump(exclude_unset=True) for pydantic v2
+    items_data = update_data.pop("items", None)
     for field, value in update_data.items():
         setattr(pembelian, field, value)
 
-    # Update items if provided
+    # 4) Validate items (if provided) then replace them
     if items_data is not None:
-        # Delete existing items
-        db.query(PembelianItem).filter(PembelianItem.pembelian_id == pembelian_id).delete()
+        validate_pembelian_items_stock(db, items_data)
 
-        # Add new items - USE USER-PROVIDED PRICES
-        for item_request in items_data:
-            # Fetch the item to get its name and validate existence
-            item = db.query(Item).filter(Item.id == item_request.get('item_id')).first()
+        db.query(PembelianItem).filter(
+            PembelianItem.pembelian_id == pembelian_id
+        ).delete()
+
+        for item_req in items_data:
+            item = db.query(Item).filter(Item.id == item_req["item_id"]).first()
             if not item:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Item with ID {item_request.get('item_id')} not found"
+                    detail=f"Item with ID {item_req['item_id']} not found",
                 )
 
-            # USE USER-PROVIDED UNIT PRICE (don't override with item.price)
-            unit_price = Decimal(str(item_request.get('unit_price', item.price)))
-            qty = item_request['qty']
-            tax_percentage = item_request.get('tax_percentage', 0)
-            
-            # Calculate total price
+            # unit_price is REQUIRED by schema on update – no fallback
+            unit_price = Decimal(str(item_req["unit_price"]))
+            qty = int(item_req["qty"])
+            tax_percentage = int(item_req.get("tax_percentage", 0))
+
             total_price = calculate_item_total(qty, unit_price)
 
-            pembelian_item = PembelianItem(
+            db.add(PembelianItem(
                 pembelian_id=pembelian_id,
-                item_id=item_request.get('item_id'),
+                item_id=item.id,
                 item_name=item.name,
                 qty=qty,
-                unit_price=unit_price, 
+                unit_price=unit_price,        
                 total_price=total_price,
-                tax_percentage=tax_percentage
-            )
-            db.add(pembelian_item)
+                tax_percentage=tax_percentage,
+            ))
 
     db.commit()
-
-    # Recalculate totals
     calculate_pembelian_totals(db, pembelian_id)
+    db.commit()
 
     return await get_pembelian(pembelian_id, db)
 
@@ -638,14 +569,14 @@ async def download_attachment(
     )
 
 @router.get("/{pembelian_id}/totals", response_model=TotalsResponse)
-async def get_totals(pembelian_id: str, db: Session = Depends(get_db)):
-    """Get calculated totals for pembelian"""
-    return calculate_pembelian_totals(db, pembelian_id)
+async def get_totals(pembelian_id: int, db: Session = Depends(get_db)):
+    data = calculate_pembelian_totals(db, pembelian_id)
+    return TotalsResponse(**data)
 
 @router.post("/{pembelian_id}/recalculate", response_model=TotalsResponse)
-async def recalculate_totals(pembelian_id: str, db: Session = Depends(get_db)):
-    """Manually recalculate totals for pembelian"""
-    return calculate_pembelian_totals(db, pembelian_id)
+async def recalc_totals(pembelian_id: int, db: Session = Depends(get_db)):
+    data = calculate_pembelian_totals(db, pembelian_id)
+    return TotalsResponse(**data)
 
 @router.delete("/{pembelian_id}", response_model=SuccessResponse)
 async def delete_pembelian(pembelian_id: str, db: Session = Depends(get_db)):

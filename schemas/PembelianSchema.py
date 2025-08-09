@@ -92,7 +92,8 @@ class PembelianBase(BaseModel):
         if v < 0:
             raise ValueError('Amount cannot be negative')
         return v
-
+    
+     
 class PembelianCreate(PembelianBase):
     items: List[PembelianItemCreate] = []
 
@@ -110,7 +111,6 @@ class PembelianUpdate(BaseModel):
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
     discount: Optional[Decimal] = None
-    tax : Optional[int] = None
     additional_discount: Optional[Decimal] = None
     expense: Optional[Decimal] = None
     items: Optional[List[PembelianItemUpdate]] = None
@@ -210,14 +210,15 @@ class SuccessResponse(BaseModel):
 
 # Totals calculation response
 class TotalsResponse(BaseModel):
-    subtotal: Decimal  # Sum of all item totals
-    discount: Decimal
-    grand_total : Decimal  # subtotal - discount
-    tax_amount : Decimal
+    subtotal_before_tax: Decimal
+    subtotal_after_tax: Decimal
+    tax_amount: Decimal
+    discount_percent: Decimal     # keep the input % for reference
+    discount_amount: Decimal
     additional_discount: Decimal
     expense: Decimal
     total_qty: int
-    final_total: Decimal  # subtotal - discount - additional_discount + expense
+    grand_total: Decimal  
 
     class Config:
         from_attributes = True
