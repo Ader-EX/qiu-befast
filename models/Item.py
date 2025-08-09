@@ -1,10 +1,13 @@
 
+import os
 from typing import Optional
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime,Enum
 from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
+
+
 
 
 class ItemTypeEnum(enum.Enum):
@@ -36,17 +39,48 @@ class Item(Base):
 
     satuan_rel = relationship("Satuan", back_populates="items")
     vendor_rel = relationship("Vendor", back_populates="items")
-    attachments = relationship("AllAttachment", back_populates="item_rel", cascade="all, delete-orphan")
+    attachments = relationship("AllAttachment", back_populates="item_rel", cascade="all, delete-orphan",   primaryjoin="and_(Item.id==foreign(AllAttachment.item_id), AllAttachment.parent_type=='ITEMS')")
     pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
     penjualan_items  = relationship("PenjualanItem", back_populates="item_rel")
     pembayaran_items  = relationship("PembayaranItem", back_populates="item_rel")
 
     @property
     def primary_image_url(self) -> Optional[str]:
-        if self.attachments:
-            for att in self.attachments:
-                if att.parent_type.name == "ITEMS":
-                    return att.url
-            return self.attachments[0].url
-        return None
+        if not self.attachments:
+            return None
+
+        # 1) prefer an image attachment for ITEMS
+        chosen = None
+       
+
+        # 2) fallback to the first attachment if none matched
+        if chosen is None:
+            chosen = self.attachments[0]
+
+        # 3) get a path-like string
+        raw_path = getattr(chosen, "file_path", None) or getattr(chosen, "path", None) or getattr(chosen, "filename", None)
+        if raw_path is None:
+            return None
+
+        # 4) strip leading slashes
+        normalized = raw_path.lstrip("/")
+
+        # 5) map DB path to /static URL
+        static_dir = (os.getenv("STATIC_URL") or "").rstrip("/")
+
+        if static_dir:
+            if normalized.startswith(static_dir + "/"):
+                relative = normalized[len(static_dir) + 1 :]
+                return f"/static/{relative}"
+            if normalized == static_dir:
+                return "/static/"
+        
+        # common case: "uploads/..." -> "/static/..."
+        if normalized.startswith("uploads/"):
+            relative = normalized.split("uploads/", 1)[1]
+            return f"/static/{relative}"
+
+        # fallback
+        return f"/static/{normalized}"
+
 

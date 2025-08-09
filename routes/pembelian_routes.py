@@ -404,13 +404,15 @@ async def update_pembelian(
             # Use the item's price instead of user input
             unit_price = item.price
             total_price = calculate_item_total(item_request['qty'], unit_price)
+            tax_percentage = item_request.get('tax_percentage', 0)
 
             pembelian_item = PembelianItem(
                 pembelian_id=pembelian_id,
                 item_id=item_request.get('item_id'),
                 qty=item_request['qty'],
                 unit_price=unit_price,  # Use item's price
-                total_price=total_price
+                total_price=total_price,
+                tax_percentage=tax_percentage
             )
             db.add(pembelian_item)
 

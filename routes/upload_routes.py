@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends
 from fastapi import Depends
 from sqlalchemy.orm import Session
 from database import get_db
+
 from models.Item import Item
 from models.Pembelian import Pembelian, PembelianItem
 from routes.pembelian_routes import calculate_pembelian_totals
@@ -24,6 +25,7 @@ from fastapi.responses import FileResponse
 from jinja2 import Environment, FileSystemLoader
 import tempfile
 import os
+from sqlalchemy.orm import joinedload
 
 
 router = APIRouter()
@@ -86,13 +88,64 @@ def upload_image(
         "url": f"/static/items/{filename}"
     }
 
-
-
-
 @router.get("/{pembelian_id}/invoice/html", response_class=HTMLResponse)
 async def view_invoice_html(pembelian_id: int, request: Request, db: Session = Depends(get_db)):
+    pembelian = (
+        db.query(Pembelian)
+        .options(
+            joinedload(Pembelian.pembelian_items)
+            .joinedload(PembelianItem.item_rel)
+            .joinedload(Item.attachments)
+        )
+        .filter(Pembelian.id == pembelian_id)
+        .first()
+    )
 
-    from sqlalchemy.orm import joinedload
+    if not pembelian:
+        raise HTTPException(status_code=404, detail="Pembelian not found")
+
+    # Create enhanced items data with image URLs
+    enhanced_items = []
+    for item in pembelian.pembelian_items:
+        enhanced_item = {
+            'item': item,
+            'image_url': item.item_rel.primary_image_url,
+            'item_name': item.item_name,
+            'qty': item.qty,
+            'satuan_name': item.satuan_name,
+            'tax_percentage': item.tax_percentage,
+            'unit_price': item.unit_price,
+            'total_price': item.total_price
+        }
+        enhanced_items.append(enhanced_item)
+
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "pembelian": pembelian,
+            "enhanced_items": enhanced_items,  # Use this in template instead
+            "totals": calculate_pembelian_totals(db, pembelian_id),
+            "company": {
+                "name": "PT. Jayagiri Indo Asia",
+                "logo_url": "static/logo.png",
+                "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
+                "website": "www.qiupart.com",
+                "bank_name": "Bank Mandiri",
+                "account_name": "PT. JAYAGIRI INDO ASIA",
+                "account_number": "167-00-07971095",
+                "representative": "AMAR",
+            },
+            "css": open("templates/invoice.css").read(),
+        },
+    )
+
+
+
+@router.get("/{pembelian_id}/invoice/check")
+async def view_invoice_html(pembelian_id: int, db: Session = Depends(get_db)):
+
+
     pembelian = (
         db.query(Pembelian)
         .options(
@@ -106,29 +159,17 @@ async def view_invoice_html(pembelian_id: int, request: Request, db: Session = D
     if not pembelian:
         raise HTTPException(status_code=404, detail="Pembelian not found")
 
-    totals = calculate_pembelian_totals(db, pembelian_id)
+    # Extract image URLs from attachments
+    images = []
+    for pembelian_item in pembelian.pembelian_items:
+        for attachment in pembelian_item.item_rel.attachments:
+            images.append({
+                "item_id": pembelian_item.item_rel.id,
+                "filename": attachment.filename,
+                "url": attachment.url  # adjust field name as per your model
+            })
 
-    company = {
-        "name": "PT. Jayagiri Indo Asia",
-        "logo_url": "static/logo.png",
-        "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
-        "website": "www.qiupart.com",
-        "bank_name": "Bank Mandiri",
-        "account_name": "PT. JAYAGIRI INDO ASIA",
-        "account_number": "167-00-07971095",
-        "representative": "AMAR",
+    return {
+        "pembelian_id": pembelian.id,
+        "images": images
     }
-
-    with open("templates/invoice.css") as css_file:
-        css_content = css_file.read()
-
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "pembelian": pembelian,
-            "totals": totals,
-            "company": company,
-            "css": css_content,
-        },
-    )

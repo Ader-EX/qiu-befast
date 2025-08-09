@@ -1,149 +1,169 @@
 <!DOCTYPE html>
 <html lang="id">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Invoice {{ pembelian.no_pembelian }}</title>
-  <style>
-    {{ css|safe }}
-  </style>
-
-</head>
-<body>
-<div class="invoice-container">
-  <!-- HEADER -->
-  <div class="header">
-    <img src="{{ company.logo_url }}" alt="Logo" style="width:150px; height:auto;">
-    <div class="header-right">
-      <div>{{ company.address }}</div>
-      <div>{{ company.website }}</div>
-    </div>
-  </div>
-
-  <hr class="divider">
-  <h1>Invoice</h1>
-
-  <!-- INFO SECTION -->
-  <div class="info-section">
-    <div class="info-block">
-      <div class="title">Informasi Invoice</div>
-      <div class="info-row">
-        <div class="label">Nomor Faktur</div>
-        <div class="value">{{ pembelian.no_pembelian }}</div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Invoice {{ pembelian.no_pembelian }}</title>
+    <style>
+      {{ css|safe }}
+    </style>
+  </head>
+  <body>
+    <div class="invoice-container">
+      <!-- HEADER -->
+      <div class="header">
+        <img
+          src="{{ url_for('static', path='logo.png') }}"
+          style="width: 150px; height: auto"
+          alt="Logo"
+        />
+        <div class="header-right">
+          <div>{{ company.address }}</div>
+          <div>{{ company.website }}</div>
+        </div>
       </div>
-      <div class="info-row">
-        <div class="label">Tanggal Terbit</div>
-        <div class="value">{{ pembelian.sales_date.strftime('%d-%m-%Y') }}</div>
+
+      <hr class="divider" />
+      <h1>Invoice</h1>
+
+      <!-- INFO SECTION -->
+      <div class="info-section">
+        <div class="info-block">
+          <div class="title">Informasi Invoice</div>
+          <div class="info-row">
+            <div class="label">Nomor Faktur</div>
+            <div class="value">{{ pembelian.no_pembelian }}</div>
+          </div>
+          <div class="info-row">
+            <div class="label">Tanggal Terbit</div>
+            <div class="value">
+              {{ pembelian.sales_date.strftime('%d-%m-%Y') }}
+            </div>
+          </div>
+          <div class="info-row">
+            <div class="label">Tanggal Jatuh Tempo</div>
+            <div class="value">
+              {{ pembelian.sales_due_date.strftime('%d-%m-%Y') }}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-block">
+          <div class="title">Kpd Yth.</div>
+          <div class="info-row">
+            <div class="label">Nama Customer</div>
+            <div class="value">{{ pembelian.customer_display }}</div>
+          </div>
+          <div class="info-row">
+            <div class="label">Alamat</div>
+            <div class="value">
+              {{ pembelian.customer_address_display if
+              pembelian.customer_address_display else '-' }}
+            </div>
+          </div>
+          <div class="info-row">
+            <div class="label">Status</div>
+            <div class="value">{{ pembelian.status_pembayaran.value }}</div>
+          </div>
+        </div>
       </div>
-      <div class="info-row">
-        <div class="label">Tanggal Jatuh Tempo</div>
-        <div class="value">{{ pembelian.sales_due_date.strftime('%d-%m-%Y') }}</div>
+
+      <!-- ITEMS TABLE -->
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Nama Barang</th>
+              <th>QTY</th>
+              <th>Satuan</th>
+              <th>Pajak (%)</th>
+              <th>Harga Satuan (IDR)</th>
+              <th>Nominal (IDR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in pembelian.pembelian_items %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td style="display: flex; align-items: center; gap: 12px">
+                <img
+                  src="{{ item.item_rel.primary_image_url }}"
+                  alt="Product"
+                  style="width: 60px; height: 60px"
+                />
+                <span>{{ item.item_name }}</span>
+              </td>
+              <td style="text-align: center">{{ item.qty }}</td>
+              <td style="text-align: center">{{ item.satuan_name or '-' }}</td>
+              <td style="text-align: center">{{ item.tax_percentage or 0 }}</td>
+              <td style="text-align: right">
+                Rp {{ "{:,.0f}".format(item.unit_price) }}
+              </td>
+              <td style="text-align: right">
+                Rp {{ "{:,.0f}".format(item.total_price) }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- TOTALS -->
+      <div class="totals-section">
+        <div class="totals-title">Total Invoice</div>
+        <div class="totals-row">
+          <div class="label">Sub Total</div>
+          <div class="value">Rp {{ "{:,.0f}".format(totals.subtotal) }}</div>
+        </div>
+        <div class="totals-row">
+          <div class="label">Discount</div>
+          <div class="value">Rp {{ "{:,.0f}".format(pembelian.discount) }}</div>
+        </div>
+        <div class="totals-row">
+          <div class="label">Additional Discount</div>
+          <div class="value destructive">
+            Rp {{ "{:,.0f}".format(pembelian.additional_discount) }}
+          </div>
+        </div>
+
+        <div style="height: 16px"></div>
+
+        <div class="summary-row">
+          <div>Total</div>
+          <div>Rp {{ "{:,.0f}".format(totals.final_total) }}</div>
+        </div>
+        <div class="summary-row" style="font-weight: 400; font-size: 14px">
+          <div>Pajak</div>
+          <div>Rp {{ "{:,.0f}".format(totals.tax_amount) }}</div>
+        </div>
+        <div class="summary-row" style="font-weight: 400; font-size: 14px">
+          <div>Expense</div>
+          <div>Rp {{ "{:,.0f}".format(pembelian.expense) }}</div>
+        </div>
+
+        <div class="summary-row">
+          <div>Grand Total</div>
+          <div>Rp {{ "{:,.0f}".format(totals.grand_total) }}</div>
+        </div>
+      </div>
+
+      <!-- PAYMENT INFO -->
+      <div class="payment">
+        Mohon melakukan pembayaran ke rekening berikut:<br />
+        • Nama Bank: {{ company.bank_name }}<br />
+        • Nama Penerima: {{ company.account_name }}<br />
+        • No. Rekening: {{ company.account_number }}
+      </div>
+
+      <!-- SIGNATURE -->
+      <div class="signature">
+        <div class="signature-block">
+          <div class="line1">Hormat kami,</div>
+          <div class="line2">{{ company.name }}</div>
+          <div class="line3">{{ company.representative }}</div>
+        </div>
       </div>
     </div>
-
-    <div class="info-block">
-      <div class="title">Kpd Yth.</div>
-      <div class="info-row">
-        <div class="label">Nama Customer</div>
-        <div class="value">{{ pembelian.customer_display }}</div>
-      </div>
-      <div class="info-row">
-        <div class="label">Alamat</div>
-        <div class="value">{{ pembelian.customer_address_display if pembelian.customer_address_display else '-' }}</div>
-      </div>
-      <div class="info-row">
-        <div class="label">Status</div>
-        <div class="value">{{ pembelian.status_pembayaran.value }}</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ITEMS TABLE -->
-  <div class="table-wrapper">
-    <table>
-      <thead>
-      <tr>
-        <th>No</th>
-        <th>Nama Barang</th>
-        <th>QTY</th>
-        <th>Satuan</th>
-        <th>Pajak (%)</th>
-        <th>Harga Satuan (IDR)</th>
-        <th>Nominal (IDR)</th>
-      </tr>
-      </thead>
-      <tbody>
-      {% for item in pembelian.pembelian_items %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td style="display:flex; align-items:center; gap:12px;">
-          <img src="{{ item.image_url or 'Image.png' }}" alt="Product" style="width:60px; height:60px;">
-          <span>{{ item.item_name }}</span>
-        </td>
-        <td style="text-align:center;">{{ item.qty }}</td>
-        <td style="text-align:center;">{{ item.satuan_name or '-' }}</td>
-        <td style="text-align:center;">{{ item.tax_percentage or 0 }}</td>
-        <td style="text-align:right;">Rp {{ "{:,.0f}".format(item.unit_price) }}</td>
-        <td style="text-align:right;">Rp {{ "{:,.0f}".format(item.total_price) }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <!-- TOTALS -->
-  <div class="totals-section">
-    <div class="totals-title">Total Invoice</div>
-    <div class="totals-row">
-      <div class="label">Sub Total</div>
-      <div class="value">Rp {{ "{:,.0f}".format(totals.subtotal) }}</div>
-    </div>
-    <div class="totals-row">
-      <div class="label">Discount</div>
-      <div class="value">Rp {{ "{:,.0f}".format(pembelian.discount) }}</div>
-    </div>
-    <div class="totals-row">
-      <div class="label">Additional Discount</div>
-      <div class="value destructive">Rp {{ "{:,.0f}".format(pembelian.additional_discount) }}</div>
-    </div>
-
-    <div style="height:16px;"></div>
-
-    <div class="summary-row">
-      <div>Total</div>
-      <div>Rp {{ "{:,.0f}".format(totals.final_total) }}</div>
-    </div>
-    <div class="summary-row" style="font-weight:400; font-size:14px;">
-      <div>Pajak</div>
-      <div>Rp {{ "{:,.0f}".format(totals.tax_amount) }}</div>
-    </div>
-    <div class="summary-row" style="font-weight:400; font-size:14px;">
-      <div>Expense</div>
-      <div>Rp {{ "{:,.0f}".format(pembelian.expense) }}</div>
-    </div>
-
-    <div class="summary-row">
-      <div>Grand Total</div>
-      <div>Rp {{ "{:,.0f}".format(totals.grand_total) }}</div>
-    </div>
-  </div>
-
-  <!-- PAYMENT INFO -->
-  <div class="payment">
-    Mohon melakukan pembayaran ke rekening berikut:<br>
-    • Nama Bank: {{ company.bank_name }}<br>
-    • Nama Penerima: {{ company.account_name }}<br>
-    • No. Rekening: {{ company.account_number }}
-  </div>
-
-  <!-- SIGNATURE -->
-  <div class="signature">
-    <div class="signature-block">
-      <div class="line1">Hormat kami,</div>
-      <div class="line2">{{ company.name }}</div>
-      <div class="line3">{{ company.representative }}</div>
-    </div>
-  </div>
-</div>
-</body>
+  </body>
 </html>
