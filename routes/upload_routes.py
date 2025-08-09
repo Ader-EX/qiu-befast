@@ -22,7 +22,6 @@ from routes.pembelian_routes import calculate_pembelian_totals
 from utils import resolve_css_vars
 from fastapi.responses import FileResponse
 from jinja2 import Environment, FileSystemLoader
-from xhtml2pdf import pisa
 import tempfile
 import os
 
