@@ -9,6 +9,10 @@
     </style>
   </head>
   <body>
+    {# Currency macro; change to .replace(",", ".") if you want Indo separators
+    #} {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float)
+    }} {%- endmacro %}
+
     <div class="invoice-container">
       <!-- HEADER -->
       <div class="header">
@@ -37,13 +41,15 @@
           <div class="info-row">
             <div class="label">Tanggal Terbit</div>
             <div class="value">
-              {{ pembelian.sales_date.strftime('%d-%m-%Y') }}
+              {{ pembelian.sales_date.strftime('%d-%m-%Y') if
+              pembelian.sales_date else '-' }}
             </div>
           </div>
           <div class="info-row">
             <div class="label">Tanggal Jatuh Tempo</div>
             <div class="value">
-              {{ pembelian.sales_due_date.strftime('%d-%m-%Y') }}
+              {{ pembelian.sales_due_date.strftime('%d-%m-%Y') if
+              pembelian.sales_due_date else '-' }}
             </div>
           </div>
         </div>
@@ -63,7 +69,10 @@
           </div>
           <div class="info-row">
             <div class="label">Status</div>
-            <div class="value">{{ pembelian.status_pembayaran.value }}</div>
+            <div class="value">
+              {{ pembelian.status_pembayaran.value if
+              pembelian.status_pembayaran else '-' }}
+            </div>
           </div>
         </div>
       </div>
@@ -83,26 +92,23 @@
             </tr>
           </thead>
           <tbody>
-            {% for item in pembelian.pembelian_items %}
+            {# Use enhanced_items so image_url is already absolute/prefixed #}
+            {% for row in enhanced_items %}
             <tr>
               <td>{{ loop.index }}</td>
               <td style="display: flex; align-items: center; gap: 12px">
                 <img
-                  src="{{ item.item_rel.primary_image_url }}"
+                  src="{{ row.image_url }}"
                   alt="Product"
-                  style="width: 60px; height: 60px"
+                  style="width: 60px; height: 60px; object-fit: cover"
                 />
-                <span>{{ item.item_name }}</span>
+                <span>{{ row.item_name }}</span>
               </td>
-              <td style="text-align: center">{{ item.qty }}</td>
-              <td style="text-align: center">{{ item.satuan_name or '-' }}</td>
-              <td style="text-align: center">{{ item.tax_percentage or 0 }}</td>
-              <td style="text-align: right">
-                Rp {{ "{:,.0f}".format(item.unit_price) }}
-              </td>
-              <td style="text-align: right">
-                Rp {{ "{:,.0f}".format(item.total_price) }}
-              </td>
+              <td style="text-align: center">{{ row.qty }}</td>
+              <td style="text-align: center">{{ row.satuan_name or '-' }}</td>
+              <td style="text-align: center">{{ row.tax_percentage or 0 }}</td>
+              <td style="text-align: right">{{ idr(row.unit_price) }}</td>
+              <td style="text-align: right">{{ idr(row.total_price) }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -112,18 +118,21 @@
       <!-- TOTALS -->
       <div class="totals-section">
         <div class="totals-title">Total Invoice</div>
+
         <div class="totals-row">
           <div class="label">Sub Total</div>
-          <div class="value">Rp {{ "{:,.0f}".format(totals.subtotal) }}</div>
+          <div class="value">{{ idr(totals.subtotal) }}</div>
         </div>
+
         <div class="totals-row">
           <div class="label">Discount</div>
-          <div class="value">Rp {{ "{:,.0f}".format(pembelian.discount) }}</div>
+          <div class="value">{{ idr(pembelian.discount) }}</div>
         </div>
+
         <div class="totals-row">
           <div class="label">Additional Discount</div>
           <div class="value destructive">
-            Rp {{ "{:,.0f}".format(pembelian.additional_discount) }}
+            {{ idr(pembelian.additional_discount) }}
           </div>
         </div>
 
@@ -131,24 +140,24 @@
 
         <div class="summary-row">
           <div>Total</div>
-          <div>Rp {{ "{:,.0f}".format(totals.final_total) }}</div>
+          <div>{{ idr(totals.final_total) }}</div>
         </div>
         <div class="summary-row" style="font-weight: 400; font-size: 14px">
           <div>Pajak</div>
-          <div>Rp {{ "{:,.0f}".format(totals.tax_amount) }}</div>
+          <div>{{ idr(totals.tax_amount) }}</div>
         </div>
         <div class="summary-row" style="font-weight: 400; font-size: 14px">
           <div>Expense</div>
-          <div>Rp {{ "{:,.0f}".format(pembelian.expense) }}</div>
+          <div>{{ idr(pembelian.expense) }}</div>
         </div>
         <div class="summary-row" style="font-weight: 400; font-size: 14px">
           <div>Remaining</div>
-          <div>Rp {{ "{:,.0f}".format(pembelian.remaining) }}</div>
+          <div>{{ idr(pembelian.remaining) }}</div>
         </div>
 
         <div class="summary-row">
           <div>Grand Total</div>
-          <div>Rp {{ "{:,.0f}".format(totals.grand_total) }}</div>
+          <div>{{ idr(totals.grand_total) }}</div>
         </div>
       </div>
 
@@ -165,8 +174,7 @@
         <div class="signature-block">
           <div class="line1">Hormat kami,</div>
           <div class="line2">{{ company.name }}</div>
-          <br />
-          <br />
+          <br /><br />
           <div class="line3">{{ company.representative }}</div>
         </div>
       </div>

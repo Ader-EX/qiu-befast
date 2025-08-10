@@ -4,11 +4,12 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
-from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
+from models.Pembelian import StatusPembelianEnum
+from models.Penjualan import StatusPembayaranEnum, StatusPembelianEnum
 
 
 # Base schemas
-class PembelianItemBase(BaseModel):
+class PenjualanItemBase(BaseModel):
     item_id: Optional[int] = None
     qty: int
     unit_price: Decimal
@@ -26,18 +27,18 @@ class PembelianItemBase(BaseModel):
             raise ValueError('Unit price cannot be negative')
         return v
 
-class PembelianItemCreate(PembelianItemBase):
+class PenjualanItemCreate(PenjualanItemBase):
 
     item_id: int
     pass
 
-class PembelianItemUpdate(PembelianItemBase):
+class PenjualanItemUpdate(PenjualanItemBase):
     item_id: int
     pass
 
-class PembelianItemResponse(BaseModel):
+class PenjualanItemResponse(BaseModel):
     id: int
-    pembelian_id: int
+    penjualan_id: int
 
     # Draft mode fields
     item_id: Optional[int] = None
@@ -70,10 +71,10 @@ class AttachmentResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class PembelianBase(BaseModel):
-    no_pembelian: str
+class PenjualanBase(BaseModel):
+    no_penjualan: str
     warehouse_id: Optional[int] = None
-    vendor_id: Optional[str] = None  # Changed: vendor_id instead of customer_id
+    customer_id: Optional[str] = None
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
@@ -81,10 +82,10 @@ class PembelianBase(BaseModel):
     additional_discount: Optional[Decimal] = Decimal('0.00')
     expense: Optional[Decimal] = Decimal('0.00')
 
-    @validator('no_pembelian')
-    def validate_no_pembelian(cls, v):
+    @validator('no_penjualan')
+    def validate_no_penjualan(cls, v):
         if not v or v.strip() == "":
-            raise ValueError('No pembelian cannot be empty')
+            raise ValueError('No Penjualan cannot be empty')
         return v.strip()
 
     @validator('discount', 'additional_discount', 'expense')
@@ -94,8 +95,8 @@ class PembelianBase(BaseModel):
         return v
     
      
-class PembelianCreate(PembelianBase):
-    items: List[PembelianItemCreate] = []
+class PenjualanCreate(PenjualanBase):
+    items: List[PenjualanItemCreate] = []
 
     @validator('items')
     def validate_items(cls, v):
@@ -103,22 +104,22 @@ class PembelianCreate(PembelianBase):
             raise ValueError('At least one item is required')
         return v
 
-class PembelianUpdate(BaseModel):
-    no_pembelian: Optional[str] = None
+class PenjualanUpdate(BaseModel):
+    no_penjualan: Optional[str] = None
     warehouse_id: Optional[int] = None
-    vendor_id: Optional[str] = None  # Changed: vendor_id instead of customer_id
+    customer_id: Optional[str] = None
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
     discount: Optional[Decimal] = None
     additional_discount: Optional[Decimal] = None
     expense: Optional[Decimal] = None
-    items: Optional[List[PembelianItemUpdate]] = None
+    items: Optional[List[PenjualanItemUpdate]] = None
 
-    @validator('no_pembelian')
-    def validate_no_pembelian(cls, v):
+    @validator('no_penjualan')
+    def validate_no_penjualan(cls, v):
         if v is not None and (not v or v.strip() == ""):
-            raise ValueError('No pembelian cannot be empty')
+            raise ValueError('No Penjualan cannot be empty')
         return v.strip() if v else v
 
     @validator('discount', 'additional_discount', 'expense')
@@ -127,11 +128,11 @@ class PembelianUpdate(BaseModel):
             raise ValueError('Amount cannot be negative')
         return v
 
-class PembelianResponse(BaseModel):
+class PenjualanResponse(BaseModel):
     id: int
-    no_pembelian: str
+    no_penjualan: str
     status_pembayaran: StatusPembayaranEnum
-    status_pembelian: StatusPembelianEnum
+    status_penjualan: StatusPembelianEnum
 
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
@@ -145,39 +146,39 @@ class PembelianResponse(BaseModel):
 
     # Draft mode fields
     warehouse_id: Optional[int] = None
-    vendor_id: Optional[str] = None  # Changed: vendor_id instead of customer_id
+    customer_id: Optional[str] = None
     top_id: Optional[int] = None
 
     # Finalized mode fields
     warehouse_name: Optional[str] = None
-    vendor_name: Optional[str] = None  # Changed: vendor_name instead of customer_name
-    vendor_address: Optional[str] = None  # Added: vendor_address
+    customer_name: Optional[str] = None
     top_name: Optional[str] = None
     currency_name: Optional[str] = None
 
+
     # Related data
-    items: List[PembelianItemResponse] = Field(default_factory=list, alias="pembelian_items")
+    items: List[PenjualanItemResponse] = Field(default_factory=list, alias="penjualan_items")
     attachments: List[AttachmentResponse] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
 
-class PembelianStatusUpdate(BaseModel):
-    status_pembelian: Optional[StatusPembelianEnum] = None
+class PenjualanStatusUpdate(BaseModel):
+    status_Penjualan: Optional[StatusPembelianEnum] = None
     status_pembayaran: Optional[StatusPembayaranEnum] = None
 
-class PembelianListResponse(BaseModel):
+class PenjualanListResponse(BaseModel):
     id: int
-    no_pembelian: str
+    no_penjualan: str
     status_pembayaran: StatusPembayaranEnum
-    status_pembelian: StatusPembelianEnum
+    status_Penjualan: StatusPembelianEnum
     sales_date: Optional[datetime] = None
     total_qty: int
     total_price: Decimal
     total_paid: Decimal
 
-    # Vendor info (draft or finalized) - Changed: vendor instead of customer
-    vendor_name: Optional[str] = None
+    # Customer info (draft or finalized)
+    customer_name: Optional[str] = None
 
     # Warehouse info (draft or finalized)
     warehouse_name: Optional[str] = None

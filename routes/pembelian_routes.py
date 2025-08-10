@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from database import get_db
 from models.Pembayaran import  Pembayaran
-from models.Customer import Customer
+from models.Vendor import Vendor  # Changed from Customer to Vendor
 from models.Item import Item
 from models.Pembelian import Pembelian, StatusPembelianEnum,PembelianItem, StatusPembayaranEnum
 from models.AllAttachment import ParentType, AllAttachment
@@ -131,7 +131,7 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int):
 def finalize_pembelian(db: Session, pembelian_id: str):
     pembelian = db.query(Pembelian).options(
         selectinload(Pembelian.warehouse_rel),
-        selectinload(Pembelian.customer_rel).selectinload(Customer.curr_rel),  # Load currency relationship
+        selectinload(Pembelian.vend_rel).selectinload(Vendor.curr_rel),  # Changed: Load vendor with currency relationship
         selectinload(Pembelian.top_rel),
         selectinload(Pembelian.pembelian_items).selectinload(PembelianItem.item_rel)
     ).filter(Pembelian.id == pembelian_id).first()
@@ -142,9 +142,9 @@ def finalize_pembelian(db: Session, pembelian_id: str):
     if pembelian.status_pembelian != StatusPembelianEnum.DRAFT:
         raise HTTPException(status_code=400, detail="Can only finalize DRAFT pembelians")
 
-    # Validate required fields
-    if not pembelian.warehouse_id or not pembelian.customer_id:
-        raise HTTPException(status_code=400, detail="Warehouse and Customer are required for finalization")
+    # Validate required fields - Changed: vendor_id instead of customer_id
+    if not pembelian.warehouse_id or not pembelian.vendor_id:
+        raise HTTPException(status_code=400, detail="Warehouse and Vendor are required for finalization")
 
     if not pembelian.pembelian_items:
         raise HTTPException(status_code=400, detail="At least one item is required for finalization")
@@ -156,13 +156,13 @@ def finalize_pembelian(db: Session, pembelian_id: str):
     # Copy master data names
     if pembelian.warehouse_rel:
         pembelian.warehouse_name = pembelian.warehouse_rel.name
-    if pembelian.customer_rel:
-        pembelian.customer_name = pembelian.customer_rel.name
-        pembelian.customer_address = pembelian.customer_rel.address
+    if pembelian.vend_rel:  # Changed: vendor instead of customer
+        pembelian.vendor_name = pembelian.vend_rel.name
+        pembelian.vendor_address = pembelian.vend_rel.address
 
-        # Get currency name from customer's currency relationship
-        if pembelian.customer_rel.curr_rel:
-            pembelian.currency_name = pembelian.customer_rel.curr_rel.name
+        # Get currency name from vendor's currency relationship
+        if pembelian.vend_rel.curr_rel:
+            pembelian.currency_name = pembelian.vend_rel.curr_rel.name
     if pembelian.top_rel:
         pembelian.top_name = pembelian.top_rel.name
 
@@ -220,7 +220,7 @@ def save_uploaded_file(file: UploadFile, pembelian_id: str) -> str:
 async def get_all_pembelian(
         status_pembelian: Optional[StatusPembelianEnum] = Query(None),
         status_pembayaran: Optional[StatusPembayaranEnum] = Query(None),
-        customer_id: Optional[str] = Query(None),
+        vendor_id: Optional[str] = Query(None),  # Changed: vendor_id instead of customer_id
         warehouse_id: Optional[int] = Query(None),
         page: int = Query(1, ge=1),
         size: int = Query(50, ge=1, le=100),
@@ -231,7 +231,7 @@ async def get_all_pembelian(
     query = db.query(Pembelian).options(
         selectinload(Pembelian.pembelian_items),
         selectinload(Pembelian.attachments),
-        selectinload(Pembelian.customer_rel),
+        selectinload(Pembelian.vend_rel),  # Changed: vendor relationship
         selectinload(Pembelian.warehouse_rel)
     )
 
@@ -240,8 +240,8 @@ async def get_all_pembelian(
         query = query.filter(Pembelian.status_pembelian == status_pembelian)
     if status_pembayaran is not None and status_pembayaran != StatusPembayaranEnum.ALL:
         query = query.filter(Pembelian.status_pembayaran == status_pembayaran)
-    if customer_id:
-        query = query.filter(Pembelian.customer_id == customer_id)
+    if vendor_id:  # Changed: vendor_id filter
+        query = query.filter(Pembelian.vendor_id == vendor_id)
     if warehouse_id:
         query = query.filter(Pembelian.warehouse_id == warehouse_id)
 
@@ -252,10 +252,10 @@ async def get_all_pembelian(
     # Transform response to include calculated fields
     result = []
     for pembelian in pembelians:
-        # Determine customer name (draft or finalized)
-        customer_name = pembelian.customer_name
-        if not customer_name and pembelian.customer_rel:
-            customer_name = pembelian.customer_rel.name
+        # Determine vendor name (draft or finalized) - Changed
+        vendor_name = pembelian.vendor_name
+        if not vendor_name and pembelian.vend_rel:
+            vendor_name = pembelian.vend_rel.name
 
         # Determine warehouse name (draft or finalized)
         warehouse_name = pembelian.warehouse_name
@@ -271,7 +271,7 @@ async def get_all_pembelian(
             "total_paid": pembelian.total_paid.quantize(Decimal('0.0001')),
             "total_qty": pembelian.total_qty,
             "total_price": pembelian.total_price.quantize(Decimal('0.0001')),
-            "customer_name": customer_name,
+            "vendor_name": vendor_name,  # Changed: vendor_name instead of customer_name
             "warehouse_name": warehouse_name,
             "items_count": len(pembelian.pembelian_items),
             "attachments_count": len(pembelian.attachments)
@@ -291,7 +291,7 @@ async def get_pembelian(pembelian_id: str, db: Session = Depends(get_db)):
     pembelian = db.query(Pembelian).options(
         selectinload(Pembelian.pembelian_items).selectinload(PembelianItem.item_rel),
         selectinload(Pembelian.attachments),
-        selectinload(Pembelian.customer_rel),
+        selectinload(Pembelian.vend_rel),  # Changed: vendor relationship
         selectinload(Pembelian.warehouse_rel),
         selectinload(Pembelian.top_rel)
     ).filter(Pembelian.id == pembelian_id).first()
@@ -319,7 +319,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         id=generate_pembelian_id(),
         no_pembelian=request.no_pembelian,
         warehouse_id=request.warehouse_id,
-        customer_id=request.customer_id,
+        vendor_id=request.vendor_id,  # Changed: vendor_id instead of customer_id
         top_id=request.top_id,
         sales_date=request.sales_date,
         sales_due_date=request.sales_due_date,

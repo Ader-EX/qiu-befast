@@ -46,19 +46,19 @@ class Pembelian(Base):
     # For finalized: store names to preserve data even if master gets deleted
     # Draft mode - foreign keys (nullable when finalized)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
-    customer_id = Column(String(50), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
+    vendor_id = Column(String(50), ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
     top_id = Column(Integer, ForeignKey("term_of_payments.id", ondelete="SET NULL"), nullable=True)
 
     # Finalized mode - stored names (nullable when draft)
     warehouse_name = Column(String(255), nullable=True)
-    customer_name = Column(String(255), nullable=True)
-    customer_address = Column(Text, nullable=True)
+    vendor_name = Column(String(255), nullable=True)
+    vendor_address = Column(Text, nullable=True)
     top_name = Column(String(255), nullable=True)
     currency_name  = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.now, nullable=False)  
 
     # Relationships (only active in draft mode)
-    customer_rel = relationship("Customer", back_populates="pembelians")
+    vend_rel = relationship("Vendor", back_populates="pembelians")
     warehouse_rel = relationship("Warehouse", back_populates="pembelians")
     top_rel = relationship("TermOfPayment", back_populates="pembelians")
 
@@ -68,12 +68,12 @@ class Pembelian(Base):
     attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
 
     @hybrid_property
-    def customer_display(self) -> str:
+    def vendor_display(self) -> str:
         # draft‐mode name always wins; but if it’s empty, try the live FK
-        if self.customer_name:
-            return self.customer_name
-        if self.customer_rel:
-            return self.customer_rel.name
+        if self.vendor_name:
+            return self.vendor_name
+        if self.vendor_rel:
+            return self.vendor_rel.name
         return "—"
     
     @hybrid_property
@@ -82,12 +82,12 @@ class Pembelian(Base):
 
 
     @hybrid_property
-    def customer_address_display(self) -> str:
+    def vendor_address_display(self) -> str:
         # draft‐mode name always wins; but if it’s empty, try the live FK
-        if self.customer_address:
-            return self.customer_address
-        if self.customer_rel:
-            return self.customer_rel.address
+        if self.vendor_address:
+            return self.vendor_address
+        if self.vendor_rel:
+            return self.vendor_rel.address
         return "—"
     
    
