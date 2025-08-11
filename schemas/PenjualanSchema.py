@@ -137,26 +137,21 @@ class PenjualanResponse(BaseModel):
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
 
-    # Financial fields
     discount: Decimal
     additional_discount: Decimal
     expense: Decimal
     total_qty: int
     total_price: Decimal
 
-    # Draft mode fields
     warehouse_id: Optional[int] = None
     customer_id: Optional[str] = None
     top_id: Optional[int] = None
 
-    # Finalized mode fields
     warehouse_name: Optional[str] = None
     customer_name: Optional[str] = None
     top_name: Optional[str] = None
     currency_name: Optional[str] = None
 
-
-    # Related data
     items: List[PenjualanItemResponse] = Field(default_factory=list, alias="penjualan_items")
     attachments: List[AttachmentResponse] = Field(default_factory=list)
 
@@ -171,7 +166,7 @@ class PenjualanListResponse(BaseModel):
     id: int
     no_penjualan: str
     status_pembayaran: StatusPembayaranEnum
-    status_Penjualan: StatusPembelianEnum
+    status_penjualan: StatusPembelianEnum
     sales_date: Optional[datetime] = None
     total_qty: int
     total_price: Decimal

@@ -34,7 +34,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 # Utility Functions
 def generate_penjualan_id() -> int:
-    return random.randint(10000000, 99999999)
+    return random.randint(10000000, 999999999)
 
 def calculate_item_total(qty: int, unit_price: Decimal) -> Decimal:
     """Calculate total price for an item"""
@@ -50,22 +50,19 @@ def validate_item_stock(db: Session, item_id: str, requested_qty: int) -> None:
             detail=f"Item with ID {item_id} not found"
         )
 
-    # Get current available stock (handle None case)
     available_stock = item.total_item if item.total_item is not None else 0
 
-    # Check if we have enough stock
     if available_stock < requested_qty:
         raise HTTPException(
             status_code=400,
-            detail=f"Stock untuk item '{item.name}' tidak tersedia. Available: {available_stock}, Requested: {requested_qty}"
+            detail=f"Stock untuk item '{item.name}' tidak tersedia. Tersedia: {available_stock}, Requested: {requested_qty}"
         )
 
-    # Check if stock would go negative after deduction
     remaining_after_deduction = available_stock - requested_qty
     if remaining_after_deduction < 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Stock akan menjadi < 0 untuk item '{item.name}'. Available: {available_stock}, Requested: {requested_qty}"
+            detail=f"Stock akan menjadi < 0 untuk item '{item.name}'. Tersedia: {available_stock}, Requested: {requested_qty}"
         )
 
 def validate_penjualan_items_stock(db: Session, items_data: List) -> None:
@@ -94,7 +91,6 @@ def calculate_penjualan_totals(db: Session, penjualan_id: int):
         unit_after = Decimal(it.unit_price or 0)
         tax_pct = Decimal(it.tax_percentage or 0)
 
-        # unit price before tax = after / (1 + tax%)
         before_unit = unit_after / (Decimal(1) + (tax_pct / Decimal(100)))
 
         q += qty
@@ -103,7 +99,7 @@ def calculate_penjualan_totals(db: Session, penjualan_id: int):
 
     penjualan = db.query(Penjualan).filter(Penjualan.id == penjualan_id).first()
 
-    discount_percent = Decimal(penjualan.discount or 0)            # % (0..100)
+    discount_percent = Decimal(penjualan.discount or 0)
     additional_discount = Decimal(penjualan.additional_discount or 0)
     expense = Decimal(penjualan.expense or 0)
 
@@ -112,12 +108,10 @@ def calculate_penjualan_totals(db: Session, penjualan_id: int):
 
     grand_total = sum_before - discount_amount - additional_discount + tax_amount + expense
 
-    # Persist high-level rollups if you want
     penjualan.total_qty = int(q)
     penjualan.total_price = grand_total
     db.commit()
 
-    # IMPORTANT: return the NEW field names
     return {
         "subtotal_before_tax": sum_before,
         "subtotal_after_tax": sum_after,
@@ -130,66 +124,67 @@ def calculate_penjualan_totals(db: Session, penjualan_id: int):
         "grand_total": grand_total,
     }
 
-def finalize_penjualan(db: Session, penjualan_id: str):
-    penjualan = db.query(Penjualan).options(
-        selectinload(Penjualan.warehouse_rel),
-        selectinload(Penjualan.customer_rel).selectinload(Customer.curr_rel),  # Changed: Load vendor with currency relationship
-        selectinload(Penjualan.top_rel),
-        selectinload(Penjualan.penjualan_items).selectinload(PenjualanItem.item_rel)
-    ).filter(Penjualan.id == penjualan_id).first()
+def finalize_penjualan(db: Session, penjualan_id: int):
+    penjualan = (
+        db.query(Penjualan)
+        .options(
+            selectinload(Penjualan.warehouse_rel),
+            selectinload(Penjualan.customer_rel).selectinload(Customer.curr_rel),
+            selectinload(Penjualan.top_rel),
+            selectinload(Penjualan.penjualan_items).selectinload(PenjualanItem.item_rel),
+        )
+        .filter(Penjualan.id == penjualan_id)
+        .first()
+    )
 
     if not penjualan:
         raise HTTPException(status_code=404, detail="penjualan not found")
-
     if penjualan.status_penjualan != StatusPembelianEnum.DRAFT:
         raise HTTPException(status_code=400, detail="Can only finalize DRAFT penjualans")
-
-    # Validate required fields - Changed: customer_id instead of customer_id
     if not penjualan.warehouse_id or not penjualan.customer_id:
         raise HTTPException(status_code=400, detail="Warehouse and Customer are required for finalization")
-
     if not penjualan.penjualan_items:
         raise HTTPException(status_code=400, detail="At least one item is required for finalization")
 
-    # STOCK VALIDATION - Check stock availability for all items
-    for penjualan_item in penjualan.penjualan_items:
-        validate_item_stock(db, penjualan_item.item_id, penjualan_item.qty)
+    for it in penjualan.penjualan_items:
+        validate_item_stock(db, it.item_id, it.qty)
 
-    # Copy master data names
     if penjualan.warehouse_rel:
         penjualan.warehouse_name = penjualan.warehouse_rel.name
-    if penjualan.customer_rel:  # Changed: vendor instead of customer
-        penjualan.customer_rel = penjualan.customer_rel.name
-        penjualan.customer_rel = penjualan.customer_rel.address
 
-        # Get currency name from vendor's currency relationship
-        if penjualan.customer_rel.curr_rel:
-            penjualan.currency_name = penjualan.customer_rel.curr_rel.name
-    if penjualan.top_rel:
+    cust = penjualan.customer_rel
+    if cust:
+        if hasattr(penjualan, "customer_name"):
+            penjualan.customer_name = cust.name
+        if hasattr(penjualan, "customer_address"):
+            penjualan.customer_address = getattr(cust, "address", None)
+        if hasattr(penjualan, "currency_name") and getattr(cust, "curr_rel", None):
+            penjualan.currency_name = cust.curr_rel.name
+
+    if penjualan.top_rel and hasattr(penjualan, "top_name"):
         penjualan.top_name = penjualan.top_rel.name
 
-    # Copy item data
-    for penjualan_item in penjualan.penjualan_items:
-        if penjualan_item.item_rel:
-            item = penjualan_item.item_rel
-            penjualan_item.item_name = item.name
-            penjualan_item.item_sku = item.sku
-            penjualan_item.item_type = item.type.value if item.type else None
-            if item.satuan_rel:
-                penjualan_item.satuan_name = item.satuan_rel.name
-            if item.customer_rel:
-                penjualan_item.customer_name = item.customer_rel.name
+    for pit in penjualan.penjualan_items:
+        item = pit.item_rel
+        if item:
+            pit.item_name = item.name
+            pit.item_sku = item.sku
+            pit.item_type = item.type.value if getattr(item, "type", None) else None
+            if getattr(item, "satuan_rel", None):
+                pit.satuan_name = item.satuan_rel.name
+            if getattr(item, "customer_rel", None):
+                pit.customer_name = item.customer_rel.name
 
-    # Update item stock after validation - deduct the quantities
-    for penjualan_item in penjualan.penjualan_items:
-        item = db.query(Item).filter(Item.id == penjualan_item.item_id).first()
-        if item and item.total_item is not None:
-            # Subtract the purchased quantity from available stock
-            item.total_item = item.total_item - penjualan_item.qty
+    # Deduct stock
+    for pit in penjualan.penjualan_items:
+        item = db.query(Item).filter(Item.id == pit.item_id).first()
+        if item is not None and item.total_item is not None:
+            item.total_item = item.total_item - pit.qty
 
-    # Update status
+    # Activate
     penjualan.status_penjualan = StatusPembelianEnum.ACTIVE
     db.commit()
+
 
 def validate_draft_status(penjualan: Penjualan):
     """Validate that penjualan is in DRAFT status for editing"""
@@ -379,13 +374,11 @@ async def update_penjualan(
     request: PenjualanUpdate,
     db: Session = Depends(get_db),
 ):
-    # 1) Load + guard
     penjualan = db.query(Penjualan).filter(Penjualan.id == penjualan_id).first()
     if not penjualan:
         raise HTTPException(status_code=404, detail="penjualan not found")
     validate_draft_status(penjualan)
 
-    # 2) Unique no_penjualan check
     if request.no_penjualan and request.no_penjualan != penjualan.no_penjualan:
         exists = db.query(Penjualan).filter(
             and_(Penjualan.no_penjualan == request.no_penjualan,
@@ -394,13 +387,11 @@ async def update_penjualan(
         if exists:
             raise HTTPException(status_code=400, detail="No penjualan already exists")
 
-    # 3) Apply simple field updates
-    update_data = request.dict(exclude_unset=True)  # or request.model_dump(exclude_unset=True) for pydantic v2
+    update_data = request.dict(exclude_unset=True)
     items_data = update_data.pop("items", None)
     for field, value in update_data.items():
         setattr(penjualan, field, value)
 
-    # 4) Validate items (if provided) then replace them
     if items_data is not None:
         validate_penjualan_items_stock(db, items_data)
 
@@ -416,7 +407,6 @@ async def update_penjualan(
                     detail=f"Item with ID {item_req['item_id']} not found",
                 )
 
-            # unit_price is REQUIRED by schema on update – no fallback
             unit_price = Decimal(str(item_req["unit_price"]))
             qty = int(item_req["qty"])
             tax_percentage = int(item_req.get("tax_percentage", 0))
@@ -440,8 +430,7 @@ async def update_penjualan(
     return await get_penjualan(penjualan_id, db)
 
 @router.post("/{penjualan_id}/finalize", response_model=PenjualanResponse)
-async def finalize_penjualan_endpoint(penjualan_id: str, db: Session = Depends(get_db)):
-    """Finalize penjualan - convert from DRAFT to ACTIVE"""
+async def finalize_penjualan_endpoint(penjualan_id: int, db: Session = Depends(get_db)):
 
     finalize_penjualan(db, penjualan_id)
     return await get_penjualan(penjualan_id, db)
@@ -493,7 +482,7 @@ async def upload_attachments(
         file_path = save_uploaded_file(file, penjualan_id)
 
         attachment = AllAttachment(
-            parent_type=ParentType.penjualanS,
+            parent_type=ParentType.PENJUALANS,
             penjualan_id=penjualan_id,
             filename=file.filename,
             file_path=file_path,
