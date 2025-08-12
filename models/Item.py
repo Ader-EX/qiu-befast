@@ -33,7 +33,6 @@ class Item(Base, SoftDeleteMixin):
     satuan_id = Column(Integer, ForeignKey("satuans.id"), nullable=False)
     vendor_id = Column(String(50), ForeignKey("vendors.id", ), nullable=False)
 
-
     # Relationships
     category_one_rel = relationship("Category", foreign_keys=[category_one])
     category_two_rel = relationship("Category", foreign_keys=[category_two])

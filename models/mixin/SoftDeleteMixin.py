@@ -14,7 +14,6 @@ class SoftDeleteMixin:
         if visited is None:
             visited = set()
 
-        # Avoid reprocessing the same object
         if id(self) in visited:
             return
         visited.add(id(self))
@@ -22,7 +21,6 @@ class SoftDeleteMixin:
         self.is_deleted = True
         self.deleted_at = datetime.utcnow()
 
-        # Cascade soft delete to related objects with soft_delete method
         for attr in dir(self):
             rel = getattr(type(self), attr, None)
             if isinstance(rel, RelationshipProperty):
@@ -36,5 +34,3 @@ class SoftDeleteMixin:
                 else:
                     if hasattr(related, "soft_delete"):
                         related.soft_delete(visited)
-
-

@@ -1,21 +1,17 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
-from fastapi import Request
-
 from fastapi import APIRouter, Depends, Form, Request, UploadFile, File
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
-from starlette import status
 from starlette.exceptions import HTTPException
 import shutil
 import os
 import uuid
 from starlette.responses import FileResponse
-from fastapi.responses import JSONResponse
+
 from models.Item import Item
 from database import get_db
 from models.AllAttachment import AllAttachment,ParentType
-from routes.helper import generate_attachment_url
 from schemas.CategorySchemas import CategoryOut
 from schemas.ItemSchema import ItemResponse, ItemTypeEnum, AttachmentResponse
 from schemas.PaginatedResponseSchemas import PaginatedResponse
