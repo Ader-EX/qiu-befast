@@ -1,3 +1,4 @@
+import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -8,6 +9,7 @@ from models.Category import Category
 from schemas.CategorySchemas import CategoryOut, CategoryCreate, CategoryUpdate
 from database import get_db
 from schemas.PaginatedResponseSchemas import PaginatedResponse
+from utils import soft_delete_record
 
 router = APIRouter()
 
@@ -22,7 +24,7 @@ async def get_all_categories(
         db: Session = Depends(get_db)
 ):
 
-    query = db.query(Category)
+    query = db.query(Category).filter(Category.is_deleted == False)
 
     if  is_active is not None:
         query =  query.filter(Category.is_active == is_active)
@@ -80,6 +82,7 @@ async def delete_category(category_id: int, db: Session = Depends(get_db)):
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    db.delete(category)
+    soft_delete_record(db,Category, category_id)
     db.commit()
+
     return None

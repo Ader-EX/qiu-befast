@@ -20,11 +20,6 @@ from database import get_db
 
 from models.Item import Item
 from models.Pembelian import Pembelian, PembelianItem
-from routes.pembelian_routes import calculate_pembelian_totals
-from utils import resolve_css_vars
-from fastapi.responses import FileResponse, JSONResponse
-from jinja2 import Environment, FileSystemLoader
-import tempfile
 import os
 from sqlalchemy.orm import joinedload
 
@@ -62,30 +57,23 @@ def to_public_image_url(raw: str, request: Request, base_url: str) -> str:
     if raw.startswith(("http://", "https://")):
         return raw
 
-    # Extract filename if it's a disk path or 'uploads/items/...'
     filename = None
     if "uploads/items" in raw:
         filename = os.path.basename(raw)
     elif raw.startswith("/"):
-        # disk path like /root/backend/uploads/items/uuid.jpg -> take basename
         filename = os.path.basename(raw)
     elif raw.startswith("static/items/"):
-        # already a static path; keep the tail
         filename = raw.split("static/items/", 1)[1]
     elif raw.startswith("/static/items/"):
         filename = raw.split("/static/items/", 1)[1]
     else:
-        # bare filename or something else -> take basename
         filename = os.path.basename(raw)
 
-    # Build a /static/items/<filename> path
     static_path = f"items/{filename}"
 
-    # Prefer request.url_for to get absolute URL with correct host/proto
     try:
         absolute = str(request.url_for("static", path=static_path))
     except Exception:
-        # Fallback to BASE_URL if url_for isn't available
         base = base_url.rstrip("/")
         absolute = f"{base}/static/{static_path}"
 

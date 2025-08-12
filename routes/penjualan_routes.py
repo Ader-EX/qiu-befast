@@ -230,7 +230,7 @@ async def get_all_penjualan(
         selectinload(Penjualan.attachments),
         selectinload(Penjualan.customer_rel),  # Changed: vendor relationship
         selectinload(Penjualan.warehouse_rel)
-    )
+    ).filter(Penjualan.is_deleted == False)
 
     # Apply filters
     if status_penjualan is not None and status_penjualan != StatusPembelianEnum.ALL:
@@ -246,15 +246,12 @@ async def get_all_penjualan(
     offset = (page - 1) * size
     penjualans = query.order_by(desc(Penjualan.sales_date)).offset(offset).limit(size).all()
 
-    # Transform response to include calculated fields
     result = []
     for penjualan in penjualans:
-        # Determine vendor name (draft or finalized) - Changed
         customer_name = penjualan.customer_name
         if not customer_name and penjualan.customer_rel:
             customer_name = penjualan.customer_rel.name
 
-        # Determine warehouse name (draft or finalized)
         warehouse_name = penjualan.warehouse_name
         if not warehouse_name and penjualan.warehouse_rel:
             warehouse_name = penjualan.warehouse_rel.name
@@ -303,20 +300,17 @@ async def get_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
 async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_db)):
     """Create new penjualan in DRAFT status"""
 
-    # Check if no_penjualan already exists
     existing = db.query(Penjualan).filter(Penjualan.no_penjualan == request.no_penjualan).first()
     if existing:
         raise HTTPException(status_code=400, detail="No penjualan sudah ada")
 
-    # STOCK VALIDATION - Check stock availability for all items
     validate_penjualan_items_stock(db, request.items)
 
-    # Generate unique ID - FIXED: Use Penjualan class instead of penjualan variable
     new_penjualan = Penjualan(
         id=generate_penjualan_id(),
         no_penjualan=request.no_penjualan,
         warehouse_id=request.warehouse_id,
-        customer_id=request.customer_id,  # Changed: customer_id instead of customer_id
+        customer_id=request.customer_id,
         top_id=request.top_id,
         sales_date=request.sales_date,
         sales_due_date=request.sales_due_date,
@@ -329,9 +323,7 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
     db.add(new_penjualan)
     db.flush()
     
-    # Add items - USE USER-PROVIDED PRICES
     for item_request in request.items:
-        # Fetch the item to validate existence and get name
         item = db.query(Item).filter(Item.id == item_request.item_id).first()
         if not item:
             raise HTTPException(
@@ -339,7 +331,6 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
                 detail=f"Item with ID {item_request.item_id} not found"
             )
 
-        # USE USER-PROVIDED UNIT PRICE (with fallback to item price)
         unit_price = (
             Decimal(str(item_request.unit_price))
             if item_request.unit_price is not None
@@ -447,7 +438,6 @@ async def update_status(
     if not penjualan:
         raise HTTPException(status_code=404, detail="penjualan not found")
 
-    # Update status fields
     if request.status_penjualan:
         penjualan.status_penjualan = request.status_penjualan
     if request.status_pembayaran:
@@ -522,7 +512,6 @@ async def delete_attachment(
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
-    # Delete file from filesystem
     if os.path.exists(attachment.file_path):
         os.remove(attachment.file_path)
 
@@ -571,39 +560,79 @@ async def recalc_totals(penjualan_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/{penjualan_id}", response_model=SuccessResponse)
 async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
-    """Delete penjualan (only allowed in DRAFT status)"""
+    """
+    Delete Penjualan:
+      - If DRAFT and no payments -> HARD DELETE (doc + lines + files).
+      - Else (has payments or not DRAFT) -> SOFT DELETE (archive).
+    """
 
-    # Load penjualan with all relationships
-    penjualan = db.query(Penjualan).options(
-        selectinload(Penjualan.penjualan_items),
-        selectinload(Penjualan.attachments)
-    ).filter(Penjualan.id == penjualan_id).first()
+    penjualan = (
+        db.query(Penjualan)
+        .options(
+            selectinload(Penjualan.penjualan_items),
+            selectinload(Penjualan.attachments),
+            selectinload(Penjualan.pembayaran_rel),   # load payments to decide path
+        )
+        .filter(Penjualan.id == penjualan_id)
+        .first()
+    )
 
     if not penjualan:
-        raise HTTPException(status_code=404, detail="penjualan not found")
+        raise HTTPException(status_code=404, detail="Penjualan not found")
 
+    # If you already enforce DRAFT-only deletion, keep this. Otherwise, remove and rely on the branching below.
+    # This will raise if not DRAFT.
     validate_draft_status(penjualan)
 
+    has_payments = bool(penjualan.pembayaran_rel)
+
+    # --- Path A: HARD DELETE only if DRAFT and no payments ---
+    if penjualan.status_penjualan.name == "DRAFT" and not has_payments:
+        try:
+            for att in penjualan.attachments:
+                if att.file_path and os.path.exists(att.file_path):
+                    try:
+                        os.remove(att.file_path)
+                    except Exception:
+                        pass
+
+            # 2) Delete child rows (or rely on cascade="all, delete-orphan")
+            db.query(PenjualanItem).filter(
+                PenjualanItem.penjualan_id == penjualan_id
+            ).delete(synchronize_session=False)
+
+            db.query(AllAttachment).filter(
+                AllAttachment.penjualan_id == penjualan_id
+            ).delete(synchronize_session=False)
+
+            # IMPORTANT: Do NOT delete Pembayaran (shouldn't exist in this branch anyway)
+            # db.query(Pembayaran).filter(Pembayaran.penjualan_id == penjualan_id).delete()
+
+            # 3) Delete header
+            db.delete(penjualan)
+            db.commit()
+
+            return SuccessResponse(message="Penjualan (DRAFT) deleted successfully")
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error deleting penjualan: {str(e)}"
+            )
+
+    # --- Path B: SOFT DELETE (archive) if payments exist or not DRAFT ---
     try:
-        for attachment in penjualan.attachments:
-            if os.path.exists(attachment.file_path):
-                os.remove(attachment.file_path)
-
-        db.query(PenjualanItem).filter(PenjualanItem.penjualan_id == penjualan_id).delete()
-        db.query(AllAttachment).filter(AllAttachment.penjualan_id == penjualan_id).delete()
-
-        db.query(Pembayaran).filter(Pembayaran.penjualan_id == penjualan_id).delete()
-
-        db.delete(penjualan)
+        penjualan.is_deleted = True
+        penjualan.deleted_at = datetime.utcnow()
         db.commit()
-
-        return SuccessResponse(message="penjualan deleted successfully")
-
+        return SuccessResponse(
+            message="Penjualan archived (soft deleted). Items and payments preserved."
+        )
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
-            detail=f"Error deleting penjualan: {str(e)}"
+            detail=f"Error archiving penjualan: {str(e)}"
         )
 
 # Statistics endpoints

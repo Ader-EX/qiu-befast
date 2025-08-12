@@ -10,6 +10,9 @@ from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta
 
+from models.mixin.SoftDeleteMixin import SoftDeleteMixin
+
+
 class StatusPembayaranEnum(enum.Enum):
     ALL = "ALL"
     UNPAID = "UNPAID"
@@ -22,7 +25,7 @@ class StatusPembelianEnum(enum.Enum):
     ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
 
-class Pembelian(Base):
+class Pembelian(Base,SoftDeleteMixin):
     __tablename__ = "pembelians"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -66,6 +69,9 @@ class Pembelian(Base):
     pembelian_items = relationship("PembelianItem", back_populates="pembelian", cascade="all, delete-orphan")
     pembayaran_rel = relationship("Pembayaran", back_populates="pembelian_rel", cascade="all, delete-orphan")
     attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
+
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
 
     @hybrid_property
     def vendor_display(self) -> str:

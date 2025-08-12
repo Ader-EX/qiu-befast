@@ -4,9 +4,10 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 
 from models.Customer import Customer
+from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 
 
-class Currency(Base):
+class Currency(Base,SoftDeleteMixin):
     __tablename__ = "currencies"
     
     id = Column(Integer, primary_key=True,  index=True)
@@ -18,3 +19,6 @@ class Currency(Base):
     # Relationships
     vend_rel = relationship("Vendor", cascade="all, delete", back_populates="curr_rel")
     cust_rel = relationship("Customer", cascade="all, delete", back_populates="curr_rel")
+
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at  = Column(DateTime, nullable=True)

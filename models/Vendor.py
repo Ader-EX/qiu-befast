@@ -3,7 +3,10 @@ from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
-class Vendor(Base):
+from models.mixin.SoftDeleteMixin import SoftDeleteMixin
+
+
+class Vendor(Base, SoftDeleteMixin):
     __tablename__ = "vendors"
     
     id = Column(String(50), primary_key=True, index=True)
@@ -20,3 +23,6 @@ class Vendor(Base):
     pembelians = relationship("Pembelian",cascade="all, delete", back_populates="vend_rel")
 
     items = relationship("Item", back_populates="vendor_rel")
+
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)

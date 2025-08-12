@@ -3,9 +3,10 @@ from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta
 
+from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 
 
-class Customer(Base):
+class Customer(Base,SoftDeleteMixin):
     __tablename__ = "customers"
     id = Column(String(50), primary_key=True, index=True)
     name = Column(String(50), nullable=False)
@@ -22,5 +23,7 @@ class Customer(Base):
     penjualans = relationship("Penjualan",cascade="all, delete", back_populates="customer_rel")
     pembayarans = relationship("Pembayaran",cascade="all, delete", back_populates="customer_rel")
 
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
 
 

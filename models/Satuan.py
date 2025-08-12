@@ -3,8 +3,10 @@ from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
+from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 
-class Satuan(Base):
+
+class Satuan(Base,SoftDeleteMixin):
     __tablename__ = "satuans"
     
     id = Column(Integer, primary_key=True,  index=True)
@@ -15,3 +17,5 @@ class Satuan(Base):
     
     # Relationships
     items = relationship("Item",cascade="all, delete", back_populates="satuan_rel")
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)

@@ -1,5 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
+from pydantic.v1.utils import to_lower_camel
 from sqlalchemy.orm import Session
 from starlette import status
 from starlette.exceptions import HTTPException
@@ -8,6 +9,7 @@ from models.Warehouse import Warehouse
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.WarehouseSchemas import WarehouseOut, WarehouseCreate, WarehouseUpdate
 from database import get_db
+from utils import soft_delete_record
 
 router = APIRouter()
 
@@ -20,7 +22,7 @@ async def get_all_warehouses(
     is_active : Optional[bool] = None,
     search: Optional[str] = Query(None, description="Search warehouse by name"),
 ):
-    query = db.query(Warehouse)
+    query = db.query(Warehouse).filter(Warehouse.is_deleted == False)
 
     if is_active is not None:
         query.filter(Warehouse.is_active == is_active)
@@ -37,7 +39,6 @@ async def get_all_warehouses(
         "total": total_count
     }
 
-# Get one
 @router.get("/{warehouse_id}", response_model=WarehouseOut)
 async def get_warehouse(warehouse_id: int, db: Session = Depends(get_db)):
     warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
@@ -45,7 +46,6 @@ async def get_warehouse(warehouse_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Warehouse not found")
     return warehouse
 
-# Create
 @router.post("", response_model=WarehouseOut, status_code=status.HTTP_201_CREATED)
 async def create_warehouse(warehouse_data: WarehouseCreate, db: Session = Depends(get_db)):
     warehouse = Warehouse(**warehouse_data.dict())
@@ -75,6 +75,6 @@ async def delete_warehouse(warehouse_id: int, db: Session = Depends(get_db)):
     if not warehouse:
         raise HTTPException(status_code=404, detail="Warehouse not found")
 
-    db.delete(warehouse)
+    soft_delete_record(db,Warehouse, warehouse_id)
     db.commit()
     return None

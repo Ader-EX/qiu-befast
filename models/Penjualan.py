@@ -3,7 +3,7 @@ import enum
 from typing import Optional
 
 from sqlalchemy import (
-    Column, Integer, String, ForeignKey, Numeric, Text, DateTime, Enum
+    Column, Integer, String, ForeignKey, Numeric, Text, DateTime, Enum, Boolean
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -11,17 +11,10 @@ from database import Base
 from datetime import datetime, timedelta
 
 from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
-
-# --- Enums ---
-# Assuming these enums are defined elsewhere, but included here for completeness.
-# I've created a StatusPenjualanEnum to mirror StatusPembelianEnum.
+from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 
 
-
-
-# --- Penjualan (Sales) Model ---
-
-class Penjualan(Base):
+class Penjualan(Base,SoftDeleteMixin):
     __tablename__ = "penjualans"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -65,6 +58,8 @@ class Penjualan(Base):
     penjualan_items = relationship("PenjualanItem", back_populates="penjualan", cascade="all, delete-orphan")
     pembayaran_rel = relationship("Pembayaran", back_populates="penjualan_rel", cascade="all, delete-orphan")
     attachments = relationship("AllAttachment", back_populates="penjualans", cascade="all, delete-orphan")
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
 
     @hybrid_property
     def customer_display(self) -> str:

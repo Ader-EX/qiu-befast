@@ -1,15 +1,17 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Integer, Column, DateTime, Enum, Numeric, ForeignKey, String
+from sqlalchemy import Integer, Column, DateTime, Enum, Numeric, ForeignKey, String, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
+from models.mixin.SoftDeleteMixin import SoftDeleteMixin
+
 
 class PembayaranPengembalianType(enum.Enum):
     PEMBELIAN = "PEMBELIAN"
     PENJUALAN = "PENJUALAN"
 
-class Pembayaran(Base):
+class Pembayaran(Base,SoftDeleteMixin):
     __tablename__ = "pembayarans"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -42,6 +44,8 @@ class Pembayaran(Base):
     pembayaran_items = relationship("PembayaranItem", back_populates="pembayaran", cascade="all, delete-orphan")
 
     attachments = relationship("AllAttachment", back_populates="pembayarans", cascade="all, delete-orphan")
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
 
 class PembayaranItem(Base):
     __tablename__ = "pembayaran_items"

@@ -233,7 +233,7 @@ async def get_all_pembelian(
         selectinload(Pembelian.attachments),
         selectinload(Pembelian.vend_rel),  # Changed: vendor relationship
         selectinload(Pembelian.warehouse_rel)
-    )
+    ).filter(Pembelian.is_deleted== False)
 
     # Apply filters
     if status_pembelian is not None and status_pembelian != StatusPembelianEnum.ALL:
@@ -245,19 +245,15 @@ async def get_all_pembelian(
     if warehouse_id:
         query = query.filter(Pembelian.warehouse_id == warehouse_id)
 
-    # Apply pagination
     offset = (page - 1) * size
     pembelians = query.order_by(desc(Pembelian.sales_date)).offset(offset).limit(size).all()
 
-    # Transform response to include calculated fields
     result = []
     for pembelian in pembelians:
-        # Determine vendor name (draft or finalized) - Changed
         vendor_name = pembelian.vendor_name
         if not vendor_name and pembelian.vend_rel:
             vendor_name = pembelian.vend_rel.name
 
-        # Determine warehouse name (draft or finalized)
         warehouse_name = pembelian.warehouse_name
         if not warehouse_name and pembelian.warehouse_rel:
             warehouse_name = pembelian.warehouse_rel.name
@@ -311,10 +307,8 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
     if existing:
         raise HTTPException(status_code=400, detail="No pembelian sudah ada")
 
-    # STOCK VALIDATION - Check stock availability for all items
     validate_pembelian_items_stock(db, request.items)
 
-    # Generate unique ID
     pembelian = Pembelian(
         id=generate_pembelian_id(),
         no_pembelian=request.no_pembelian,
@@ -579,42 +573,72 @@ async def recalc_totals(pembelian_id: int, db: Session = Depends(get_db)):
     return TotalsResponse(**data)
 
 @router.delete("/{pembelian_id}", response_model=SuccessResponse)
-async def delete_pembelian(pembelian_id: str, db: Session = Depends(get_db)):
-    """Delete pembelian (only allowed in DRAFT status)"""
-
-    # Load pembelian with all relationships
-    pembelian = db.query(Pembelian).options(
-        selectinload(Pembelian.pembelian_items),
-        selectinload(Pembelian.attachments)
-    ).filter(Pembelian.id == pembelian_id).first()
+async def delete_pembelian(pembelian_id: int, db: Session = Depends(get_db)):
+    """
+    Delete pembelian:
+      - If DRAFT and no payments -> HARD DELETE (doc + lines + files).
+      - If any payments exist OR not DRAFT -> either block OR soft delete (archive).
+        (Below: we choose to SOFT DELETE to keep payments and lines.)
+    """
+    pembelian = (
+        db.query(Pembelian)
+        .options(
+            selectinload(Pembelian.pembelian_items),
+            selectinload(Pembelian.attachments),
+            selectinload(Pembelian.pembayaran_rel),
+        )
+        .get(pembelian_id)
+    )
 
     if not pembelian:
         raise HTTPException(status_code=404, detail="Pembelian not found")
 
-    validate_draft_status(pembelian)
+    has_payments = bool(pembelian.pembayaran_rel)
 
+    if pembelian.status_pembelian.name == "DRAFT" and not has_payments:
+        try:
+            for att in pembelian.attachments:
+                if att.file_path and os.path.exists(att.file_path):
+                    try:
+                        os.remove(att.file_path)
+                    except Exception:
+                        pass
+
+            db.query(PembelianItem).filter(
+                PembelianItem.pembelian_id == pembelian_id
+            ).delete(synchronize_session=False)
+
+            db.query(AllAttachment).filter(
+                AllAttachment.pembelian_id == pembelian_id
+            ).delete(synchronize_session=False)
+
+
+
+            db.delete(pembelian)
+            db.commit()
+            return SuccessResponse(message="Pembelian (DRAFT) deleted successfully")
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error deleting pembelian: {str(e)}"
+            )
+
+    # Otherwise -> SOFT DELETE (archive). Keep items & payments.
     try:
-        for attachment in pembelian.attachments:
-            if os.path.exists(attachment.file_path):
-                os.remove(attachment.file_path)
-
-        db.query(PembelianItem).filter(PembelianItem.pembelian_id == pembelian_id).delete()
-        db.query(AllAttachment).filter(AllAttachment.pembelian_id == pembelian_id).delete()
-
-        db.query(Pembayaran).filter(Pembayaran.pembelian_id == pembelian_id).delete()
-
-
-        db.delete(pembelian)
+        pembelian.is_deleted = True
+        pembelian.deleted_at = datetime.utcnow()
         db.commit()
-
-        return SuccessResponse(message="Pembelian deleted successfully")
-
+        return SuccessResponse(
+            message="Pembelian archived (soft deleted). Items and payments preserved."
+        )
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
-            detail=f"Error deleting pembelian: {str(e)}"
+            detail=f"Error archiving pembelian: {str(e)}"
         )
+
 # Statistics endpoints
 @router.get("/stats/summary")
 async def get_pembelian_summary(db: Session = Depends(get_db)):

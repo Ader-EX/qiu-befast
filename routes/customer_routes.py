@@ -11,6 +11,7 @@ from models.TermOfPayment import TermOfPayment
 from schemas.CustomerSchemas import CustomerOut, CustomerCreate, CustomerUpdate
 from database import get_db
 from schemas.PaginatedResponseSchemas import PaginatedResponse
+from utils import soft_delete_record
 
 router = APIRouter()
 
@@ -23,7 +24,7 @@ def get_all_Customer(
         is_active: Optional[bool] = None,
         search_key: Optional[str] = None,
 ):
-    query = db.query(Customer).options(joinedload(Customer.top_rel), joinedload(Customer.curr_rel))
+    query = db.query(Customer).options(joinedload(Customer.top_rel), joinedload(Customer.curr_rel)).filter(Customer.is_deleted == False )
 
     if is_active is not None:
         query = query.filter(Customer.is_active == is_active)
@@ -59,10 +60,19 @@ async def get_customer(customer_id: str, db: Session = Depends(get_db)):
 async def create_customer(customer_data: CustomerCreate, db: Session = Depends(get_db)):
     existing_customer = db.query(Customer).filter(Customer.id == customer_data.id).first()
     if existing_customer:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Customer with ID '{customer_data.id}' already exists."
-        )
+        if  existing_customer.is_active:
+            for field, value in customer_data.dict().items():
+                setattr(existing_customer, field, value)
+            existing_customer.is_deleted = False
+            existing_customer.deleted_at = None
+            db.commit()
+            db.refresh(existing_customer)
+            return existing_customer
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Customer with ID '{customer_data.id}' already exists."
+            )
 
     currency = db.query(Currency).filter(
         Currency.id == customer_data.currency_id,
@@ -109,12 +119,12 @@ async def update_customer(customer_id: str, customer_data: CustomerUpdate, db: S
 # Delete
 @router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_customer(customer_id: str, db: Session = Depends(get_db)):
-    is_used = db.query(Customer)
+
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
 
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    db.delete(customer)
+    soft_delete_record(db, Customer, customer_id)
     db.commit()
     return None

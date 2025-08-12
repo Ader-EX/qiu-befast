@@ -7,7 +7,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 
-
+from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 
 
 class ItemTypeEnum(enum.Enum):
@@ -15,7 +15,7 @@ class ItemTypeEnum(enum.Enum):
     RAW_MATERIAL = "RAW_MATERIAL"
     SERVICE = "SERVICE"
 
-class Item(Base):
+class Item(Base, SoftDeleteMixin):
     __tablename__ = "items"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -31,7 +31,8 @@ class Item(Base):
     category_one = Column(Integer, ForeignKey("categories.id"), nullable=True)
     category_two = Column(Integer, ForeignKey("categories.id"), nullable=True)
     satuan_id = Column(Integer, ForeignKey("satuans.id"), nullable=False)
-    vendor_id = Column(String(50), ForeignKey("vendors.id"), nullable=False)
+    vendor_id = Column(String(50), ForeignKey("vendors.id", ), nullable=False)
+
 
     # Relationships
     category_one_rel = relationship("Category", foreign_keys=[category_one])
@@ -43,6 +44,9 @@ class Item(Base):
     pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
     penjualan_items  = relationship("PenjualanItem", back_populates="item_rel")
     pembayaran_items  = relationship("PembayaranItem", back_populates="item_rel")
+
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
 
     @property
     def primary_image_url(self) -> Optional[str]:

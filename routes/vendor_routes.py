@@ -9,6 +9,7 @@ from models.TermOfPayment import TermOfPayment
 from models.Vendor import Vendor
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.VendorSchemas import VendorCreate, VendorUpdate, VendorOut
+from utils import soft_delete_record
 
 router = APIRouter()
 @router.get("", response_model=PaginatedResponse[VendorOut])
@@ -19,7 +20,7 @@ def get_all_vendors(
         is_active: Optional[bool] = None,
         search_key: Optional[str] = None,
 ):
-    query = db.query(Vendor).options(joinedload(Vendor.top_rel), joinedload(Vendor.curr_rel))
+    query = db.query(Vendor).options(joinedload(Vendor.top_rel), joinedload(Vendor.curr_rel)).filter(Vendor.is_deleted == False)
 
     if is_active is not None:
         query = query.filter(Vendor.is_active == is_active)
@@ -49,34 +50,27 @@ def get_vendor(vendor_id: str, db: Session = Depends(get_db)):
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return vendor
-
 @router.post("", response_model=VendorOut, status_code=status.HTTP_201_CREATED)
 def create_vendor(data: VendorCreate, db: Session = Depends(get_db)):
-    # 1. Check if Vendor ID already exists
     existing_vendor = db.query(Vendor).filter(Vendor.id == data.id).first()
+
+    if not db.query(Currency).filter(Currency.id == data.currency_id).first():
+        raise HTTPException(400, f"Currency with ID '{data.currency_id}' not found.")
+    if not db.query(TermOfPayment).filter(TermOfPayment.id == data.top_id).first():
+        raise HTTPException(400, f"Term of Payment with ID '{data.top_id}' not found.")
+
     if existing_vendor:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Vendor with ID '{data.id}' already exists."
-        )
+        if existing_vendor.is_deleted:
+            for field, value in data.dict().items():
+                setattr(existing_vendor, field, value)
+            existing_vendor.is_deleted = False
+            existing_vendor.deleted_at = None
+            db.commit()
+            db.refresh(existing_vendor)
+            return existing_vendor
+        else:
+            raise HTTPException(400, "Vendor ID already exists")
 
-    # 2. Check if currency_id exists
-    currency = db.query(Currency).filter(Currency.id == data.currency_id).first()
-    if not currency:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Currency with ID '{data.currency_id}' not found."
-        )
-
-    # 3. Check if top_id exists
-    top = db.query(TermOfPayment).filter(TermOfPayment.id == data.top_id).first()
-    if not top:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Term of Payment with ID '{data.top_id}' not found."
-        )
-
-    # If all valid, create the vendor
     vendor = Vendor(**data.dict())
     db.add(vendor)
     db.commit()
@@ -98,9 +92,11 @@ def update_vendor(vendor_id: str, data: VendorUpdate, db: Session = Depends(get_
 
 @router.delete("/{vendor_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_vendor(vendor_id: str, db: Session = Depends(get_db)):
-    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
+    vendor = db.query(Vendor).filter(Vendor.id == vendor_id, Vendor.is_deleted == False).first()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
-    db.delete(vendor)
+
+    soft_delete_record(db, Vendor, vendor_id)
+
     db.commit()
     return None

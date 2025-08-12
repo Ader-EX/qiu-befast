@@ -8,6 +8,7 @@ from models.Currency import Currency
 from schemas.CurrencySchemas import CurrencyOut, CurrencyCreate, CurrencyUpdate
 from database import get_db
 from schemas.PaginatedResponseSchemas import PaginatedResponse
+from utils import soft_delete_record
 
 router = APIRouter()
 
@@ -18,7 +19,7 @@ async def get_all_currencies(db: Session = Depends(get_db),
                              search_key : Optional[str] = None,
                              skip: int = Query(0, ge=0),
                              limit: int = Query(5, ge=1, le=1000)):
-    query = db.query(Currency)
+    query = db.query(Currency).filter(Currency.is_deleted == False)
 
     if  is_active is not None:
         query =  query.filter(Currency.is_active == is_active)
@@ -74,6 +75,6 @@ async def delete_currency(currency_id: int, db: Session = Depends(get_db)):
     if not currency:
         raise HTTPException(status_code=404, detail="Currency not found")
 
-    db.delete(currency)
+    soft_delete_record(db, Currency, currency_id)
     db.commit()
     return None

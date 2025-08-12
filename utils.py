@@ -3,6 +3,7 @@ import os
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from typing import Union, Any
+from sqlalchemy.orm import Session
 import jwt
 
 REFRESH_TOKEN_EXPIRE_MINUTES=60 * 24 * 7
@@ -53,3 +54,14 @@ def resolve_css_vars(css: str) -> str:
     for var_name, value in css_vars.items():
         css = css.replace(f"var({var_name})", value)
     return css
+
+
+def soft_delete_record(session: Session, model_class, record_id):
+    obj = session.get(model_class, record_id)
+    if not obj:
+        raise ValueError(f"{model_class.__name__} with id {record_id} not found")
+    if hasattr(obj, "soft_delete"):
+        obj.soft_delete()
+    else:
+        raise ValueError(f"{model_class.__name__} does not support soft delete")
+    session.commit()

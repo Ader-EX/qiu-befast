@@ -21,7 +21,7 @@ from schemas.ItemSchema import ItemResponse, ItemTypeEnum, AttachmentResponse
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.SatuanSchemas import SatuanOut
 from schemas.VendorSchemas import VendorOut
-
+from utils import soft_delete_record
 
 router = APIRouter()
 
@@ -29,7 +29,6 @@ NEXT_PUBLIC_UPLOAD_DIR = os.getenv("UPLOAD_DIR" ,default="uploads/items")
 os.makedirs(NEXT_PUBLIC_UPLOAD_DIR, exist_ok=True)
 @router.post("", response_model=ItemResponse)
 async def create_item(
-        # Item data
         type: ItemTypeEnum = Form(...),
         name: str = Form(...),
         sku: str = Form(...),
@@ -40,23 +39,36 @@ async def create_item(
         category_two: Optional[int] = Form(None),
         satuan_id: int = Form(...),
         vendor_id: str = Form(...),
-        # Images (max 3)
         images: List[UploadFile] = File(default=[]),
         db: Session = Depends(get_db)
 ):
-
-
     # Validate max 3 images
     if len(images) > 3:
         raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
 
-    # Check if SKU already exists
+    # Check if SKU exists
     existing_item = db.query(Item).filter(Item.sku == sku).first()
     if existing_item:
-        raise HTTPException(status_code=400, detail="SKU already exists")
+        if existing_item.is_deleted:
+            existing_item.type = type
+            existing_item.name = name
+            existing_item.total_item = total_item
+            existing_item.price = price
+            existing_item.is_active = is_active
+            existing_item.category_one = category_one
+            existing_item.category_two = category_two
+            existing_item.satuan_id = satuan_id
+            existing_item.vendor_id = vendor_id
+            existing_item.is_deleted = False
+            existing_item.deleted_at = None
+            db.commit()
+            db.refresh(existing_item)
+            return existing_item
+        else:
+            raise HTTPException(status_code=400, detail="SKU already exists")
 
     try:
-        # Create item
+        # Create new item
         db_item = Item(
             type=type,
             name=name,
@@ -82,15 +94,10 @@ async def create_item(
                 file_extension = os.path.splitext(image.filename)[1]
                 unique_filename = f"{uuid.uuid4()}{file_extension}"
 
-                # Save to VPS (production path)
+                # Save to VPS
                 vps_file_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
                 with open(vps_file_path, "wb") as buffer:
                     shutil.copyfileobj(image.file, buffer)
-
-                # local_file_path = os.path.join(NEXT_PUBLIC_LOCAL_UPLOAD_DIR, unique_filename)
-                image.file.seek(0)  # Reset file pointer
-                # with open(local_file_path, "wb") as buffer:
-                #     shutil.copyfileobj(image.file, buffer)
 
                 attachment = AllAttachment(
                     parent_type=ParentType.ITEMS,
@@ -99,49 +106,19 @@ async def create_item(
                     file_path=vps_file_path,
                     file_size=os.path.getsize(vps_file_path),
                     mime_type=image.content_type,
-                    
                     created_at=datetime.now()
                 )
-
                 db.add(attachment)
                 attachments.append(attachment)
 
         db.commit()
-
-        # Refresh item with attachments
         db.refresh(db_item)
 
-        print(f"Saving to: {NEXT_PUBLIC_UPLOAD_DIR}")
-        item_dict = {
-            "id": db_item.id,
-            "type": db_item.type,
-            "name": db_item.name,
-            "sku": db_item.sku,
-            "total_item": db_item.total_item,
-            "price": float(db_item.price),
-            "is_active": db_item.is_active,
-            "category_one": db_item.category_one,
-            "category_two": db_item.category_two,
-            "satuan_id": db_item.satuan_id,
-            "vendor_id": db_item.vendor_id,
-            "attachments": [
-                {
-                    "id": att.id,
-                    "filename": att.filename,
-                    "file_path": att.file_path,
-                    "file_size": att.file_size,
-                    "mime_type": att.mime_type,
-                    "created_at": att.created_at,
-                } for att in db_item.attachments
-            ]
-        }
-
-        return item_dict
+        return db_item
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creating item: {str(e)}")
-
 
 
 
@@ -165,7 +142,7 @@ def get_items(
         joinedload(Item.satuan_rel),
         joinedload(Item.vendor_rel),
         joinedload(Item.attachments)
-    )
+    ).filter(Item.is_deleted == False)
 
     # Apply filters
     if search_key:
@@ -341,7 +318,7 @@ async def update_item(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating item: {str(e)}")
-        
+
 @router.delete("/{item_id}")
 def delete_item(item_id: int, db: Session = Depends(get_db)):
     db_item = db.query(Item).filter(Item.id == item_id).first()
@@ -349,25 +326,27 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Item not found")
 
     try:
+        # Physically delete all attachments and DB rows
         for attachment in db_item.attachments:
             file_path = attachment.file_path.replace("\\", "/")
 
-            # Handle relative and absolute paths
             if os.path.exists(file_path):
                 os.remove(file_path)
                 print(f"Deleted file: {file_path}")
             else:
                 print(f"File not found (skipped): {file_path}")
 
-        # Delete the item (assuming cascade deletes attachments)
-        db.delete(db_item)
+            db.delete(attachment)
+        soft_delete_record(db,Item, item_id)
+
         db.commit()
 
-        return {"message": f"Item {item_id} deleted successfully"}
+        return {"message": f"Item {item_id} soft deleted successfully (attachments removed)"}
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error deleting item: {str(e)}")
+
 
 @router.get("/{item_id}/images/{attachment_id}")
 def get_item_image(item_id: int, attachment_id: int, db: Session = Depends(get_db)):
@@ -403,7 +382,6 @@ def sync_items_to_vps(db: Session = Depends(get_db)):
         for attachment in attachments:
             local_path = attachment.file_path.replace(NEXT_PUBLIC_UPLOAD_DIR)
 
-            # If VPS file doesn't exist but local does, copy it
             if not os.path.exists(attachment.file_path) and os.path.exists(local_path):
                 os.makedirs(os.path.dirname(attachment.file_path), exist_ok=True)
                 shutil.copy2(local_path, attachment.file_path)

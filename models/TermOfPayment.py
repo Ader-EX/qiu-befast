@@ -4,8 +4,10 @@ from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
+from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 
-class TermOfPayment(Base):
+
+class TermOfPayment(Base,SoftDeleteMixin):
     __tablename__ = "term_of_payments"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -19,3 +21,6 @@ class TermOfPayment(Base):
     pembelians = relationship("Pembelian", cascade="all, delete", back_populates="top_rel")
     penjualans = relationship("Penjualan", cascade="all, delete", back_populates="top_rel")
     pembayarans = relationship("Pembayaran", cascade="all, delete", back_populates="top_rel")
+
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)

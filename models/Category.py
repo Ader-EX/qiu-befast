@@ -3,7 +3,10 @@ from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
-class Category(Base):
+from models.mixin.SoftDeleteMixin import SoftDeleteMixin
+
+
+class Category(Base,SoftDeleteMixin):
     __tablename__ = "categories"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -14,3 +17,6 @@ class Category(Base):
     # Relationships
     items_category_one = relationship("Item",cascade="all, delete", foreign_keys="Item.category_one", back_populates="category_one_rel")
     items_category_two = relationship("Item",cascade="all, delete", foreign_keys="Item.category_two", back_populates="category_two_rel")
+
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)

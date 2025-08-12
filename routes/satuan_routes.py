@@ -13,10 +13,7 @@ from models.Satuan import Satuan
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.SatuanSchemas import SatuanOut, SatuanCreate, SatuanUpdate
 from database import Base, engine, SessionLocal, get_db
-
-
-
-
+from utils import soft_delete_record
 
 router =APIRouter()
 
@@ -29,7 +26,7 @@ async def get_all_satuan(
         skip: int = Query(0, ge=0),
         limit: int = Query(5, ge=1, le=1000)
 ):
-    query = db.query(Satuan)
+    query = db.query(Satuan).filter(Satuan.is_deleted == False)
 
     if is_active is not None:
         query = query.filter(Satuan.is_active == is_active)
@@ -55,7 +52,9 @@ async def get_satuan(satuan_id: int, db: Session = Depends(get_db)):
 # Create
 @router.post("", response_model=SatuanOut, status_code=status.HTTP_201_CREATED)
 async def create_satuan(satuan_data: SatuanCreate, db: Session = Depends(get_db)):
+
     satuan = Satuan(**satuan_data.dict())
+
     db.add(satuan)
     db.commit()
     db.refresh(satuan)
@@ -82,6 +81,6 @@ async def delete_satuan(satuan_id: int, db: Session = Depends(get_db)):
     if not satuan:
         raise HTTPException(status_code=404, detail="Satuan not found")
 
-    db.delete(satuan)
+    soft_delete_record(db,Satuan, satuan_id)
     db.commit()
     return None

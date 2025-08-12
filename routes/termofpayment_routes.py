@@ -13,7 +13,7 @@ from starlette.exceptions import HTTPException
 
 from models.TermOfPayment import TermOfPayment
 from database import Base, engine, SessionLocal, get_db
-
+from utils import soft_delete_record
 
 router =APIRouter()
 
@@ -25,7 +25,7 @@ async def getAllTOP(db : Session = Depends(get_db),
                     limit: int = Query(5, ge=1, le=1000)):
 
 
-    query = db.query(TermOfPayment)
+    query = db.query(TermOfPayment).filter(TermOfPayment.is_deleted == False)
 
     if  is_active is not None:
         query =  query.filter(TermOfPayment.is_active == is_active)
@@ -79,6 +79,6 @@ async def delete_top(top_id: int, db: Session = Depends(get_db)):
     if not top:
         raise HTTPException(status_code=404, detail="TOP not found")
 
-    db.delete(top)
+    soft_delete_record(db, TermOfPayment, top_id)
     db.commit()
     return None
