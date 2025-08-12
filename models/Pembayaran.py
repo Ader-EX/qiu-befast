@@ -5,20 +5,19 @@ from sqlalchemy import Integer, Column, DateTime, Enum, Numeric, ForeignKey, Str
 from sqlalchemy.orm import relationship
 from database import Base
 from models.mixin.SoftDeleteMixin import SoftDeleteMixin
+from schemas.PembayaranSchemas import PembayaranPengembalianType
 
 
-class PembayaranPengembalianType(enum.Enum):
-    PEMBELIAN = "PEMBELIAN"
-    PENJUALAN = "PENJUALAN"
 
 class Pembayaran(Base,SoftDeleteMixin):
     __tablename__ = "pembayarans"
 
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime, default=datetime.now(), nullable=False)
+    
+    payment_date =Column(DateTime, nullable=False)
 
-    total_qty = Column(Integer, nullable=False, default=0)
-    total_price = Column(Numeric(15,7), default=0.00)
+    total_paid = Column(Numeric(15,7), default=0.00)
 
     pembelian_id = Column(Integer,ForeignKey("pembelians.id"), nullable=True)
     penjualan_id = Column(Integer,ForeignKey("penjualans.id"), nullable=True)
@@ -26,17 +25,17 @@ class Pembayaran(Base,SoftDeleteMixin):
     reference_type = Column(Enum(PembayaranPengembalianType), nullable=False)
 
     customer_id = Column(String(50), ForeignKey("customers.id"), nullable=True)
-    top_id = Column(Integer, ForeignKey("term_of_payments.id"), nullable=True)
-    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)
+    vendor_id = Column(String(50), ForeignKey("vendors.id"), nullable=True )
+    currency_id = Column(Integer, ForeignKey("currencies.id"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False)
 
     warehouse_name = Column(String(255), nullable=True)
     customer_name = Column(String(255), nullable=True)
-    top_name = Column(String(255), nullable=True)
     currency_name  = Column(String(255), nullable=True)
 
     customer_rel = relationship("Customer", back_populates="pembayarans")
     warehouse_rel = relationship("Warehouse", back_populates="pembayarans")
-    top_rel = relationship("TermOfPayment", back_populates="pembayarans")
+    curr_rel = relationship("Currency", back_populates="pembayarans")
 
     pembelian_rel = relationship("Pembelian", back_populates="pembayaran_rel")
     penjualan_rel = relationship("Penjualan", back_populates="pembayaran_rel")
