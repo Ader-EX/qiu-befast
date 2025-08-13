@@ -50,6 +50,7 @@ def get_vendor(vendor_id: str, db: Session = Depends(get_db)):
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return vendor
+
 @router.post("", response_model=VendorOut, status_code=status.HTTP_201_CREATED)
 def create_vendor(data: VendorCreate, db: Session = Depends(get_db)):
     existing_vendor = db.query(Vendor).filter(Vendor.id == data.id).first()
