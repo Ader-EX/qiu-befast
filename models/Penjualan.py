@@ -17,7 +17,7 @@ from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 class Penjualan(Base,SoftDeleteMixin):
     __tablename__ = "penjualans"
 
-    id = Column(String(255), primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
     no_penjualan = Column(String(255), unique=True, default="", nullable=False)
     status_pembayaran = Column(Enum(StatusPembayaranEnum), default=StatusPembayaranEnum.UNPAID)
     status_penjualan = Column(Enum(StatusPembelianEnum), default=StatusPembelianEnum.DRAFT)
@@ -56,7 +56,7 @@ class Penjualan(Base,SoftDeleteMixin):
 
     # Items relationship
     penjualan_items = relationship("PenjualanItem", back_populates="penjualan", cascade="all, delete-orphan")
-    pembayaran_rel = relationship("Pembayaran", back_populates="penjualan_rel", cascade="all, delete-orphan")
+    pembayaran_detail_rel = relationship("PembayaranDetails", back_populates="penjualan_rel", cascade="all, delete-orphan")
     attachments = relationship("AllAttachment", back_populates="penjualans", cascade="all, delete-orphan")
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)

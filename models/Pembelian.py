@@ -28,7 +28,7 @@ class StatusPembelianEnum(enum.Enum):
 class Pembelian(Base,SoftDeleteMixin):
     __tablename__ = "pembelians"
 
-    id = Column(String(255), primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
     no_pembelian = Column(String(255),unique=True, default="", nullable=False)
     status_pembayaran = Column(Enum(StatusPembayaranEnum), default=StatusPembayaranEnum.UNPAID)
     status_pembelian = Column(Enum(StatusPembelianEnum), default=StatusPembelianEnum.DRAFT)
@@ -67,7 +67,7 @@ class Pembelian(Base,SoftDeleteMixin):
 
     # Items relationship
     pembelian_items = relationship("PembelianItem", back_populates="pembelian", cascade="all, delete-orphan")
-    pembayaran_rel = relationship("Pembayaran", back_populates="pembelian_rel", cascade="all, delete-orphan")
+    pembayaran_detail_rel = relationship("PembayaranDetails", back_populates="pembelian_rel", cascade="all, delete-orphan")
     attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
 
     is_deleted = Column(Boolean, default=False, nullable=False)

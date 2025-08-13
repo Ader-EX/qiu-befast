@@ -63,7 +63,6 @@ app.add_middleware(
 )
 
 # Public routes
-app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
 
 
 print("STATIC_URL =", os.getenv("STATIC_URL"))  # You should see the full absolute path
@@ -82,6 +81,7 @@ app.mount("/static", StaticFiles(directory=os.getenv("STATIC_URL")), name="stati
 # app.include_router(pembelian_routes.router, prefix="/pembelian", tags=["Pembelian"],  dependencies=[Depends(verify_access_token)])
 
 
+app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
 app.include_router(satuan_routes.router, prefix="/satuan", tags=["Satuan"])
 app.include_router(termofpayment_routes.router, prefix="/top", tags=["Term of Payment"])
 app.include_router(warehouse_routes.router, prefix="/warehouse", tags=["Warehouse"])

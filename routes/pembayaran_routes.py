@@ -42,7 +42,6 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
     total_paid = sum(payment.total_paid for payment in total_payments)
     record.total_paid = total_paid
     
-    # Update payment status
     total_outstanding = record.total_price - (record.total_paid + record.total_return)
     
     if total_outstanding <= 0:
