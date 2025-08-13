@@ -115,7 +115,6 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int):
     pembelian.total_price = grand_total
     db.commit()
 
-    # IMPORTANT: return the NEW field names
     return {
         "subtotal_before_tax": sum_before,
         "subtotal_after_tax": sum_after,

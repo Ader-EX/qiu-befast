@@ -1,9 +1,20 @@
+from datetime import datetime
+from typing import Optional
+
 from pydantic import BaseModel
-import datetime
+import enum
+
+class UserType(enum.Enum):
+    OWNER = 0
+    MANAGER = 1
+    STAFF =2
+    ALL = 3
 
 class UserCreate(BaseModel):
     username:str
     password:str
+    is_active:bool = True
+    role: UserType = UserType.STAFF
 
 
 class RequestDetails(BaseModel):
@@ -24,4 +35,20 @@ class TokenCreate(BaseModel):
     access_token:str
     refresh_token:str
     status:bool
-    created_date:datetime.datetime
+    created_date:datetime
+
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    role: UserType
+    last_login: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[UserType] = None

@@ -42,7 +42,6 @@ class Item(Base, SoftDeleteMixin):
     attachments = relationship("AllAttachment", back_populates="item_rel", cascade="all, delete-orphan",   primaryjoin="and_(Item.id==foreign(AllAttachment.item_id), AllAttachment.parent_type=='ITEMS')")
     pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
     penjualan_items  = relationship("PenjualanItem", back_populates="item_rel")
-    pembayaran_items  = relationship("PembayaranItem", back_populates="item_rel")
 
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)

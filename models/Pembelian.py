@@ -28,7 +28,7 @@ class StatusPembelianEnum(enum.Enum):
 class Pembelian(Base,SoftDeleteMixin):
     __tablename__ = "pembelians"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String(255), primary_key=True, index=True)
     no_pembelian = Column(String(255),unique=True, default="", nullable=False)
     status_pembayaran = Column(Enum(StatusPembayaranEnum), default=StatusPembayaranEnum.UNPAID)
     status_pembelian = Column(Enum(StatusPembelianEnum), default=StatusPembelianEnum.DRAFT)

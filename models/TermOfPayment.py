@@ -20,7 +20,5 @@ class TermOfPayment(Base,SoftDeleteMixin):
     cust_rel = relationship("Customer", back_populates="top_rel")
     pembelians = relationship("Pembelian", cascade="all, delete", back_populates="top_rel")
     penjualans = relationship("Penjualan", cascade="all, delete", back_populates="top_rel")
-    pembayarans = relationship("Pembayaran", cascade="all, delete", back_populates="top_rel")
-
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)

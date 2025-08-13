@@ -17,7 +17,7 @@ from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 class Penjualan(Base,SoftDeleteMixin):
     __tablename__ = "penjualans"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String(255), primary_key=True, index=True)
     no_penjualan = Column(String(255), unique=True, default="", nullable=False)
     status_pembayaran = Column(Enum(StatusPembayaranEnum), default=StatusPembayaranEnum.UNPAID)
     status_penjualan = Column(Enum(StatusPembelianEnum), default=StatusPembelianEnum.DRAFT)
