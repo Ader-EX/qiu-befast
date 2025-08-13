@@ -58,8 +58,6 @@ class Penjualan(Base,SoftDeleteMixin):
     penjualan_items = relationship("PenjualanItem", back_populates="penjualan", cascade="all, delete-orphan")
     pembayaran_detail_rel = relationship("PembayaranDetails", back_populates="penjualan_rel", cascade="all, delete-orphan")
     attachments = relationship("AllAttachment", back_populates="penjualans", cascade="all, delete-orphan")
-    is_deleted = Column(Boolean, default=False, nullable=False)
-    deleted_at = Column(DateTime, nullable=True)
 
     @hybrid_property
     def customer_display(self) -> str:

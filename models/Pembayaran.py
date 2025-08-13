@@ -35,8 +35,7 @@ class Pembayaran(Base, SoftDeleteMixin):
     pembayaran_details = relationship("PembayaranDetails", back_populates="pembayaran_rel", cascade="all, delete-orphan")
     
     attachments = relationship("AllAttachment", back_populates="pembayarans", cascade="all, delete-orphan")
-    is_deleted = Column(Boolean, default=False, nullable=False)
-    deleted_at = Column(DateTime, nullable=True)
+
 
 
 class PembayaranDetails(Base, SoftDeleteMixin):
@@ -53,5 +52,3 @@ class PembayaranDetails(Base, SoftDeleteMixin):
     pembelian_rel = relationship("Pembelian", back_populates="pembayaran_detail_rel")
     penjualan_rel = relationship("Penjualan", back_populates="pembayaran_detail_rel")
 
-    is_deleted = Column(Boolean, default=False, nullable=False)
-    deleted_at = Column(DateTime, nullable=True)

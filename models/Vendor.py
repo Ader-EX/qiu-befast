@@ -15,7 +15,6 @@ class Vendor(Base, SoftDeleteMixin):
     currency_id = Column(Integer, ForeignKey("currencies.id"), nullable=False)
     top_id = Column(Integer, ForeignKey("term_of_payments.id"), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-
     
     # Relationships
     curr_rel = relationship("Currency",cascade="all, delete", back_populates="vend_rel")
@@ -23,6 +22,3 @@ class Vendor(Base, SoftDeleteMixin):
     pembelians = relationship("Pembelian",cascade="all, delete", back_populates="vend_rel")
 
     items = relationship("Item", back_populates="vendor_rel")
-
-    is_deleted = Column(Boolean, default=False, nullable=False)
-    deleted_at = Column(DateTime, nullable=True)

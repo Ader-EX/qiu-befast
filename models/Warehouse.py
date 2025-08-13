@@ -15,6 +15,3 @@ class Warehouse(Base,SoftDeleteMixin):
     pembelians  = relationship("Pembelian",cascade="all, delete", back_populates="warehouse_rel")
     penjualans  = relationship("Penjualan",cascade="all, delete", back_populates="warehouse_rel")
     pembayarans  = relationship("Pembayaran",cascade="all, delete", back_populates="warehouse_rel")
-
-    is_deleted = Column(Boolean, default=False, nullable=False)
-    deleted_at = Column(DateTime, nullable=True)

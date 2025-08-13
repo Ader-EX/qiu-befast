@@ -21,6 +21,3 @@ class Currency(Base,SoftDeleteMixin):
     cust_rel = relationship("Customer", cascade="all, delete", back_populates="curr_rel")
     
     pembayarans = relationship("Pembayaran", cascade="all, delete", back_populates="curr_rel")
-
-    is_deleted = Column(Boolean, default=False, nullable=False)
-    deleted_at  = Column(DateTime, nullable=True)

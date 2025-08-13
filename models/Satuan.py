@@ -13,9 +13,6 @@ class Satuan(Base,SoftDeleteMixin):
     name = Column(String(100), nullable=False)
     symbol = Column(String(10), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-
     
     # Relationships
     items = relationship("Item",cascade="all, delete", back_populates="satuan_rel")
-    is_deleted = Column(Boolean, default=False, nullable=False)
-    deleted_at = Column(DateTime, nullable=True)

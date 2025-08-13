@@ -69,10 +69,6 @@ class Pembelian(Base,SoftDeleteMixin):
     pembelian_items = relationship("PembelianItem", back_populates="pembelian", cascade="all, delete-orphan")
     pembayaran_detail_rel = relationship("PembayaranDetails", back_populates="pembelian_rel", cascade="all, delete-orphan")
     attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
-
-    is_deleted = Column(Boolean, default=False, nullable=False)
-    deleted_at = Column(DateTime, nullable=True)
-
     @hybrid_property
     def vendor_display(self) -> str:
         # draft‐mode name always wins; but if it’s empty, try the live FK

@@ -23,7 +23,3 @@ class Customer(Base,SoftDeleteMixin):
     penjualans = relationship("Penjualan",cascade="all, delete", back_populates="customer_rel")
     pembayarans = relationship("Pembayaran",cascade="all, delete", back_populates="customer_rel")
 
-    is_deleted = Column(Boolean, default=False, nullable=False)
-    deleted_at = Column(DateTime, nullable=True)
-
-

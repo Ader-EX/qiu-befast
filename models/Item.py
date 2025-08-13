@@ -43,8 +43,6 @@ class Item(Base, SoftDeleteMixin):
     pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
     penjualan_items  = relationship("PenjualanItem", back_populates="item_rel")
 
-    is_deleted = Column(Boolean, default=False, nullable=False)
-    deleted_at = Column(DateTime, nullable=True)
 
     @property
     def primary_image_url(self) -> Optional[str]:
