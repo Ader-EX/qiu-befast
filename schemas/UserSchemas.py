@@ -42,6 +42,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     role: UserType
+    is_active : bool
     last_login: Optional[datetime] = None
 
     class Config:
