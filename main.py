@@ -51,7 +51,7 @@ app.openapi = custom_openapi
 @app.on_event("startup")
 async def startup_event():
     Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created.")
+    print("✅ Database tables created (TEST VENDOR).")
     print("🚀 Starting FastAPI project")
 
 origins = [
