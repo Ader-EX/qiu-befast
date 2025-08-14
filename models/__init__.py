@@ -10,3 +10,4 @@ from models import Warehouse
 from models import Pembelian
 from models import Pembayaran
 from models import Penjualan
+from models.mixin import  SoftDeleteMixin
