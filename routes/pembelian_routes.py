@@ -328,10 +328,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
 
     db.add(pembelian)
     db.flush()
-    
-    # Add items - USE USER-PROVIDED PRICES
     for item_request in request.items:
-        # Fetch the item to validate existence and get name
         item = db.query(Item).filter(Item.id == item_request.item_id).first()
         if not item:
             raise HTTPException(
@@ -339,7 +336,6 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
                 detail=f"Item with ID {item_request.item_id} not found"
             )
 
-        # USE USER-PROVIDED UNIT PRICE (with fallback to item price)
         unit_price = (
         Decimal(str(item_request.unit_price))
         if item_request.unit_price is not None
@@ -350,9 +346,9 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         pembelian_item = PembelianItem(
             pembelian_id=pembelian.id,
             item_id=item_request.item_id,
-            item_name=item.name,
+            item_name=item_request.name,
             qty=item_request.qty,
-            unit_price=unit_price,  # ← USE USER INPUT!
+            unit_price=unit_price,
             tax_percentage=item_request.tax_percentage,
             total_price=total_price
         )
