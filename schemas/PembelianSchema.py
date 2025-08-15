@@ -66,12 +66,11 @@ class AttachmentResponse(BaseModel):
     file_path: Optional[str] = None
     
     created_at: datetime
-
     class Config:
         from_attributes = True
 
 class PembelianBase(BaseModel):
-    no_pembelian: str
+    no_pembelian: Optional[str] = None
     warehouse_id: Optional[int] = None
     vendor_id: Optional[str] = None  # Changed: vendor_id instead of customer_id
     top_id: Optional[int] = None
