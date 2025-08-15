@@ -2,7 +2,7 @@ import random
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, status
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, selectinload, joinedload
 from sqlalchemy import and_, func, desc
 from typing import List, Optional
 import uuid
@@ -12,12 +12,15 @@ import enum
 from datetime import datetime
 from decimal import Decimal
 
+from starlette.responses import HTMLResponse
+
 from database import get_db
-from models.Pembayaran import  Pembayaran
+from starlette.requests import Request
 from models.Vendor import Vendor  # Changed from Customer to Vendor
 from models.Item import Item
 from models.Pembelian import Pembelian, StatusPembelianEnum,PembelianItem, StatusPembayaranEnum
 from models.AllAttachment import ParentType, AllAttachment
+from routes.upload_routes import to_public_image_url, templates
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PembelianSchema import TotalsResponse, PembelianListResponse, PembelianResponse, PembelianCreate, \
     PembelianUpdate, PembelianStatusUpdate, UploadResponse, SuccessResponse
@@ -667,3 +670,79 @@ async def get_pembelian_summary(db: Session = Depends(get_db)):
         "total_value": total_value,
         "unpaid_value": unpaid_value
     }
+
+
+@router.get("/{pembelian_id}/invoice/html", response_class=HTMLResponse)
+async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: Session = Depends(get_db)):
+    pembelian = (
+        db.query(Pembelian)
+        .options(
+            joinedload(Pembelian.pembelian_items)
+            .joinedload(PembelianItem.item_rel)
+            .joinedload(Item.attachments)
+        )
+        .filter(Pembelian.id == pembelian_id)
+        .first()
+    )
+    if not pembelian:
+        raise HTTPException(status_code=404, detail="Pembelian not found")
+
+    BASE_URL = os.getenv("BASE_URL", "https://qiu-system.qiuparts.com")
+
+    enhanced_items = []
+    for it in pembelian.pembelian_items:
+        raw = it.item_rel.primary_image_url if it.item_rel else None
+        img_url = to_public_image_url(raw, request, BASE_URL)
+        enhanced_items.append({
+            "item": it,
+            "image_url": img_url,
+            "item_name": it.item_name,
+            "qty": it.qty,
+            "satuan_name": it.satuan_name,
+            "tax_percentage": it.tax_percentage,
+            "unit_price": it.unit_price,
+            "total_price": it.total_price,
+        })
+
+    subtotal = Decimal(0)
+    tax_amount = Decimal(0)
+    for item in pembelian.pembelian_items:
+        item_total = Decimal(str(item.total_price or 0))
+        subtotal += item_total
+        if item.tax_percentage:
+            item_tax = item_total * Decimal(str(item.tax_percentage)) / Decimal('100')
+            tax_amount += item_tax
+
+    discount = Decimal(str(pembelian.discount or 0))
+    additional_discount = Decimal(str(pembelian.additional_discount or 0))
+    final_total = subtotal - discount - additional_discount
+    expense = Decimal(str(pembelian.expense or 0))
+    grand_total = final_total + tax_amount + expense
+
+    totals = {
+        "subtotal": subtotal,
+        "tax_amount": tax_amount,
+        "final_total": final_total,
+        "grand_total": grand_total,
+    }
+
+    return templates.TemplateResponse(
+        "pembelian.html",
+        {
+            "request": request,
+            "pembelian": pembelian,
+            "enhanced_items": enhanced_items,
+            "totals": totals,
+            "company": {
+                "name": "PT. Jayagiri Indo Asia",
+                "logo_url": "static/logo.png",
+                "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
+                "website": "www.qiupart.com",
+                "bank_name": "Bank Mandiri",
+                "account_name": "PT. JAYAGIRI INDO ASIA",
+                "account_number": "167-00-07971095",
+                "representative": "AMAR",
+            },
+            "css": open("templates/invoice.css").read(),
+        },
+    )

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Invoice {{ pembelian.no_pembelian }}</title>
+    <style>
+      {{ css|safe }}
+    </style>
+  </head>
+  <body>
+    {# Currency macro; change to .replace(",", ".") if you want Indo separators
+    #} {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float)
+    }} {%- endmacro %}
+
+    <div class="invoice-container">
+      <!-- HEADER -->
+      <div class="header">
+        <img
+          src="{{ url_for('static', path='logo.png') }}"
+          style="width: 150px; height: auto"
+          alt="Logo"
+        />
+        <div class="header-right">
+          <div>{{ company.address }}</div>
+          <div>{{ company.website }}</div>
+        </div>
+      </div>
+
+      <hr class="divider" />
+      <h1>Invoice</h1>
+
+      <!-- INFO SECTION -->
+      <div class="info-section">
+        <div class="info-block">
+          <div class="title">Informasi Invoice</div>
+          <div class="info-row">
+            <div class="label">Nomor Faktur</div>
+            <div class="value">{{ pembelian.no_pembelian }}</div>
+          </div>
+          <div class="info-row">
+            <div class="label">Tanggal Terbit</div>
+            <div class="value">
+              {{ pembelian.sales_date.strftime('%d-%m-%Y') if
+              pembelian.sales_date else '-' }}
+            </div>
+          </div>
+          <div class="info-row">
+            <div class="label">Tanggal Jatuh Tempo</div>
+            <div class="value">
+              {{ pembelian.sales_due_date.strftime('%d-%m-%Y') if
+              pembelian.sales_due_date else '-' }}
+            </div>
+          </div>
+        </div>
+
+        <div class="info-block">
+          <div class="title">Kpd Yth.</div>
+          <div class="info-row">
+            <div class="label">Nama Customer</div>
+            <div class="value">{{ pembelian.vendor_display }}</div>
+          </div>
+          <div class="info-row">
+            <div class="label">Alamat</div>
+            <div class="value">
+              {{ pembelian.vendor_address_display if
+              pembelian.vendor_address_display else '-' }}
+            </div>
+          </div>
+          <div class="info-row">
+            <div class="label">Status</div>
+            <div class="value">
+              {{ pembelian.status_pembayaran.value if
+              pembelian.status_pembayaran else '-' }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ITEMS TABLE -->
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Nama Barang</th>
+              <th>QTY</th>
+              <th>Satuan</th>
+              <th>Pajak (%)</th>
+              <th>Harga Satuan (IDR)</th>
+              <th>Nominal (IDR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {# Use enhanced_items so image_url is already absolute/prefixed #}
+            {% for row in enhanced_items %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td style="display: flex; align-items: center; gap: 12px">
+                <img
+                  src="{{ row.image_url }}"
+                  alt="Product"
+                  style="width: 60px; height: 60px; object-fit: cover"
+                />
+                <span>{{ row.item_name }}</span>
+              </td>
+              <td style="text-align: center">{{ row.qty }}</td>
+              <td style="text-align: center">{{ row.satuan_name or '-' }}</td>
+              <td style="text-align: center">{{ row.tax_percentage or 0 }}</td>
+              <td style="text-align: right">{{ idr(row.unit_price) }}</td>
+              <td style="text-align: right">{{ idr(row.total_price) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- TOTALS -->
+      <div class="totals-section">
+        <div class="totals-title">Total Invoice</div>
+
+        <div class="totals-row">
+          <div class="label">Sub Total</div>
+          <div class="value">{{ idr(totals.subtotal) }}</div>
+        </div>
+
+        <div class="totals-row">
+          <div class="label">Discount</div>
+          <div class="value">{{ idr(pembelian.discount) }}</div>
+        </div>
+
+        <div class="totals-row">
+          <div class="label">Additional Discount</div>
+          <div class="value destructive">
+            {{ idr(pembelian.additional_discount) }}
+          </div>
+        </div>
+
+        <div style="height: 16px"></div>
+
+        <div class="summary-row">
+          <div>Total</div>
+          <div>{{ idr(totals.final_total) }}</div>
+        </div>
+        <div class="summary-row" style="font-weight: 400; font-size: 14px">
+          <div>Pajak</div>
+          <div>{{ idr(totals.tax_amount) }}</div>
+        </div>
+        <div class="summary-row" style="font-weight: 400; font-size: 14px">
+          <div>Expense</div>
+          <div>{{ idr(pembelian.expense) }}</div>
+        </div>
+        <div class="summary-row" style="font-weight: 400; font-size: 14px">
+          <div>Remaining</div>
+          <div>{{ idr(pembelian.remaining) }}</div>
+        </div>
+
+        <div class="summary-row">
+          <div>Grand Total</div>
+          <div>{{ idr(totals.grand_total) }}</div>
+        </div>
+      </div>
+
+      <!-- PAYMENT INFO -->
+      <div class="payment">
+        Mohon melakukan pembayaran ke rekening berikut:<br />
+        • Nama Bank: {{ company.bank_name }}<br />
+        • Nama Penerima: {{ company.account_name }}<br />
+        • No. Rekening: {{ company.account_number }}
+      </div>
+
+      <!-- SIGNATURE -->
+      <div class="signature">
+        <div class="signature-block">
+          <div class="line1">Hormat kami,</div>
+          <div class="line2">{{ company.name }}</div>
+          <br /><br />
+          <div class="line3">{{ company.representative }}</div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

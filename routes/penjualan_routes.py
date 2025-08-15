@@ -2,7 +2,7 @@ import random
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, status
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, selectinload, joinedload
 from sqlalchemy import and_, func, desc
 from typing import List, Optional
 import uuid
@@ -12,15 +12,19 @@ import enum
 from datetime import datetime
 from decimal import Decimal
 
+from starlette.requests import Request
+from starlette.responses import HTMLResponse
+
 from database import get_db
 from models.Customer import Customer
 from models.Pembayaran import  Pembayaran
-from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
+from models.Penjualan import StatusPembayaranEnum, StatusPembelianEnum
 from models.Penjualan import Penjualan, PenjualanItem
 
 from models.Item import Item
 
 from models.AllAttachment import ParentType, AllAttachment
+from routes.upload_routes import to_public_image_url, templates
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PenjualanSchema import PenjualanCreate, PenjualanListResponse, PenjualanResponse, PenjualanStatusUpdate, PenjualanUpdate, SuccessResponse, TotalsResponse, UploadResponse
 
@@ -664,3 +668,80 @@ async def get_penjualan_summary(db: Session = Depends(get_db)):
         "total_value": total_value,
         "unpaid_value": unpaid_value
     }
+
+
+
+@router.get("/{penjualan_id}/invoice/html", response_class=HTMLResponse)
+async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: Session = Depends(get_db)):
+    penjualan = (
+        db.query(Penjualan)
+        .options(
+            joinedload(Penjualan.penjualan_items)
+            .joinedload(PenjualanItem.item_rel)
+            .joinedload(Item.attachments)
+        )
+        .filter(Penjualan.id == penjualan_id)
+        .first()
+    )
+    if not penjualan:
+        raise HTTPException(status_code=404, detail="Penjualan not found")
+
+    BASE_URL = os.getenv("BASE_URL", "https://qiu-system.qiuparts.com")
+
+    enhanced_items = []
+    for it in penjualan.penjualan_items:
+        raw = it.item_rel.primary_image_url if it.item_rel else None
+        img_url = to_public_image_url(raw, request, BASE_URL)
+        enhanced_items.append({
+            "item": it,
+            "image_url": img_url,
+            "item_name": it.item_name,
+            "qty": it.qty,
+            "satuan_name": it.satuan_name,
+            "tax_percentage": it.tax_percentage,
+            "unit_price": it.unit_price,
+            "total_price": it.total_price,
+        })
+
+    subtotal = Decimal(0)
+    tax_amount = Decimal(0)
+    for item in penjualan.penjualan_items:
+        item_total = Decimal(str(item.total_price or 0))
+        subtotal += item_total
+        if item.tax_percentage:
+            item_tax = item_total * Decimal(str(item.tax_percentage)) / Decimal('100')
+            tax_amount += item_tax
+
+    discount = Decimal(str(penjualan.discount or 0))
+    additional_discount = Decimal(str(penjualan.additional_discount or 0))
+    final_total = subtotal - discount - additional_discount
+    expense = Decimal(str(penjualan.expense or 0))
+    grand_total = final_total + tax_amount + expense
+
+    totals = {
+        "subtotal": subtotal,
+        "tax_amount": tax_amount,
+        "final_total": final_total,
+        "grand_total": grand_total,
+    }
+
+    return templates.TemplateResponse(
+        "penjualan.html",
+        {
+            "request": request,
+            "penjualan": penjualan,
+            "enhanced_items": enhanced_items,
+            "totals": totals,
+            "company": {
+                "name": "PT. Jayagiri Indo Asia",
+                "logo_url": "static/logo.png",
+                "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
+                "website": "www.qiupart.com",
+                "bank_name": "Bank Mandiri",
+                "account_name": "PT. JAYAGIRI INDO ASIA",
+                "account_number": "167-00-07971095",
+                "representative": "AMAR",
+            },
+            "css": open("templates/invoice.css").read(),
+        },
+    )
