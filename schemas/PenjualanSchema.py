@@ -72,7 +72,7 @@ class AttachmentResponse(BaseModel):
         from_attributes = True
 
 class PenjualanBase(BaseModel):
-    no_penjualan: str
+    no_penjualan: Optional[str] = None
     warehouse_id: Optional[int] = None
     customer_id: Optional[str] = None
     top_id: Optional[int] = None

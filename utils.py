@@ -65,3 +65,37 @@ def soft_delete_record(session: Session, model_class, record_id):
     else:
         raise ValueError(f"{model_class.__name__} does not support soft delete")
     session.commit()
+
+
+def generate_unique_record_number(
+        db: Session,
+        model_class,
+        prefix: str = "QP/SI"
+) -> str:
+    """Generate unique record number for any model with a created_at column.
+
+    Format: PREFIX/NoUrut/MM/YYYY
+    Sequence resets every month.
+    """
+
+    today = datetime.now()
+    bulan = today.strftime("%m")
+    tahun = today.strftime("%Y")
+
+    start_of_month = datetime(today.year, today.month, 1)
+    if today.month == 12:
+        start_of_next_month = datetime(today.year + 1, 1, 1)
+    else:
+        start_of_next_month = datetime(today.year, today.month + 1, 1)
+
+    count_this_month = (
+        db.query(model_class)
+        .filter(
+            model_class.created_at >= start_of_month,
+            model_class.created_at < start_of_next_month
+        )
+        .count()
+    )
+
+    nomor_urut = count_this_month + 1
+    return f"{prefix}/{nomor_urut:03d}/{bulan}/{tahun}"

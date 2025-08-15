@@ -24,6 +24,7 @@ from routes.upload_routes import to_public_image_url, templates
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PembelianSchema import TotalsResponse, PembelianListResponse, PembelianResponse, PembelianCreate, \
     PembelianUpdate, PembelianStatusUpdate, UploadResponse, SuccessResponse
+from utils import generate_unique_record_number
 
 router = APIRouter()
 
@@ -313,9 +314,9 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
 
     pembelian = Pembelian(
         id=generate_pembelian_id(),
-        no_pembelian=request.no_pembelian,
+        no_pembelian = generate_unique_record_number(db, Pembelian, prefix="QP/PRC"),
         warehouse_id=request.warehouse_id,
-        vendor_id=request.vendor_id,  # Changed: vendor_id instead of customer_id
+        vendor_id=request.vendor_id,
         top_id=request.top_id,
         sales_date=request.sales_date,
         sales_due_date=request.sales_due_date,

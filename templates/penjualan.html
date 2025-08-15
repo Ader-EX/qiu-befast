@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Invoice {{ pembelian.no_pembelian }}</title>
+    <title>Invoice {{ penjualan.no_penjualan }}</title>
     <style>
       {{ css|safe }}
     </style>
@@ -36,20 +36,20 @@
           <div class="title">Informasi Invoice</div>
           <div class="info-row">
             <div class="label">Nomor Faktur</div>
-            <div class="value">{{ pembelian.no_pembelian }}</div>
+            <div class="value">{{ penjualan.no_penjualan }}</div>
           </div>
           <div class="info-row">
             <div class="label">Tanggal Terbit</div>
             <div class="value">
-              {{ pembelian.sales_date.strftime('%d-%m-%Y') if
-              pembelian.sales_date else '-' }}
+              {{ penjualan.sales_date.strftime('%d-%m-%Y') if
+              penjualan.sales_date else '-' }}
             </div>
           </div>
           <div class="info-row">
             <div class="label">Tanggal Jatuh Tempo</div>
             <div class="value">
-              {{ pembelian.sales_due_date.strftime('%d-%m-%Y') if
-              pembelian.sales_due_date else '-' }}
+              {{ penjualan.sales_due_date.strftime('%d-%m-%Y') if
+              penjualan.sales_due_date else '-' }}
             </div>
           </div>
         </div>
@@ -58,20 +58,20 @@
           <div class="title">Kpd Yth.</div>
           <div class="info-row">
             <div class="label">Nama Customer</div>
-            <div class="value">{{ pembelian.customer_display }}</div>
+            <div class="value">{{ penjualan.customer_display }}</div>
           </div>
           <div class="info-row">
             <div class="label">Alamat</div>
             <div class="value">
-              {{ pembelian.customer_address_display if
-              pembelian.customer_address_display else '-' }}
+              {{ penjualan.customer_address_display if
+              penjualan.customer_address_display else '-' }}
             </div>
           </div>
           <div class="info-row">
             <div class="label">Status</div>
             <div class="value">
-              {{ pembelian.status_pembayaran.value if
-              pembelian.status_pembayaran else '-' }}
+              {{ penjualan.status_pembayaran.value if
+              penjualan.status_pembayaran else '-' }}
             </div>
           </div>
         </div>
@@ -126,13 +126,13 @@
 
         <div class="totals-row">
           <div class="label">Discount</div>
-          <div class="value">{{ idr(pembelian.discount) }}</div>
+          <div class="value">{{ idr(penjualan.discount) }}</div>
         </div>
 
         <div class="totals-row">
           <div class="label">Additional Discount</div>
           <div class="value destructive">
-            {{ idr(pembelian.additional_discount) }}
+            {{ idr(penjualan.additional_discount) }}
           </div>
         </div>
 
@@ -148,11 +148,11 @@
         </div>
         <div class="summary-row" style="font-weight: 400; font-size: 14px">
           <div>Expense</div>
-          <div>{{ idr(pembelian.expense) }}</div>
+          <div>{{ idr(penjualan.expense) }}</div>
         </div>
         <div class="summary-row" style="font-weight: 400; font-size: 14px">
           <div>Remaining</div>
-          <div>{{ idr(pembelian.remaining) }}</div>
+          <div>{{ idr(penjualan.remaining) }}</div>
         </div>
 
         <div class="summary-row">

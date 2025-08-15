@@ -27,6 +27,7 @@ from models.AllAttachment import ParentType, AllAttachment
 from routes.upload_routes import to_public_image_url, templates
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PenjualanSchema import PenjualanCreate, PenjualanListResponse, PenjualanResponse, PenjualanStatusUpdate, PenjualanUpdate, SuccessResponse, TotalsResponse, UploadResponse
+from utils import generate_unique_record_number
 
 router = APIRouter()
 
@@ -312,7 +313,7 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
 
     new_penjualan = Penjualan(
         id=generate_penjualan_id(),
-        no_penjualan=request.no_penjualan,
+        no_penjualan = generate_unique_record_number(db, Penjualan, prefix="QP/SI"),
         warehouse_id=request.warehouse_id,
         customer_id=request.customer_id,
         top_id=request.top_id,

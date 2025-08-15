@@ -6,9 +6,8 @@ import enum
 
 class UserType(enum.Enum):
     OWNER = 0
-    MANAGER = 1
-    STAFF =2
-    ALL = 3
+    STAFF = 1
+    ALL =2
 
 class UserCreate(BaseModel):
     username:str
