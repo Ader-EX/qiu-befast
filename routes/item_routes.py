@@ -24,17 +24,15 @@ router = APIRouter()
 NEXT_PUBLIC_UPLOAD_DIR = os.getenv("UPLOAD_DIR" ,default="uploads/items")
 os.makedirs(NEXT_PUBLIC_UPLOAD_DIR, exist_ok=True)
 
-
 def get_item_prefix(item_type: ItemTypeEnum) -> str:
-    match item_type:
-        case ItemTypeEnum.FINISH_GOOD:
-            return "FG"
-        case ItemTypeEnum.RAW_MATERIAL:
-            return "RAW"
-        case ItemTypeEnum.SERVICE:
-            return "SERVICE"
-        case _:
-            raise ValueError(f"Unsupported item type: {item_type}")
+    if item_type == ItemTypeEnum.FINISH_GOOD:
+        return "FG"
+    elif item_type == ItemTypeEnum.RAW_MATERIAL:
+        return "RAW"
+    elif item_type == ItemTypeEnum.SERVICE:
+        return "SERVICE"
+    else:
+        raise ValueError(f"Unsupported item type: {item_type}")
 
 @router.post("", response_model=ItemResponse)
 async def create_item(
