@@ -342,11 +342,12 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         else Decimal(str(item.price))
 )
         total_price = calculate_item_total(item_request.qty, unit_price)
+        new_item = db.query(Item).filter(Item.id == item_request.item_id).first()
 
         pembelian_item = PembelianItem(
             pembelian_id=pembelian.id,
             item_id=item_request.item_id,
-            item_name=item_request.name,
+            item_name=new_item.name,
             qty=item_request.qty,
             unit_price=unit_price,
             tax_percentage=item_request.tax_percentage,
@@ -685,6 +686,7 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
         raise HTTPException(status_code=404, detail="Pembelian not found")
 
     BASE_URL = os.getenv("BASE_URL", "https://qiu-system.qiuparts.com")
+  
 
     enhanced_items = []
     for it in pembelian.pembelian_items:

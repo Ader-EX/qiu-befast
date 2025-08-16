@@ -17,12 +17,25 @@ from schemas.ItemSchema import ItemResponse, ItemTypeEnum, AttachmentResponse
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.SatuanSchemas import SatuanOut
 from schemas.VendorSchemas import VendorOut
-from utils import soft_delete_record
+from utils import generate_unique_record_code, soft_delete_record
 
 router = APIRouter()
 
 NEXT_PUBLIC_UPLOAD_DIR = os.getenv("UPLOAD_DIR" ,default="uploads/items")
 os.makedirs(NEXT_PUBLIC_UPLOAD_DIR, exist_ok=True)
+
+
+def get_item_prefix(item_type: ItemTypeEnum) -> str:
+    match item_type:
+        case ItemTypeEnum.FINISH_GOOD:
+            return "FG"
+        case ItemTypeEnum.RAW_MATERIAL:
+            return "RAW"
+        case ItemTypeEnum.SERVICE:
+            return "SERVICE"
+        case _:
+            raise ValueError(f"Unsupported item type: {item_type}")
+
 @router.post("", response_model=ItemResponse)
 async def create_item(
         type: ItemTypeEnum = Form(...),
@@ -41,12 +54,13 @@ async def create_item(
     # Validate max 3 images
     if len(images) > 3:
         raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
-
+    pattern = get_item_prefix(type)
     # Check if SKU exists
     existing_item = db.query(Item).filter(Item.sku == sku).first()
     if existing_item:
         if existing_item.is_deleted:
             existing_item.type = type
+            existing_item.code =  generate_unique_record_code(db,Item,pattern)
             existing_item.name = name
             existing_item.total_item = total_item
             existing_item.price = price
@@ -68,6 +82,7 @@ async def create_item(
         db_item = Item(
             type=type,
             name=name,
+            code =  generate_unique_record_code(db,Item,pattern),
             sku=sku,
             total_item=total_item,
             price=price,
@@ -441,6 +456,7 @@ def construct_item_response(item: Item, request: Request) -> Dict[str, Any]:
         "type": item.type,
         "name": item.name,
         "sku": item.sku,
+        "code" : item.code,
         "total_item": item.total_item,
         "price": item.price,
         "is_active": item.is_active,

@@ -10,6 +10,7 @@ from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
 # Base schemas
 class PembelianItemBase(BaseModel):
     item_id: Optional[int] = None
+ 
     qty: int
     unit_price: Decimal
     tax_percentage : Optional[int] = 0
@@ -27,7 +28,7 @@ class PembelianItemBase(BaseModel):
         return v
 
 class PembelianItemCreate(PembelianItemBase):
-
+ 
     item_id: int
     pass
 

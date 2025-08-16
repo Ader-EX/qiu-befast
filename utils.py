@@ -99,3 +99,20 @@ def generate_unique_record_number(
 
     nomor_urut = count_this_month + 1
     return f"{prefix}/{nomor_urut:03d}/{bulan}/{tahun}"
+
+
+def generate_unique_record_code(
+        db: Session,
+        model_class,
+      
+        prefix: str = "FG"
+) -> str:
+    """Generate unique record number for any model  column.
+
+    Format: PREFIX-00001
+ 
+    """
+    counter =  db.query(model_class).count()
+
+    nomor_urut = counter + 1
+    return f"{prefix}-{nomor_urut:05d}"

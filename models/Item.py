@@ -19,6 +19,7 @@ class Item(Base, SoftDeleteMixin):
     __tablename__ = "items"
     
     id = Column(Integer, primary_key=True, index=True)
+    code= Column(String(100), unique=True, nullable=True)
     type = Column(Enum(ItemTypeEnum))
     name = Column(String(100), nullable=False)
     sku = Column(String(100), unique=True, nullable=False, index=True)

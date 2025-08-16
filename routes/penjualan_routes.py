@@ -151,6 +151,9 @@ def finalize_penjualan(db: Session, penjualan_id: int):
     if not penjualan.penjualan_items:
         raise HTTPException(status_code=400, detail="At least one item is required for finalization")
 
+    # PRESERVE the original no_penjualan
+    original_no_penjualan = penjualan.no_penjualan
+
     for it in penjualan.penjualan_items:
         validate_item_stock(db, it.item_id, it.qty)
 
@@ -180,14 +183,20 @@ def finalize_penjualan(db: Session, penjualan_id: int):
             if getattr(item, "customer_rel", None):
                 pit.customer_name = item.customer_rel.name
 
-    # Deduct stock
+ 
+    if not penjualan.no_penjualan or penjualan.no_penjualan != original_no_penjualan:
+        penjualan.no_penjualan = original_no_penjualan
+
     for pit in penjualan.penjualan_items:
         item = db.query(Item).filter(Item.id == pit.item_id).first()
         if item is not None and item.total_item is not None:
             item.total_item = item.total_item - pit.qty
 
-    # Activate
     penjualan.status_penjualan = StatusPembelianEnum.ACTIVE
+    
+    if not penjualan.no_penjualan:
+        penjualan.no_penjualan = original_no_penjualan
+    
     db.commit()
 
 
@@ -375,13 +384,6 @@ async def update_penjualan(
         raise HTTPException(status_code=404, detail="penjualan not found")
     validate_draft_status(penjualan)
 
-    if request.no_penjualan and request.no_penjualan != penjualan.no_penjualan:
-        exists = db.query(Penjualan).filter(
-            and_(Penjualan.no_penjualan == request.no_penjualan,
-                 Penjualan.id != penjualan_id)
-        ).first()
-        if exists:
-            raise HTTPException(status_code=400, detail="No penjualan already exists")
 
     update_data = request.dict(exclude_unset=True)
     items_data = update_data.pop("items", None)

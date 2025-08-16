@@ -72,7 +72,7 @@ class AttachmentResponse(BaseModel):
         from_attributes = True
 
 class PenjualanBase(BaseModel):
-    no_penjualan: Optional[str] = None
+    
     warehouse_id: Optional[int] = None
     customer_id: Optional[str] = None
     top_id: Optional[int] = None
@@ -82,11 +82,7 @@ class PenjualanBase(BaseModel):
     additional_discount: Optional[Decimal] = Decimal('0.00')
     expense: Optional[Decimal] = Decimal('0.00')
 
-    @validator('no_penjualan')
-    def validate_no_penjualan(cls, v):
-        if not v or v.strip() == "":
-            raise ValueError('No Penjualan cannot be empty')
-        return v.strip()
+  
 
     @validator('discount', 'additional_discount', 'expense')
     def validate_amounts(cls, v):
@@ -105,7 +101,7 @@ class PenjualanCreate(PenjualanBase):
         return v
 
 class PenjualanUpdate(BaseModel):
-    no_penjualan: Optional[str] = None
+    
     warehouse_id: Optional[int] = None
     customer_id: Optional[str] = None
     top_id: Optional[int] = None
@@ -116,11 +112,7 @@ class PenjualanUpdate(BaseModel):
     expense: Optional[Decimal] = None
     items: Optional[List[PenjualanItemUpdate]] = None
 
-    @validator('no_penjualan')
-    def validate_no_penjualan(cls, v):
-        if v is not None and (not v or v.strip() == ""):
-            raise ValueError('No Penjualan cannot be empty')
-        return v.strip() if v else v
+   
 
     @validator('discount', 'additional_discount', 'expense')
     def validate_amounts(cls, v):

@@ -41,6 +41,7 @@ class AttachmentResponse(BaseModel):
 
 class ItemBase(BaseModel):
     type: ItemTypeEnum
+    code: str
     name: str
     sku: str
     total_item: int = 0
