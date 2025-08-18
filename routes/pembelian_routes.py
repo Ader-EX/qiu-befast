@@ -62,13 +62,9 @@ def validate_item_stock(db: Session, item_id: str, requested_qty: int) -> None:
             detail=f"Stock untuk item '{item.name}' tidak tersedia. Available: {available_stock}, Requested: {requested_qty}"
         )
 
-    # Check if stock would go negative after deduction
-    remaining_after_deduction = available_stock - requested_qty
-    if remaining_after_deduction < 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Stock akan menjadi < 0 untuk item '{item.name}'. Available: {available_stock}, Requested: {requested_qty}"
-        )
+    # Check if stock would go positive 
+    remaining_after_addition = available_stock + requested_qty
+   
 
 def validate_pembelian_items_stock(db: Session, items_data: List) -> None:
     """Validate stock for all items in pembelian"""
@@ -181,12 +177,12 @@ def finalize_pembelian(db: Session, pembelian_id: str):
             if item.vendor_rel:
                 pembelian_item.vendor_name = item.vendor_rel.name
 
-    # Update item stock after validation - deduct the quantities
+    # Update item stock after validation - add the quantities
     for pembelian_item in pembelian.pembelian_items:
         item = db.query(Item).filter(Item.id == pembelian_item.item_id).first()
         if item and item.total_item is not None:
-            # Subtract the purchased quantity from available stock
-            item.total_item = item.total_item - pembelian_item.qty
+            # Add the purchased quantity from available stock
+            item.total_item = item.total_item + pembelian_item.qty
 
     # Update status
     pembelian.status_pembelian = StatusPembelianEnum.ACTIVE
@@ -431,6 +427,37 @@ async def update_pembelian(
 
     return await get_pembelian(pembelian_id, db)
 
+
+@router.patch("/{pembelian_id}", status_code=status.HTTP_200_OK)
+async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get_db)):
+    """
+    Rolls back the status of a purchase ('Pembelian') to 'DRAFT'
+    if its current status is 'ACTIVE' or 'COMPLETED'.
+    
+    Args:
+        pembelian_id: The unique ID of the purchase to update.
+        db: The database session dependency.
+    """
+
+    query = db.query(Pembelian).filter(Pembelian.id == pembelian_id)
+    
+
+    pembelian = query.first()
+
+
+    if not pembelian:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pembelian not found")
+
+
+    if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
+        pembelian.status_pembelian = StatusPembelianEnum.DRAFT
+    
+    db.commit()
+    db.refresh(pembelian)
+    return {
+        "msg": "Pembelian status changed successfully"
+    }
+
 @router.post("/{pembelian_id}/finalize", response_model=PembelianResponse)
 async def finalize_pembelian_endpoint(pembelian_id: str, db: Session = Depends(get_db)):
     """Finalize pembelian - convert from DRAFT to ACTIVE"""
@@ -585,7 +612,7 @@ async def delete_pembelian(pembelian_id: int, db: Session = Depends(get_db)):
         .options(
             selectinload(Pembelian.pembelian_items),
             selectinload(Pembelian.attachments),
-            selectinload(Pembelian.pembayaran_rel),
+            selectinload(Pembelian.pembayaran_detail_rel),
         )
         .get(pembelian_id)
     )
@@ -593,7 +620,7 @@ async def delete_pembelian(pembelian_id: int, db: Session = Depends(get_db)):
     if not pembelian:
         raise HTTPException(status_code=404, detail="Pembelian not found")
 
-    has_payments = bool(pembelian.pembayaran_rel)
+    has_payments = bool(pembelian.pembayaran_detail_rel)
 
     if pembelian.status_pembelian.name == "DRAFT" and not has_payments:
         try:
@@ -611,9 +638,6 @@ async def delete_pembelian(pembelian_id: int, db: Session = Depends(get_db)):
             db.query(AllAttachment).filter(
                 AllAttachment.pembelian_id == pembelian_id
             ).delete(synchronize_session=False)
-
-
-
             db.delete(pembelian)
             db.commit()
             return SuccessResponse(message="Pembelian (DRAFT) deleted successfully")

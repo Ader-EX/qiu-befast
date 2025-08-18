@@ -13,11 +13,10 @@ class Customer(Base,SoftDeleteMixin):
     address = Column(String(255) , nullable=False)
     is_active = Column(Boolean, default=True)
 
-    top_id = Column(Integer, ForeignKey("term_of_payments.id"), nullable=False)
     currency_id = Column(Integer, ForeignKey("currencies.id"),nullable=False)
     created_at = Column(DateTime, default=datetime.now(), nullable=False)
 
-    top_rel = relationship("TermOfPayment",back_populates="cust_rel")
+   
     curr_rel = relationship("Currency", back_populates="cust_rel")
     # pembelians = relationship("Pembelian",cascade="all, delete", back_populates="customer_rel")
     penjualans = relationship("Penjualan",cascade="all, delete", back_populates="customer_rel")

@@ -453,6 +453,38 @@ async def update_status(
     db.commit()
     return await get_penjualan(penjualan_id, db)
 
+
+
+@router.patch("/{penjualan_id}", status_code=status.HTTP_200_OK)
+async def rollback_penjualan_status(penjualan_id: int, db: Session = Depends(get_db)):
+    """
+    Rolls back the status of a purchase ('Pembelian') to 'DRAFT'
+    if its current status is 'ACTIVE' or 'COMPLETED'.
+    
+    Args:
+        pembelian_id: The unique ID of the purchase to update.
+        db: The database session dependency.
+    """
+
+    query = db.query(Penjualan).filter(Penjualan.id == penjualan_id)
+    
+
+    penjualan = query.first()
+
+
+    if not penjualan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Penjualan not found")
+
+
+    if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
+        penjualan.status_penjualan = StatusPembelianEnum.DRAFT
+    
+    db.commit()
+    db.refresh(penjualan)
+    return {
+        "msg": "Penjualan status changed successfully"
+    }
+
 @router.post("/{penjualan_id}/upload-attachments", response_model=UploadResponse)
 async def upload_attachments(
         penjualan_id: str,

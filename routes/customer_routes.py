@@ -24,7 +24,7 @@ def get_all_Customer(
         is_active: Optional[bool] = None,
         search_key: Optional[str] = None,
 ):
-    query = db.query(Customer).options(joinedload(Customer.top_rel), joinedload(Customer.curr_rel)).filter(Customer.is_deleted == False )
+    query = db.query(Customer).options( joinedload(Customer.curr_rel)).filter(Customer.is_deleted == False )
 
     if is_active is not None:
         query = query.filter(Customer.is_active == is_active)
