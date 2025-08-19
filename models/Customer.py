@@ -12,6 +12,7 @@ class Customer(Base,SoftDeleteMixin):
     name = Column(String(50), nullable=False)
     address = Column(String(255) , nullable=False)
     is_active = Column(Boolean, default=True)
+    kode_lambung = Column(Text, nullable=True, default="")
 
     currency_id = Column(Integer, ForeignKey("currencies.id"),nullable=False)
     created_at = Column(DateTime, default=datetime.now(), nullable=False)

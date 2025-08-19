@@ -21,4 +21,3 @@ class Vendor(Base, SoftDeleteMixin):
     top_rel = relationship("TermOfPayment",cascade="all, delete", back_populates="vend_rel")
     pembelians = relationship("Pembelian",cascade="all, delete", back_populates="vend_rel")
 
-    items = relationship("Item", back_populates="vendor_rel")

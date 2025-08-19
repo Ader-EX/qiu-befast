@@ -7,7 +7,6 @@ from starlette.exceptions import HTTPException
 
 from models.Currency import Currency
 from models.Customer import Customer
-from models.TermOfPayment import TermOfPayment
 from schemas.CustomerSchemas import CustomerOut, CustomerCreate, CustomerUpdate
 from database import get_db
 from schemas.PaginatedResponseSchemas import PaginatedResponse
@@ -84,15 +83,6 @@ async def create_customer(customer_data: CustomerCreate, db: Session = Depends(g
             detail=f"Currency with ID '{customer_data.currency_id}' not found."
         )
 
-    top = db.query(TermOfPayment).filter(
-        TermOfPayment.id == customer_data.top_id,
-        TermOfPayment.is_active == True
-    ).first()
-    if not top:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Term of Payment with ID '{customer_data.top_id}' not found."
-        )
 
     customer = Customer(**customer_data.dict())
     db.add(customer)

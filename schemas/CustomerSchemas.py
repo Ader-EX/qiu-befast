@@ -1,21 +1,18 @@
 from pydantic import BaseModel
-from typing import Optional
-
+from typing import Optional, List
 from schemas.CurrencySchemas import CurrencyOut
-from schemas.TopSchemas import TopOut
 
 
 class CustomerBase(BaseModel):
     id:str
     name: str
     address: str
+    kode_lambung: Optional[str] = None
     is_active: Optional[bool] = True
     currency_id: int
 
-
 class CustomerCreate(CustomerBase):
-    id: str  
-
+    pass
 
 class CustomerUpdate(CustomerBase):
     pass

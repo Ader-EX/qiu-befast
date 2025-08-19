@@ -28,18 +28,16 @@ class Item(Base, SoftDeleteMixin):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.now(), nullable=False)
     
-    # Foreign Ke
+    # Foreign Key
     category_one = Column(Integer, ForeignKey("categories.id"), nullable=True)
     category_two = Column(Integer, ForeignKey("categories.id"), nullable=True)
     satuan_id = Column(Integer, ForeignKey("satuans.id"), nullable=False)
-    vendor_id = Column(String(50), ForeignKey("vendors.id", ), nullable=False)
 
     # Relationships
     category_one_rel = relationship("Category", foreign_keys=[category_one])
     category_two_rel = relationship("Category", foreign_keys=[category_two])
 
     satuan_rel = relationship("Satuan", back_populates="items")
-    vendor_rel = relationship("Vendor", back_populates="items")
     attachments = relationship("AllAttachment", back_populates="item_rel", cascade="all, delete-orphan",   primaryjoin="and_(Item.id==foreign(AllAttachment.item_id), AllAttachment.parent_type=='ITEMS')")
     pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
     penjualan_items  = relationship("PenjualanItem", back_populates="item_rel")
@@ -50,7 +48,7 @@ class Item(Base, SoftDeleteMixin):
         if not self.attachments:
             return None
 
-        chosen = self.attachments[0]  # or your custom selection logic
+        chosen = self.attachments[0]
 
         raw_path = getattr(chosen, "file_path", None) or getattr(chosen, "path", None) or getattr(chosen, "filename", None)
         if raw_path is None:
@@ -63,5 +61,4 @@ class Item(Base, SoftDeleteMixin):
 
         base_url = os.environ.get("BASE_URL", "http://localhost:8000")
         return f"{base_url}/static/{relative_path}"
-
 

@@ -7,8 +7,6 @@ from models.Item import ItemTypeEnum
 from schemas.CategorySchemas import CategoryOut
 from schemas.SatuanSchemas import SatuanOut
 from schemas.TopSchemas import TopOut
-from schemas.VendorSchemas import VendorOut
-
 
 class AttachmentResponse(BaseModel):
     id: int
@@ -24,16 +22,13 @@ class AttachmentResponse(BaseModel):
 
     def to_url(self):
         return f"/static/{self.file_path}"
-    
+
     @computed_field
     @property
     def url(self) -> str:
         base_url = os.environ.get("BASE_URL", "http://localhost:8000")
-        
-        # Misal file_path = "uploads/items/abc.jpg" atau "items/abc.jpg"
-        relative_path = self.file_path.replace("\\", "/")
 
-        # Remove leading "uploads/" or absolute path if any
+        relative_path = self.file_path.replace("\\", "/")
         relative_path = relative_path.replace("uploads/", "").replace("/root/backend/", "")
 
         return f"{base_url}/static/{relative_path}"
@@ -47,13 +42,11 @@ class ItemBase(BaseModel):
     total_item: int = 0
     price: float
     is_active: bool
-
-
+    kode_lambung: str
     category_one_rel: Optional[CategoryOut] = None
     category_two_rel: Optional[CategoryOut] = None
-
     satuan_rel: Optional[SatuanOut] = None
-    vendor_rel: Optional[VendorOut] = None
+
     class Config:
         from_attributes = True
 
@@ -62,18 +55,13 @@ class ItemCreate(ItemBase):
     category_one_id: Optional[int] = None
     category_two_id: Optional[int] = None
     satuan_id: Optional[int] = None
-    vendor_id: Optional[int] = None
 
-    category_one_rel: Optional[TopOut] = None
-    category_two_rel: Optional[TopOut] = None
 
 
 class ItemUpdate(ItemBase):
     category_one_id: Optional[int] = None
     category_two_id: Optional[int] = None
     satuan_id: Optional[int] = None
-    vendor_id: Optional[int] = None
-
     category_one_rel: Optional[TopOut] = None
     category_two_rel: Optional[TopOut] = None
     class Config:
