@@ -174,8 +174,7 @@ def finalize_pembelian(db: Session, pembelian_id: str):
             pembelian_item.item_type = item.type.value if item.type else None
             if item.satuan_rel:
                 pembelian_item.satuan_name = item.satuan_rel.name
-            if item.vendor_rel:
-                pembelian_item.vendor_name = item.vendor_rel.name
+
 
     # Update item stock after validation - add the quantities
     for pembelian_item in pembelian.pembelian_items:
@@ -388,7 +387,6 @@ async def update_pembelian(
     for field, value in update_data.items():
         setattr(pembelian, field, value)
 
-    # 4) Validate items (if provided) then replace them
     if items_data is not None:
         validate_pembelian_items_stock(db, items_data)
 

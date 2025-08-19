@@ -105,7 +105,6 @@ class PembelianItem(Base):
     item_type = Column(String(50), nullable=True)
     # FINISH_GOOD, RAW_MATERIAL, SERVICE
     satuan_name = Column(String(100), nullable=True)
-    vendor_name = Column(String(255), nullable=True)
     tax_percentage = Column(Integer, nullable=True, default=0)
     qty = Column(Integer, nullable=False, default=0)
     unit_price = Column(Numeric(15, 7), nullable=False, default=0.00)

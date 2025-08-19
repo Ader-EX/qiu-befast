@@ -4,14 +4,17 @@ from datetime import datetime
 from sqlalchemy import Integer, Column, DateTime, Enum, Numeric, ForeignKey, String, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
+from models.Pembelian import StatusPembelianEnum
 from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 from schemas.PembayaranSchemas import PembayaranPengembalianType
 
 
-class Pembayaran(Base, SoftDeleteMixin):
+class Pembayaran(Base):
     __tablename__ = "pembayarans"
 
     id = Column(Integer, primary_key=True, index=True)
+    no_pembayaran = Column(String(255), unique=True, default="", nullable=False)
+    status = Column(Enum(StatusPembelianEnum), default=StatusPembelianEnum.DRAFT)
     created_at = Column(DateTime, default=datetime.now(), nullable=False)
     
     payment_date = Column(DateTime, nullable=False)
@@ -38,7 +41,7 @@ class Pembayaran(Base, SoftDeleteMixin):
 
 
 
-class PembayaranDetails(Base, SoftDeleteMixin):
+class PembayaranDetails(Base):
     __tablename__ = "pembayaran_details"
 
     id = Column(Integer, primary_key=True, index=True)

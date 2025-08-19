@@ -42,7 +42,7 @@ class ItemBase(BaseModel):
     total_item: int = 0
     price: float
     is_active: bool
-    kode_lambung: str
+
     category_one_rel: Optional[CategoryOut] = None
     category_two_rel: Optional[CategoryOut] = None
     satuan_rel: Optional[SatuanOut] = None
