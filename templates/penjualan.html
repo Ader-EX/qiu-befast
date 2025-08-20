@@ -52,6 +52,13 @@
               penjualan.sales_due_date else '-' }}
             </div>
           </div>
+          <div class="info-row">
+            <div class="label">Kode Lambung</div>
+            <div class="value">
+              {{ penjualan.customer_rel.kode_lambung if
+              penjualan.customer_rel.kode_lambung else '-' }}
+            </div>
+          </div>
         </div>
 
         <div class="info-block">

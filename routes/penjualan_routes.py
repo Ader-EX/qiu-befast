@@ -314,9 +314,6 @@ async def get_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
 async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_db)):
     """Create new penjualan in DRAFT status"""
 
-    existing = db.query(Penjualan).filter(Penjualan.no_penjualan == request.no_penjualan).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="No penjualan sudah ada")
 
     validate_penjualan_items_stock(db, request.items)
 
@@ -445,8 +442,8 @@ async def update_status(
     if not penjualan:
         raise HTTPException(status_code=404, detail="penjualan not found")
 
-    if request.status_penjualan:
-        penjualan.status_penjualan = request.status_penjualan
+    if request.status_Penjualan:
+        penjualan.status_penjualan = request.status_Penjualan
     if request.status_pembayaran:
         penjualan.status_pembayaran = request.status_pembayaran
 
@@ -610,7 +607,7 @@ async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
         .options(
             selectinload(Penjualan.penjualan_items),
             selectinload(Penjualan.attachments),
-            selectinload(Penjualan.pembayaran_rel),   # load payments to decide path
+            selectinload(Penjualan.pembayaran_detail_rel),   # load payments to decide path
         )
         .filter(Penjualan.id == penjualan_id)
         .first()
@@ -623,7 +620,7 @@ async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
     # This will raise if not DRAFT.
     validate_draft_status(penjualan)
 
-    has_payments = bool(penjualan.pembayaran_rel)
+    has_payments = bool(penjualan.pembayaran_detail_rel)
 
     # --- Path A: HARD DELETE only if DRAFT and no payments ---
     if penjualan.status_penjualan.name == "DRAFT" and not has_payments:
@@ -705,12 +702,12 @@ async def get_penjualan_summary(db: Session = Depends(get_db)):
     }
 
 
-
 @router.get("/{penjualan_id}/invoice/html", response_class=HTMLResponse)
 async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: Session = Depends(get_db)):
     penjualan = (
         db.query(Penjualan)
         .options(
+            joinedload(Penjualan.customer_rel),  # Load the customer relationship
             joinedload(Penjualan.penjualan_items)
             .joinedload(PenjualanItem.item_rel)
             .joinedload(Item.attachments)

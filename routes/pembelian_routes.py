@@ -309,7 +309,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
 
     pembelian = Pembelian(
         id=generate_pembelian_id(),
-        no_pembelian = generate_unique_record_number(db, Pembelian, prefix="QP/PRC"),
+        no_pembelian = generate_unique_record_number(db, Pembelian, prefix="QP/AP"),
         warehouse_id=request.warehouse_id,
         vendor_id=request.vendor_id,
         top_id=request.top_id,
@@ -438,10 +438,8 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
     """
 
     query = db.query(Pembelian).filter(Pembelian.id == pembelian_id)
-    
 
     pembelian = query.first()
-
 
     if not pembelian:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pembelian not found")
@@ -724,7 +722,6 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
             "unit_price": it.unit_price,
             "total_price": it.total_price,
         })
-
     subtotal = Decimal(0)
     tax_amount = Decimal(0)
     for item in pembelian.pembelian_items:
