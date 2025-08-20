@@ -11,8 +11,7 @@ from models.Pembelian import Pembelian, StatusPembayaranEnum, StatusPembelianEnu
 from models.Penjualan import Penjualan
 from schemas.PembayaranSchemas import (
     PembayaranCreate, PembayaranUpdate, PembayaranResponse,
-    PembayaranListResponse, PembayaranFilter, PembayaranSummary,
-    PembayaranDailySummary
+    PembayaranListResponse, PembayaranFilter, PembayaranDetailResponse
 )
 from utils import soft_delete_record, generate_unique_record_number
 
@@ -20,7 +19,6 @@ router = APIRouter()
 
 # Helper function to update payment status
 def update_payment_status(db: Session, reference_id: int, reference_type: PembayaranPengembalianType):
-    """Update payment and completion status based on total payments"""
     if reference_type == PembayaranPengembalianType.PEMBELIAN:
         record = db.query(Pembelian).filter(Pembelian.id == reference_id).first()
     else:
@@ -29,32 +27,38 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
     if not record:
         return
 
-    # Calculate total paid for this record through PembayaranDetails
-    total_payments = db.query(func.sum(PembayaranDetails.total_paid)).join(
-        Pembayaran, PembayaranDetails.pembayaran_id == Pembayaran.id
-    ).filter(
-        and_(
-            PembayaranDetails.pembelian_id == reference_id if reference_type == PembayaranPengembalianType.PEMBELIAN else PembayaranDetails.penjualan_id == reference_id,
+    filters = [Pembayaran.status == StatusPembelianEnum.ACTIVE]
+    if reference_type == PembayaranPengembalianType.PEMBELIAN:
+        filters.append(PembayaranDetails.pembelian_id == reference_id)
+    else:
+        filters.append(PembayaranDetails.penjualan_id == reference_id)
 
-        )
-    ).scalar() or Decimal('0.00')
+    total_payments = db.query(func.sum(PembayaranDetails.total_paid)) \
+                         .join(Pembayaran, PembayaranDetails.pembayaran_id == Pembayaran.id) \
+                         .filter(*filters) \
+                         .scalar() or Decimal("0.00")
 
     record.total_paid = total_payments
 
-    total_outstanding = record.total_price - (record.total_paid + record.total_return)
+    total_return = record.total_return or Decimal("0.00")
+    total_outstanding = record.total_price - (record.total_paid + total_return)
 
+    # Update status pembayaran
     if total_outstanding <= 0:
         record.status_pembayaran = StatusPembayaranEnum.PAID
         if reference_type == PembayaranPengembalianType.PEMBELIAN:
             record.status_pembelian = StatusPembelianEnum.COMPLETED
         else:
-            record.status_penjualan = StatusPembelianEnum.COMPLETED  # Assuming similar enum exists
+            record.status_penjualan = StatusPembelianEnum.COMPLETED
     elif record.total_paid > 0:
         record.status_pembayaran = StatusPembayaranEnum.HALF_PAID
+        if reference_type == PembayaranPengembalianType.PEMBELIAN:
+            record.status_pembelian = StatusPembelianEnum.COMPLETED
+        else:
+            record.status_penjualan = StatusPembelianEnum.COMPLETED
     else:
         record.status_pembayaran = StatusPembayaranEnum.UNPAID
 
-    db.commit()
 
 @router.post("/", response_model=PembayaranResponse)
 def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(get_db)):
@@ -64,7 +68,7 @@ def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(g
     if not pembayaran_data.pembayaran_details or len(pembayaran_data.pembayaran_details) == 0:
         raise HTTPException(status_code=400, detail="Payment details are required")
 
-    # Validate reference type consistency
+    # Validate reference type consistency and check if records exist
     for detail in pembayaran_data.pembayaran_details:
         if pembayaran_data.reference_type == PembayaranPengembalianType.PEMBELIAN:
             if not detail.pembelian_id:
@@ -73,33 +77,38 @@ def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(g
             pembelian = db.query(Pembelian).filter(
                 Pembelian.id == detail.pembelian_id,
                 Pembelian.is_deleted == False,
-                Pembelian.status_pembelian == StatusPembelianEnum.ACTIVE
+                Pembelian.status_pembelian.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
             ).first()
             if not pembelian:
                 raise HTTPException(status_code=404, detail=f"Active Pembelian with ID {detail.pembelian_id} not found")
 
-        else:
+        else:  # PENJUALAN
             if not detail.penjualan_id:
                 raise HTTPException(status_code=400, detail="penjualan_id is required for PENJUALAN type")
 
             penjualan = db.query(Penjualan).filter(
                 Penjualan.id == detail.penjualan_id,
                 Penjualan.is_deleted == False,
-                Penjualan.status_penjualan == StatusPembelianEnum.ACTIVE
+                Penjualan.status_penjualan.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
             ).first()
             if not penjualan:
                 raise HTTPException(status_code=404, detail=f"Active Penjualan with ID {detail.penjualan_id} not found")
 
-    # Create payment record
-    pembayaran_dict = pembayaran_data.dict(exclude={'pembayaran_details'})
+    # Create payment record - EXCLUDE total_paid from pembayaran_dict
+    pembayaran_dict = pembayaran_data.model_dump(exclude={'pembayaran_details'})
+    # Remove total_paid if it exists since it doesn't belong in Pembayaran model
+    pembayaran_dict.pop('total_paid', None)
+
     pembayaran = Pembayaran(**pembayaran_dict)
 
+    # Generate unique payment number based on type
     if pembayaran_data.reference_type == PembayaranPengembalianType.PEMBELIAN:
         pembayaran.no_pembayaran = generate_unique_record_number(db, Pembayaran, "QP/AR")
-    else :
+    else:
         pembayaran.no_pembayaran = generate_unique_record_number(db, Pembayaran, "QP/AP")
 
     pembayaran.created_at = datetime.now()
+    pembayaran.status = StatusPembelianEnum.DRAFT
 
     db.add(pembayaran)
     db.flush()
@@ -108,13 +117,12 @@ def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(g
     for detail_data in pembayaran_data.pembayaran_details:
         detail = PembayaranDetails(
             pembayaran_id=pembayaran.id,
-            **detail_data.dict()
+            **detail_data.model_dump()
         )
         db.add(detail)
 
     db.commit()
     db.refresh(pembayaran)
-
 
     return pembayaran
 
@@ -123,49 +131,19 @@ def get_pembayarans(
         skip: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=1000),
         reference_type: Optional[PembayaranPengembalianType] = None,
-        customer_id: Optional[str] = None,
-        vendor_id: Optional[str] = None,
-        warehouse_id: Optional[int] = None,
-        currency_id: Optional[int] = None,
-        date_from: Optional[datetime] = None,
-        date_to: Optional[datetime] = None,
-        min_amount: Optional[Decimal] = None,
-        max_amount: Optional[Decimal] = None,
+        status: Optional[StatusPembelianEnum] = None,
         db: Session = Depends(get_db)
 ):
     """Get list of payment records with filtering"""
 
-    query = db.query(Pembayaran).filter(Pembayaran.is_deleted == False)
+    query = db.query(Pembayaran).filter()
 
-    # Apply filters
-    if reference_type:
+    if reference_type and reference_type != "ALL":
         query = query.filter(Pembayaran.reference_type == reference_type)
 
-    if customer_id:
-        query = query.filter(Pembayaran.customer_id == customer_id)
+    if status and status != "ALL":
+        query = query.filter(Pembayaran.status == status)
 
-    if vendor_id:
-        query = query.filter(Pembayaran.vendor_id == vendor_id)
-
-    if warehouse_id:
-        query = query.filter(Pembayaran.warehouse_id == warehouse_id)
-
-    if currency_id:
-        query = query.filter(Pembayaran.currency_id == currency_id)
-
-    if date_from:
-        query = query.filter(Pembayaran.payment_date >= date_from)
-
-    if date_to:
-        query = query.filter(Pembayaran.payment_date <= date_to)
-
-    if min_amount:
-        query = query.filter(Pembayaran.total_paid >= min_amount)
-
-    if max_amount:
-        query = query.filter(Pembayaran.total_paid <= max_amount)
-
-    # Get total count
     total = query.count()
 
     # Get paginated results with relationships
@@ -186,7 +164,7 @@ def get_pembayarans(
 
 @router.get("/{pembayaran_id}", response_model=PembayaranResponse)
 def get_pembayaran(pembayaran_id: int, db: Session = Depends(get_db)):
-
+    """Get payment record by ID"""
 
     pembayaran = db.query(Pembayaran).options(
         joinedload(Pembayaran.pembayaran_details).joinedload(PembayaranDetails.pembelian_rel),
@@ -196,8 +174,7 @@ def get_pembayaran(pembayaran_id: int, db: Session = Depends(get_db)):
         joinedload(Pembayaran.curr_rel)
     ).filter(
         Pembayaran.id == pembayaran_id,
-        Pembayaran.is_deleted == False
-    ).first()
+        ).first()
 
     if not pembayaran:
         raise HTTPException(status_code=404, detail="Pembayaran not found")
@@ -205,13 +182,12 @@ def get_pembayaran(pembayaran_id: int, db: Session = Depends(get_db)):
     return pembayaran
 
 @router.put("/{pembayaran_id}/finalize")
-async  def finalize_pembayaran(pembayaran_id : int, db:Session = Depends(get_db)):
+def finalize_pembayaran(pembayaran_id: int, db: Session = Depends(get_db)):
     """Finalize payment record by ID"""
 
     pembayaran = db.query(Pembayaran).filter(
         Pembayaran.id == pembayaran_id,
-
-    ).first()
+        ).first()
 
     if not pembayaran:
         raise HTTPException(status_code=404, detail="Pembayaran not found")
@@ -219,8 +195,12 @@ async  def finalize_pembayaran(pembayaran_id : int, db:Session = Depends(get_db)
     if pembayaran.status == StatusPembelianEnum.ACTIVE:
         raise HTTPException(status_code=400, detail="Pembayaran already finalized")
 
-    # Mark as finalized
+    if pembayaran.status != StatusPembelianEnum.DRAFT:
+        raise HTTPException(status_code=400, detail="Only draft payments can be finalized")
+
     pembayaran.status = StatusPembelianEnum.ACTIVE
+    db.flush()
+
     for detail in pembayaran.pembayaran_details:
         if detail.pembelian_id:
             update_payment_status(db, detail.pembelian_id, PembayaranPengembalianType.PEMBELIAN)
@@ -242,17 +222,20 @@ def update_pembayaran(
 
     pembayaran = db.query(Pembayaran).filter(
         Pembayaran.id == pembayaran_id,
-        Pembayaran.is_deleted == False
-    ).first()
+        ).first()
 
     if not pembayaran:
         raise HTTPException(status_code=404, detail="Pembayaran not found")
+
+    # Only allow updates if payment is in draft status
+    if pembayaran.status != StatusPembelianEnum.DRAFT:
+        raise HTTPException(status_code=400, detail="Only draft payments can be updated")
 
     # Store old reference info for status update
     old_details = [(detail.pembelian_id, detail.penjualan_id) for detail in pembayaran.pembayaran_details]
 
     # Update main pembayaran fields
-    pembayaran_dict = pembayaran_data.dict(exclude={'pembayaran_details'}, exclude_unset=True)
+    pembayaran_dict = pembayaran_data.model_dump(exclude={'pembayaran_details'}, exclude_unset=True)
     for field, value in pembayaran_dict.items():
         setattr(pembayaran, field, value)
 
@@ -261,12 +244,13 @@ def update_pembayaran(
         # Delete existing details
         for detail in pembayaran.pembayaran_details:
             db.delete(detail)
+        db.flush()
 
         # Create new details
         for detail_data in pembayaran_data.pembayaran_details:
             detail = PembayaranDetails(
                 pembayaran_id=pembayaran.id,
-                **detail_data.dict()
+                **detail_data.model_dump()
             )
             db.add(detail)
 
@@ -280,70 +264,38 @@ def update_pembayaran(
         elif old_penjualan_id:
             update_payment_status(db, old_penjualan_id, PembayaranPengembalianType.PENJUALAN)
 
-    # Update payment status for current references
-    for detail in pembayaran.pembayaran_details:
-        if detail.pembelian_id:
-            update_payment_status(db, detail.pembelian_id, PembayaranPengembalianType.PEMBELIAN)
-        elif detail.penjualan_id:
-            update_payment_status(db, detail.penjualan_id, PembayaranPengembalianType.PENJUALAN)
-
     return pembayaran
 
 @router.delete("/{pembayaran_id}")
 def delete_pembayaran(pembayaran_id: int, db: Session = Depends(get_db)):
-    """Soft delete payment record and update related pembelian/penjualan totals"""
-
+    """Delete payment record by ID"""
     pembayaran = db.query(Pembayaran).filter(
         Pembayaran.id == pembayaran_id,
-        Pembayaran.is_deleted == False
-    ).first()
+        ).first()
 
     if not pembayaran:
         raise HTTPException(status_code=404, detail="Pembayaran not found")
 
     try:
-        # Process each pembayaran detail to subtract amounts from related records
+        # Store reference info for status update
         processed_pembelian_ids = set()
         processed_penjualan_ids = set()
 
         for detail in pembayaran.pembayaran_details:
             if detail.pembelian_id:
-                # Only subtract from ACTIVE pembelian
-                pembelian = db.query(Pembelian).filter(
-                    Pembelian.id == detail.pembelian_id,
-                    Pembelian.is_deleted == False,
-                    Pembelian.status_pembelian == StatusPembelianEnum.ACTIVE
-                ).first()
-
-                if pembelian:
-                    pembelian.total_paid = max(0, pembelian.total_paid - detail.total_paid)
-                    processed_pembelian_ids.add(detail.pembelian_id)
-
+                processed_pembelian_ids.add(detail.pembelian_id)
             elif detail.penjualan_id:
-                # Only subtract from ACTIVE penjualan
-                penjualan = db.query(Penjualan).filter(
-                    Penjualan.id == detail.penjualan_id,
-                    Penjualan.is_deleted == False,
-                    Penjualan.status_penjualan == StatusPembelianEnum.ACTIVE  # Assuming similar enum
-                ).first()
+                processed_penjualan_ids.add(detail.penjualan_id)
 
-                if penjualan:
-                    if pembayaran.reference_type == PembayaranPengembalianType.PENGEMBALIAN:
-                        # For returns, subtract from total_return
-                        penjualan.total_return = max(0, penjualan.total_return - detail.total_paid)
-                    else:
-                        # For payments, subtract from total_paid
-                        penjualan.total_paid = max(0, penjualan.total_paid - detail.total_paid)
-                    processed_penjualan_ids.add(detail.penjualan_id)
+        # Delete payment details first (due to foreign key constraints)
+        for detail in pembayaran.pembayaran_details:
+            db.delete(detail)
 
-        # Soft delete the pembayaran
-        pembayaran.is_deleted = True
-        pembayaran.deleted_at = datetime.now()
-
-        # Commit all changes
+        # Delete the main payment record
+        db.delete(pembayaran)
         db.commit()
 
-        # Update payment status for all affected records
+        # Update payment status for all affected records after deletion
         for pembelian_id in processed_pembelian_ids:
             update_payment_status(db, pembelian_id, PembayaranPengembalianType.PEMBELIAN)
 
@@ -356,86 +308,54 @@ def delete_pembayaran(pembayaran_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error deleting pembayaran: {str(e)}")
 
-@router.get("/summary/total", response_model=List[PembayaranSummary])
-def get_payment_summary(
-        date_from: Optional[datetime] = None,
-        date_to: Optional[datetime] = None,
-        db: Session = Depends(get_db)
-):
-    """Get payment summary grouped by reference type"""
+@router.get("/{pembayaran_id}/details", response_model=List[PembayaranDetailResponse])
+def get_pembayaran_details(pembayaran_id: int, db: Session = Depends(get_db)):
+    """Get payment details for a specific payment"""
 
-    query = db.query(
-        Pembayaran.reference_type,
-        func.sum(Pembayaran.total_paid).label('total_payments'),
-        func.count(Pembayaran.id).label('count')
-    ).filter(Pembayaran.is_deleted == False)
+    pembayaran = db.query(Pembayaran).filter(
+        Pembayaran.id == pembayaran_id,
+        ).first()
 
-    if date_from:
-        query = query.filter(Pembayaran.payment_date >= date_from)
-    if date_to:
-        query = query.filter(Pembayaran.payment_date <= date_to)
+    if not pembayaran:
+        raise HTTPException(status_code=404, detail="Pembayaran not found")
 
-    results = query.group_by(Pembayaran.reference_type).all()
+    details = db.query(PembayaranDetails).options(
+        joinedload(PembayaranDetails.pembelian_rel),
+        joinedload(PembayaranDetails.penjualan_rel)
+    ).filter(PembayaranDetails.pembayaran_id == pembayaran_id).all()
 
-    return [
-        PembayaranSummary(
-            reference_type=result.reference_type,
-            total_payments=result.total_payments or Decimal('0.00'),
-            count=result.count
-        )
-        for result in results
-    ]
+    return details
 
-@router.get("/summary/daily", response_model=List[PembayaranDailySummary])
-def get_daily_payment_summary(
-        date_from: Optional[date] = None,
-        date_to: Optional[date] = None,
-        db: Session = Depends(get_db)
-):
-    """Get daily payment summary"""
+@router.put("/{pembayaran_id}/draft")
+def revert_to_draft(pembayaran_id: int, db: Session = Depends(get_db)):
+    """Revert an active payment back to draft status"""
 
-    query = db.query(
-        func.date(Pembayaran.payment_date).label('date'),
-        func.sum(
-            func.case(
-                [(Pembayaran.reference_type == PembayaranPengembalianType.PEMBELIAN, Pembayaran.total_paid)],
-                else_=0
-            )
-        ).label('total_pembelian'),
-        func.sum(
-            func.case(
-                [(Pembayaran.reference_type == PembayaranPengembalianType.PENJUALAN, Pembayaran.total_paid)],
-                else_=0
-            )
-        ).label('total_penjualan'),
-        func.sum(
-            func.case(
-                [(Pembayaran.reference_type == PembayaranPengembalianType.PEMBELIAN, 1)],
-                else_=0
-            )
-        ).label('count_pembelian'),
-        func.sum(
-            func.case(
-                [(Pembayaran.reference_type == PembayaranPengembalianType.PENJUALAN, 1)],
-                else_=0
-            )
-        ).label('count_penjualan')
-    ).filter(Pembayaran.is_deleted == False)
+    pembayaran = db.query(Pembayaran).filter(
+        Pembayaran.id == pembayaran_id,
+        ).first()
 
-    if date_from:
-        query = query.filter(func.date(Pembayaran.payment_date) >= date_from)
-    if date_to:
-        query = query.filter(func.date(Pembayaran.payment_date) <= date_to)
+    if not pembayaran:
+        raise HTTPException(status_code=404, detail="Pembayaran not found")
 
-    results = query.group_by(func.date(Pembayaran.payment_date)).order_by('date').all()
+    if pembayaran.status != StatusPembelianEnum.ACTIVE:
+        raise HTTPException(status_code=400, detail="Only active payments can be reverted to draft")
 
-    return [
-        PembayaranDailySummary(
-            date=result.date,
-            total_pembelian=result.total_pembelian or Decimal('0.00'),
-            total_penjualan=result.total_penjualan or Decimal('0.00'),
-            count_pembelian=result.count_pembelian,
-            count_penjualan=result.count_penjualan
-        )
-        for result in results
-    ]
+    # Store reference info for status update
+    reference_ids = []
+    for detail in pembayaran.pembayaran_details:
+        if detail.pembelian_id:
+            reference_ids.append((detail.pembelian_id, PembayaranPengembalianType.PEMBELIAN))
+        elif detail.penjualan_id:
+            reference_ids.append((detail.penjualan_id, PembayaranPengembalianType.PENJUALAN))
+
+    # Revert to draft
+    pembayaran.status = StatusPembelianEnum.DRAFT
+
+    # Update payment status for all related records (recalculate without this payment)
+    for reference_id, reference_type in reference_ids:
+        update_payment_status(db, reference_id, reference_type)
+
+    db.commit()
+    db.refresh(pembayaran)
+
+    return {"message": "Pembayaran reverted to draft successfully", "pembayaran": pembayaran}

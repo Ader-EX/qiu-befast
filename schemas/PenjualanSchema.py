@@ -112,7 +112,6 @@ class PenjualanUpdate(BaseModel):
     expense: Optional[Decimal] = None
     items: Optional[List[PenjualanItemUpdate]] = None
 
-   
 
     @validator('discount', 'additional_discount', 'expense')
     def validate_amounts(cls, v):
