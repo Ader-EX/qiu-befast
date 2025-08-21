@@ -85,6 +85,7 @@ class PembayaranCreate(PembayaranBase):
         return self
 
 class PembayaranUpdate(BaseModel):
+    reference_type : Optional[PembayaranPengembalianType] = None
     payment_date: Optional[datetime] = None
     currency_id: Optional[int] = None
     warehouse_id: Optional[int] = None

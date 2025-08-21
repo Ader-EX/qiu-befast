@@ -60,7 +60,7 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
         record.status_pembayaran = StatusPembayaranEnum.UNPAID
 
 
-@router.post("/", response_model=PembayaranResponse)
+@router.post("", response_model=PembayaranResponse)
 def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(get_db)):
     """Create a new payment record"""
 
@@ -126,7 +126,7 @@ def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(g
 
     return pembayaran
 
-@router.get("/", response_model=PembayaranListResponse)
+@router.get("", response_model=PembayaranListResponse)
 def get_pembayarans(
         skip: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=1000),
@@ -233,26 +233,126 @@ def update_pembayaran(
 
     # Store old reference info for status update
     old_details = [(detail.pembelian_id, detail.penjualan_id) for detail in pembayaran.pembayaran_details]
+    old_reference_type = pembayaran.reference_type
+
+    # Check if reference type is changing
+    reference_type_changed = (
+            pembayaran_data.reference_type is not None and
+            pembayaran_data.reference_type != old_reference_type
+    )
+
+    # If reference type is changing, validate the new data consistency
+    if reference_type_changed:
+        new_reference_type = pembayaran_data.reference_type
+
+        # Validate that customer_id/vendor_id matches the new reference type
+        if new_reference_type == PembayaranPengembalianType.PENJUALAN:
+            if pembayaran_data.customer_id is None and pembayaran.customer_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="customer_id is required when reference_type is PENJUALAN"
+                )
+            if pembayaran_data.vendor_id is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="vendor_id should not be set when reference_type is PENJUALAN"
+                )
+        else:  # PEMBELIAN
+            if pembayaran_data.vendor_id is None and pembayaran.vendor_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="vendor_id is required when reference_type is PEMBELIAN"
+                )
+            if pembayaran_data.customer_id is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="customer_id should not be set when reference_type is PEMBELIAN"
+                )
+
+        # Validate payment details consistency with new reference type
+        if pembayaran_data.pembayaran_details:
+            for detail in pembayaran_data.pembayaran_details:
+                if new_reference_type == PembayaranPengembalianType.PENJUALAN:
+                    if not detail.penjualan_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="penjualan_id is required in payment details when reference_type is PENJUALAN"
+                        )
+                    if detail.pembelian_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="pembelian_id should not be set when reference_type is PENJUALAN"
+                        )
+                else:  # PEMBELIAN
+                    if not detail.pembelian_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="pembelian_id is required in payment details when reference_type is PEMBELIAN"
+                        )
+                    if detail.penjualan_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="penjualan_id should not be set when reference_type is PEMBELIAN"
+                        )
+
+    # If reference type changed or payment details are provided, validate and check existence
+    if pembayaran_data.pembayaran_details:
+        current_reference_type = pembayaran_data.reference_type or pembayaran.reference_type
+
+        for detail in pembayaran_data.pembayaran_details:
+            if current_reference_type == PembayaranPengembalianType.PEMBELIAN:
+                if detail.pembelian_id:
+                    pembelian = db.query(Pembelian).filter(
+                        Pembelian.id == detail.pembelian_id,
+                        Pembelian.is_deleted == False,
+                        Pembelian.status_pembelian.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
+                    ).first()
+                    if not pembelian:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Active Pembelian with ID {detail.pembelian_id} not found"
+                        )
+            else:  # PENJUALAN
+                if detail.penjualan_id:
+                    penjualan = db.query(Penjualan).filter(
+                        Penjualan.id == detail.penjualan_id,
+                        Penjualan.is_deleted == False,
+                        Penjualan.status_penjualan.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
+                    ).first()
+                    if not penjualan:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Active Penjualan with ID {detail.penjualan_id} not found"
+                        )
 
     # Update main pembayaran fields
     pembayaran_dict = pembayaran_data.model_dump(exclude={'pembayaran_details'}, exclude_unset=True)
+
+    # If reference type is changing, clear the opposite ID field
+    if reference_type_changed:
+        if pembayaran_data.reference_type == PembayaranPengembalianType.PENJUALAN:
+            pembayaran.vendor_id = None
+        else:  # PEMBELIAN
+            pembayaran.customer_id = None
+
     for field, value in pembayaran_dict.items():
         setattr(pembayaran, field, value)
 
-    # Update payment details if provided
-    if pembayaran_data.pembayaran_details is not None:
+    # Always delete and recreate payment details if provided or if reference type changed
+    if pembayaran_data.pembayaran_details is not None or reference_type_changed:
         # Delete existing details
         for detail in pembayaran.pembayaran_details:
             db.delete(detail)
         db.flush()
 
-        # Create new details
-        for detail_data in pembayaran_data.pembayaran_details:
-            detail = PembayaranDetails(
-                pembayaran_id=pembayaran.id,
-                **detail_data.model_dump()
-            )
-            db.add(detail)
+        # Create new details (only if provided)
+        if pembayaran_data.pembayaran_details:
+            for detail_data in pembayaran_data.pembayaran_details:
+                detail = PembayaranDetails(
+                    pembayaran_id=pembayaran.id,
+                    **detail_data.model_dump()
+                )
+                db.add(detail)
 
     db.commit()
     db.refresh(pembayaran)
@@ -265,7 +365,6 @@ def update_pembayaran(
             update_payment_status(db, old_penjualan_id, PembayaranPengembalianType.PENJUALAN)
 
     return pembayaran
-
 @router.delete("/{pembayaran_id}")
 def delete_pembayaran(pembayaran_id: int, db: Session = Depends(get_db)):
     """Delete payment record by ID"""
