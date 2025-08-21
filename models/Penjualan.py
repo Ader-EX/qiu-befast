@@ -57,6 +57,8 @@ class Penjualan(Base,SoftDeleteMixin):
     # Items relationship
     penjualan_items = relationship("PenjualanItem", back_populates="penjualan", cascade="all, delete-orphan")
     pembayaran_detail_rel = relationship("PembayaranDetails", back_populates="penjualan_rel", cascade="all, delete-orphan")
+    pengembalian_detail_rel= relationship("PengembalianDetails", back_populates="penjualan_rel", cascade="all, delete-orphan")
+    
     attachments = relationship("AllAttachment", back_populates="penjualans", cascade="all, delete-orphan")
 
     @hybrid_property

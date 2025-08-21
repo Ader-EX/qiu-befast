@@ -113,6 +113,10 @@ def upload_image(
         attachment.pembelian_id = parent_id
     elif parent_type == ParentType.PENJUALANS:
         attachment.penjualan_id = parent_id
+    elif parent_type == ParentType.PEMBAYARANS:
+        attachment.pembayaran_id= parent_id
+    elif parent_type == ParentType.PENGEMBALIANS:
+        attachment.pembayaran_id= parent_id
 
 
     db.add(attachment)

@@ -68,6 +68,8 @@ class Pembelian(Base,SoftDeleteMixin):
     # Items relationship
     pembelian_items = relationship("PembelianItem", back_populates="pembelian", cascade="all, delete-orphan")
     pembayaran_detail_rel = relationship("PembayaranDetails", back_populates="pembelian_rel", cascade="all, delete-orphan")
+    pengembalian_detail_rel= relationship("PengembalianDetails", back_populates="pembelian_rel", cascade="all, delete-orphan")
+    
     attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
     @hybrid_property
     def vendor_display(self) -> str:

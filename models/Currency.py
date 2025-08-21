@@ -21,3 +21,4 @@ class Currency(Base,SoftDeleteMixin):
     cust_rel = relationship("Customer", cascade="all, delete", back_populates="curr_rel")
     
     pembayarans = relationship("Pembayaran", cascade="all, delete", back_populates="curr_rel")
+    pengembalians = relationship("Pengembalian", cascade="all, delete", back_populates="curr_rel")

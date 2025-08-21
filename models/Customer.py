@@ -22,4 +22,6 @@ class Customer(Base,SoftDeleteMixin):
     # pembelians = relationship("Pembelian",cascade="all, delete", back_populates="customer_rel")
     penjualans = relationship("Penjualan",cascade="all, delete", back_populates="customer_rel")
     pembayarans = relationship("Pembayaran",cascade="all, delete", back_populates="customer_rel")
+    pengembalians = relationship("Pengembalian",cascade="all, delete", back_populates="customer_rel")
+
 
