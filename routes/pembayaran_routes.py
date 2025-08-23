@@ -151,6 +151,7 @@ def get_pembayarans(
         joinedload(Pembayaran.pembayaran_details).joinedload(PembayaranDetails.pembelian_rel),
         joinedload(Pembayaran.pembayaran_details).joinedload(PembayaranDetails.penjualan_rel),
         joinedload(Pembayaran.customer_rel),
+       
         joinedload(Pembayaran.warehouse_rel),
         joinedload(Pembayaran.curr_rel)
     ).order_by(Pembayaran.created_at.desc()).offset(skip).limit(limit).all()
@@ -170,6 +171,7 @@ def get_pembayaran(pembayaran_id: int, db: Session = Depends(get_db)):
         joinedload(Pembayaran.pembayaran_details).joinedload(PembayaranDetails.pembelian_rel),
         joinedload(Pembayaran.pembayaran_details).joinedload(PembayaranDetails.penjualan_rel),
         joinedload(Pembayaran.customer_rel),
+        joinedload(Pembayaran.attachments),
         joinedload(Pembayaran.warehouse_rel),
         joinedload(Pembayaran.curr_rel)
     ).filter(
@@ -252,22 +254,13 @@ def update_pembayaran(
                     status_code=400,
                     detail="customer_id is required when reference_type is PENJUALAN"
                 )
-            if pembayaran_data.vendor_id is not None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="vendor_id should not be set when reference_type is PENJUALAN"
-                )
         else:  # PEMBELIAN
             if pembayaran_data.vendor_id is None and pembayaran.vendor_id is None:
                 raise HTTPException(
                     status_code=400,
                     detail="vendor_id is required when reference_type is PEMBELIAN"
                 )
-            if pembayaran_data.customer_id is not None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="customer_id should not be set when reference_type is PEMBELIAN"
-                )
+          
 
         # Validate payment details consistency with new reference type
         if pembayaran_data.pembayaran_details:
@@ -278,22 +271,14 @@ def update_pembayaran(
                             status_code=400,
                             detail="penjualan_id is required in payment details when reference_type is PENJUALAN"
                         )
-                    if detail.pembelian_id:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="pembelian_id should not be set when reference_type is PENJUALAN"
-                        )
+                   
                 else:  # PEMBELIAN
                     if not detail.pembelian_id:
                         raise HTTPException(
                             status_code=400,
                             detail="pembelian_id is required in payment details when reference_type is PEMBELIAN"
                         )
-                    if detail.penjualan_id:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="penjualan_id should not be set when reference_type is PEMBELIAN"
-                        )
+                   
 
     # If reference type changed or payment details are provided, validate and check existence
     if pembayaran_data.pembayaran_details:

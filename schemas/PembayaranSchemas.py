@@ -10,7 +10,7 @@ from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
 import enum
 
 from schemas.PembelianSchema import PembelianResponse
-from schemas.PenjualanSchema import PenjualanResponse
+from schemas.PenjualanSchema import AttachmentResponse, PenjualanResponse
 
 
 # Enums
@@ -137,6 +137,7 @@ class PembayaranResponse(BaseModel):
     vendor_id: Optional[str] = None
     currency_id: int
     warehouse_id: int
+    attachments: List[AttachmentResponse] = Field(default_factory=list)
 
 
     customer_rel: Optional[CustomerResponse] = None

@@ -1,6 +1,7 @@
 # routes/upload.py
 from datetime import datetime
 from decimal import Decimal
+import mimetypes
 
 from fastapi import APIRouter,Form, UploadFile, File, HTTPException, Depends
 import os
@@ -8,6 +9,7 @@ import shutil
 from uuid import uuid4
 import enum
 
+from fastapi.responses import FileResponse
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
@@ -128,5 +130,34 @@ def upload_image(
         "url": f"/static/items/{filename}"
     }
 
+def _secure_path(base_dir: str, candidate: str) -> str:
+    base_dir_abs = os.path.abspath(base_dir)
+    cand_abs = os.path.abspath(candidate)
+    if os.path.commonpath([cand_abs, base_dir_abs]) != base_dir_abs:
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    return cand_abs
 
+@router.get("/attachments/{attachment_id}/download")
+def download_attachment(
+    attachment_id: int,
+    inline: bool = False,  # set ?inline=true to render in browser if supported
+    db: Session = Depends(get_db),
+):
+    att = db.query(AllAttachment).filter(AllAttachment.id == attachment_id).first()
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    if not att.file_path or not os.path.exists(att.file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    safe_path = _secure_path(UPLOAD_DIR, att.file_path)
+    media_type = att.mime_type or mimetypes.guess_type(att.filename)[0] or "application/octet-stream"
+
+    # FileResponse sets Content-Disposition: attachment when filename is provided.
+    if inline:
+        # override to inline
+        headers = {"Content-Disposition": f'inline; filename="{att.filename}"'}
+        return FileResponse(safe_path, media_type=media_type, headers=headers)
+
+    return FileResponse(safe_path, media_type=media_type, filename=att.filename)
 

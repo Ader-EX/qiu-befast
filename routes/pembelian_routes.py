@@ -1,3 +1,4 @@
+import mimetypes
 import random
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, status
@@ -557,6 +558,7 @@ async def delete_attachment(
     db.commit()
 
     return SuccessResponse(message="Attachment deleted successfully")
+
 
 @router.get("/{pembelian_id}/download/{attachment_id}")
 async def download_attachment(
