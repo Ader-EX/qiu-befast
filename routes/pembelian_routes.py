@@ -76,7 +76,6 @@ def validate_pembelian_items_stock(db: Session, items_data: List) -> None:
         elif isinstance(item_data, dict):
             # For dictionary data
             validate_item_stock(db, item_data['item_id'], item_data['qty'])
-
 def calculate_pembelian_totals(db: Session, pembelian_id: int):
     items = (
         db.query(PembelianItem)
@@ -85,48 +84,61 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int):
     )
 
     q = Decimal('0')
-    sum_before = Decimal('0')
-    sum_after  = Decimal('0')
+    sum_before_tax = Decimal('0')
+    sum_after_tax = Decimal('0')
+    total_item_discounts = Decimal('0')  # Sum of all individual item discounts
 
     for it in items:
         qty = Decimal(it.qty or 0)
-        unit_after = Decimal(it.unit_price or 0)
+        unit_after_tax = Decimal(it.unit_price or 0)
         tax_pct = Decimal(it.tax_percentage or 0)
+        item_discount = Decimal(it.discount or 0)  # This is the discount amount per item
 
         # unit price before tax = after / (1 + tax%)
-        before_unit = unit_after / (Decimal(1) + (tax_pct / Decimal(100)))
+        unit_before_tax = unit_after_tax / (Decimal(1) + (tax_pct / Decimal(100)))
+
+        # Calculate totals
+        item_subtotal_before_tax = qty * unit_before_tax
+        item_subtotal_after_tax = qty * unit_after_tax
 
         q += qty
-        sum_before += qty * before_unit
-        sum_after  += qty * unit_after
+        sum_before_tax += item_subtotal_before_tax
+        sum_after_tax += item_subtotal_after_tax
+        total_item_discounts += item_discount  # Add individual item discount
 
     pembelian = db.query(Pembelian).filter(Pembelian.id == pembelian_id).first()
 
-    discount_percent = Decimal(pembelian.discount or 0)            # % (0..100)
+    # Get additional discount (this is separate from item discounts)
     additional_discount = Decimal(pembelian.additional_discount or 0)
     expense = Decimal(pembelian.expense or 0)
 
-    tax_amount = sum_after - sum_before
-    discount_amount = (sum_before * discount_percent) / Decimal(100)
+    # Calculate tax amount
+    tax_amount = sum_after_tax - sum_before_tax
 
-    grand_total = sum_before - discount_amount - additional_discount + tax_amount + expense
+    # Calculate total after discounts but before tax
+    # Total = Sum(qty * price_before_tax) - Sum(item_discounts) - additional_discount
+    total_before_tax = sum_before_tax - total_item_discounts - additional_discount
 
-    # Persist high-level rollups if you want
+    # Grand total = total_before_tax + tax + expense
+    grand_total = total_before_tax + tax_amount + expense
+
+    # Update pembelian totals
     pembelian.total_qty = int(q)
     pembelian.total_price = grand_total
     db.commit()
 
     return {
-        "subtotal_before_tax": sum_before,
-        "subtotal_after_tax": sum_after,
+        "subtotal_before_tax": sum_before_tax,
+        "subtotal_after_tax": sum_after_tax,
         "tax_amount": tax_amount,
-        "discount_percent": discount_percent,
-        "discount_amount": discount_amount,
+        "total_item_discounts": total_item_discounts,  # Changed from discount_amount
         "additional_discount": additional_discount,
         "expense": expense,
         "total_qty": int(q),
+        "total_before_tax": total_before_tax,  # Added this field
         "grand_total": grand_total,
     }
+
 
 def finalize_pembelian(db: Session, pembelian_id: str):
     pembelian = db.query(Pembelian).options(
@@ -279,21 +291,23 @@ async def get_all_pembelian(
     }
 
 @router.get("/{pembelian_id}", response_model=PembelianResponse)
-async def get_pembelian(pembelian_id: str, db: Session = Depends(get_db)):
-    """Get specific pembelian by ID"""
-
-    # Fixed: Added proper eager loading for all relationships
-    pembelian = db.query(Pembelian).options(
-        selectinload(Pembelian.pembelian_items).selectinload(PembelianItem.item_rel),
-        selectinload(Pembelian.attachments),
-        selectinload(Pembelian.vend_rel),  # Changed: vendor relationship
-        selectinload(Pembelian.warehouse_rel),
-        selectinload(Pembelian.top_rel)
-    ).filter(Pembelian.id == pembelian_id).first()
+async def get_pembelian(pembelian_id: int, db: Session = Depends(get_db)): 
+    pembelian = (
+        db.query(Pembelian)
+          .options(
+              selectinload(Pembelian.pembelian_items)
+                  .selectinload(PembelianItem.item_rel),   # <- this loads Item by item_id
+              selectinload(Pembelian.attachments),
+              selectinload(Pembelian.vend_rel),
+              selectinload(Pembelian.warehouse_rel),
+              selectinload(Pembelian.top_rel),
+          )
+          .filter(Pembelian.id == pembelian_id)
+          .first()
+    )
 
     if not pembelian:
         raise HTTPException(status_code=404, detail="Pembelian not found")
-
     return pembelian
 
 
@@ -316,7 +330,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         top_id=request.top_id,
         sales_date=request.sales_date,
         sales_due_date=request.sales_due_date,
-        discount=request.discount,
+        
         additional_discount=request.additional_discount,
         expense=request.expense,
         status_pembelian=StatusPembelianEnum.DRAFT
@@ -343,6 +357,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         pembelian_item = PembelianItem(
             pembelian_id=pembelian.id,
             item_id=item_request.item_id,
+            discount=item_request.discount,
             item_name=new_item.name,
             qty=item_request.qty,
             unit_price=unit_price,
@@ -691,7 +706,6 @@ async def get_pembelian_summary(db: Session = Depends(get_db)):
         "unpaid_value": unpaid_value
     }
 
-
 @router.get("/{pembelian_id}/invoice/html", response_class=HTMLResponse)
 async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: Session = Depends(get_db)):
     pembelian = (
@@ -708,12 +722,31 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
         raise HTTPException(status_code=404, detail="Pembelian not found")
 
     BASE_URL = os.getenv("BASE_URL", "https://qiu-system.qiuparts.com")
-  
 
     enhanced_items = []
+    subtotal_before_tax = Decimal('0')
+    total_item_discounts = Decimal('0')
+    tax_amount = Decimal('0')
+    
     for it in pembelian.pembelian_items:
         raw = it.item_rel.primary_image_url if it.item_rel else None
         img_url = to_public_image_url(raw, request, BASE_URL)
+        
+        # Calculate item totals
+        qty = Decimal(str(it.qty or 0))
+        unit_price_after_tax = Decimal(str(it.unit_price or 0))
+        tax_pct = Decimal(str(it.tax_percentage or 0))
+        item_discount = Decimal(str(it.discount or 0))
+        
+        # Calculate unit price before tax
+        unit_price_before_tax = unit_price_after_tax / (Decimal(1) + (tax_pct / Decimal(100)))
+        
+        # Calculate item subtotal before tax
+        item_subtotal_before_tax = qty * unit_price_before_tax
+        
+        # Calculate item tax
+        item_tax = item_subtotal_before_tax * (tax_pct / Decimal(100))
+        
         enhanced_items.append({
             "item": it,
             "image_url": img_url,
@@ -721,28 +754,35 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
             "qty": it.qty,
             "satuan_name": it.satuan_name,
             "tax_percentage": it.tax_percentage,
+            "unit_price_before_tax": unit_price_before_tax,
             "unit_price": it.unit_price,
+            "item_discount": item_discount,
+            "item_subtotal_before_tax": item_subtotal_before_tax,
+            "item_tax": item_tax,
             "total_price": it.total_price,
         })
-    subtotal = Decimal(0)
-    tax_amount = Decimal(0)
-    for item in pembelian.pembelian_items:
-        item_total = Decimal(str(item.total_price or 0))
-        subtotal += item_total
-        if item.tax_percentage:
-            item_tax = item_total * Decimal(str(item.tax_percentage)) / Decimal('100')
-            tax_amount += item_tax
+        
+        subtotal_before_tax += item_subtotal_before_tax
+        total_item_discounts += item_discount
+        tax_amount += item_tax
 
-    discount = Decimal(str(pembelian.discount or 0))
+    # Calculate additional discount and final totals
     additional_discount = Decimal(str(pembelian.additional_discount or 0))
-    final_total = subtotal - discount - additional_discount
     expense = Decimal(str(pembelian.expense or 0))
-    grand_total = final_total + tax_amount + expense
+    
+    # Total after item discounts and additional discount, before tax
+    total_before_tax = subtotal_before_tax - total_item_discounts - additional_discount
+    
+    # Grand total
+    grand_total = total_before_tax + tax_amount + expense
 
     totals = {
-        "subtotal": subtotal,
+        "subtotal_before_tax": subtotal_before_tax,
+        "total_item_discounts": total_item_discounts,
+        "additional_discount": additional_discount,
+        "total_before_tax": total_before_tax,
         "tax_amount": tax_amount,
-        "final_total": final_total,
+        "expense": expense,
         "grand_total": grand_total,
     }
 

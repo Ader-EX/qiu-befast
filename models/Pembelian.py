@@ -32,7 +32,7 @@ class Pembelian(Base,SoftDeleteMixin):
     no_pembelian = Column(String(255),unique=True, default="", nullable=False)
     status_pembayaran = Column(Enum(StatusPembayaranEnum), default=StatusPembayaranEnum.UNPAID)
     status_pembelian = Column(Enum(StatusPembelianEnum), default=StatusPembelianEnum.DRAFT)
-    discount = Column(Numeric(15,7), default=0.00)
+  
     additional_discount = Column(Numeric(15,7), default=0.00)
     expense = Column(Numeric(15,7), default=0.00)
 
@@ -76,8 +76,8 @@ class Pembelian(Base,SoftDeleteMixin):
         # draft‐mode name always wins; but if it’s empty, try the live FK
         if self.vendor_name:
             return self.vendor_name
-        if self.vendor_rel:
-            return self.vendor_rel.name
+        if self.vend_rel:
+            return self.vend_rel.name
         return "—"
     
     @hybrid_property
@@ -87,11 +87,11 @@ class Pembelian(Base,SoftDeleteMixin):
 
     @hybrid_property
     def vendor_address_display(self) -> str:
-        # draft‐mode name always wins; but if it’s empty, try the live FK
+        
         if self.vendor_address:
             return self.vendor_address
-        if self.vendor_rel:
-            return self.vendor_rel.address
+        if self.vend_rel:
+            return self.vend_rel.address
         return "—"
     
    
@@ -105,10 +105,12 @@ class PembelianItem(Base):
     item_name = Column(String(255), nullable=True)
     item_sku = Column(String(100), nullable=True)
     item_type = Column(String(50), nullable=True)
+    discount = Column(Numeric(15,7), default=0.00)
     # FINISH_GOOD, RAW_MATERIAL, SERVICE
     satuan_name = Column(String(100), nullable=True)
     tax_percentage = Column(Integer, nullable=True, default=0)
     qty = Column(Integer, nullable=False, default=0)
+   
     unit_price = Column(Numeric(15, 7), nullable=False, default=0.00)
     total_price = Column(Numeric(15, 7), nullable=False, default=0.00)  # qty * unit_price
 

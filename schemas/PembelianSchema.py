@@ -5,14 +5,16 @@ from decimal import Decimal
 from enum import Enum
 
 from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
+from schemas.ItemSchema import ItemResponse
 
 
 # Base schemas
 class PembelianItemBase(BaseModel):
     item_id: Optional[int] = None
- 
+    discount : Optional[Decimal] = None
     qty: int
     unit_price: Decimal
+   
     tax_percentage : Optional[int] = 0
 
     @field_validator('qty')
@@ -39,22 +41,20 @@ class PembelianItemUpdate(PembelianItemBase):
 class PembelianItemResponse(BaseModel):
     id: int
     pembelian_id: int
-
+  
     # Draft mode fields
     item_id: Optional[int] = None
 
-    # Finalized mode fields
-    item_name: Optional[str] = None
-    item_sku: Optional[str] = None
-    item_type: Optional[str] = None
-    satuan_name: Optional[str] = None
-    vendor_name: Optional[str] = None
+   
 
     # Item details
     qty: int
     unit_price: Decimal
     total_price: Decimal
+   
+    discount: Decimal
     tax_percentage: Optional[int] = 0
+    item: Optional[ItemResponse] = Field(None, alias="item_rel")
 
     class Config:
         from_attributes = True
@@ -77,7 +77,6 @@ class PembelianBase(BaseModel):
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
-    discount: Optional[Decimal] = Decimal('0.00')
     additional_discount: Optional[Decimal] = Decimal('0.00')
     expense: Optional[Decimal] = Decimal('0.00')
 
@@ -87,11 +86,6 @@ class PembelianBase(BaseModel):
             raise ValueError('No pembelian cannot be empty')
         return v.strip()
 
-    @validator('discount', 'additional_discount', 'expense')
-    def validate_amounts(cls, v):
-        if v < 0:
-            raise ValueError('Amount cannot be negative')
-        return v
     
      
 class PembelianCreate(PembelianBase):
@@ -110,7 +104,7 @@ class PembelianUpdate(BaseModel):
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
-    discount: Optional[Decimal] = None
+  
     additional_discount: Optional[Decimal] = None
     expense: Optional[Decimal] = None
     items: Optional[List[PembelianItemUpdate]] = None
@@ -121,11 +115,6 @@ class PembelianUpdate(BaseModel):
             raise ValueError('No pembelian cannot be empty')
         return v.strip() if v else v
 
-    @validator('discount', 'additional_discount', 'expense')
-    def validate_amounts(cls, v):
-        if v is not None and v < 0:
-            raise ValueError('Amount cannot be negative')
-        return v
 
 class PembelianResponse(BaseModel):
     id: int
@@ -137,11 +126,14 @@ class PembelianResponse(BaseModel):
     sales_due_date: Optional[datetime] = None
 
     # Financial fields
-    discount: Decimal
+    
     additional_discount: Decimal
     expense: Decimal
     total_qty: int
     total_price: Decimal
+    total_paid: Decimal
+    total_return: Decimal
+
 
     # Draft mode fields
     warehouse_id: Optional[int] = None
@@ -174,7 +166,7 @@ class PembelianListResponse(BaseModel):
     sales_date: Optional[datetime] = None
     total_qty: int
     total_price: Decimal
-    total_paid: Decimal
+
 
     # Vendor info (draft or finalized) - Changed: vendor instead of customer
     vendor_name: Optional[str] = None

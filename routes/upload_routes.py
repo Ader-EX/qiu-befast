@@ -161,3 +161,43 @@ def download_attachment(
 
     return FileResponse(safe_path, media_type=media_type, filename=att.filename)
 
+@router.delete("/attachments/{attachment_id}")
+def delete_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+):
+    att = db.query(AllAttachment).filter(AllAttachment.id == attachment_id).first()
+    if not att:
+        # idempotent: deleting a non-existent thing isn't fatal
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    file_deleted = False
+    # Try to remove the file first (safe-path checked)
+    if att.file_path:
+        try:
+            safe_path = _secure_path(UPLOAD_DIR, att.file_path)
+            if os.path.exists(safe_path):
+                os.remove(safe_path)
+                file_deleted = True
+        except FileNotFoundError:
+            # File already gone; continue with DB delete
+            pass
+        except Exception as e:
+            # If you prefer to block on file errors, raise 500 here instead.
+            # For now, we continue and still clean the DB row.
+            print(f"Failed to delete file: {e}")
+
+    # Remove the database row
+    try:
+        db.delete(att)
+        db.commit()
+    except Exception:
+        db.rollback()
+        # (Optionally) attempt to restore file if you want strict atomicity.
+        raise HTTPException(status_code=500, detail="Failed to delete attachment from database")
+
+    return {
+        "deleted": True,
+        "attachment_id": attachment_id,
+        "file_deleted": file_deleted,
+    }
