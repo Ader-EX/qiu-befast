@@ -53,9 +53,9 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
     elif record.total_paid > 0:
         record.status_pembayaran = StatusPembayaranEnum.HALF_PAID
         if reference_type == PembayaranPengembalianType.PEMBELIAN:
-            record.status_pembelian = StatusPembelianEnum.COMPLETED
+            record.status_pembelian = StatusPembelianEnum.PROCESSED
         else:
-            record.status_penjualan = StatusPembelianEnum.COMPLETED
+            record.status_penjualan = StatusPembelianEnum.PROCESSED
     else:
         record.status_pembayaran = StatusPembayaranEnum.UNPAID
 

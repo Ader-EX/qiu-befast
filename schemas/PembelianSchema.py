@@ -166,6 +166,8 @@ class PembelianListResponse(BaseModel):
     sales_date: Optional[datetime] = None
     total_qty: int
     total_price: Decimal
+    total_paid: Decimal
+    total_return: Decimal
 
 
     # Vendor info (draft or finalized) - Changed: vendor instead of customer

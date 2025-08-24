@@ -21,7 +21,7 @@ class Penjualan(Base,SoftDeleteMixin):
     no_penjualan = Column(String(255), unique=True, default="", nullable=False)
     status_pembayaran = Column(Enum(StatusPembayaranEnum), default=StatusPembayaranEnum.UNPAID)
     status_penjualan = Column(Enum(StatusPembelianEnum), default=StatusPembelianEnum.DRAFT)
-    discount = Column(Numeric(15, 7), default=0.00)
+   
     additional_discount = Column(Numeric(15, 7), default=0.00)
     expense = Column(Numeric(15, 7), default=0.00)
 
@@ -101,6 +101,7 @@ class PenjualanItem(Base):
     # Finalized mode - stored item data
     item_name = Column(String(255), nullable=True)
     item_sku = Column(String(100), nullable=True)
+    discount = Column(Numeric(15, 7), default=0.00)
     item_type = Column(String(50), nullable=True)  # e.g., FINISH_GOOD, RAW_MATERIAL, SERVICE
     satuan_name = Column(String(100), nullable=True)
     tax_percentage = Column(Integer, nullable=True, default=0) # Added for consistency

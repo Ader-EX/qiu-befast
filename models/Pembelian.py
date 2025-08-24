@@ -23,6 +23,7 @@ class StatusPembelianEnum(enum.Enum):
     ALL = "ALL"
     DRAFT = "DRAFT"
     ACTIVE = "ACTIVE"
+    PROCESSED = "PROCESSED"
     COMPLETED = "COMPLETED"
 
 class Pembelian(Base,SoftDeleteMixin):

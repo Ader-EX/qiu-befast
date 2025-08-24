@@ -90,28 +90,31 @@ def calculate_penjualan_totals(db: Session, penjualan_id: int):
     q = Decimal('0')
     sum_before = Decimal('0')
     sum_after  = Decimal('0')
+    total_item_discount = Decimal('0')  # Track item-level discounts
 
     for it in items:
         qty = Decimal(it.qty or 0)
         unit_after = Decimal(it.unit_price or 0)
         tax_pct = Decimal(it.tax_percentage or 0)
+        item_discount = Decimal(it.discount or 0)  # Get discount from item
 
         before_unit = unit_after / (Decimal(1) + (tax_pct / Decimal(100)))
 
         q += qty
         sum_before += qty * before_unit
         sum_after  += qty * unit_after
+        total_item_discount += item_discount  # Add item discount to total
 
     penjualan = db.query(Penjualan).filter(Penjualan.id == penjualan_id).first()
 
-    discount_percent = Decimal(penjualan.discount or 0)
+    # Remove discount_percent reference since it doesn't exist in the model
     additional_discount = Decimal(penjualan.additional_discount or 0)
     expense = Decimal(penjualan.expense or 0)
 
     tax_amount = sum_after - sum_before
-    discount_amount = (sum_before * discount_percent) / Decimal(100)
 
-    grand_total = sum_before - discount_amount - additional_discount + tax_amount + expense
+    # Use item-level discounts instead of header-level discount
+    grand_total = sum_before - total_item_discount - additional_discount + tax_amount + expense
 
     penjualan.total_qty = int(q)
     penjualan.total_price = grand_total
@@ -121,8 +124,8 @@ def calculate_penjualan_totals(db: Session, penjualan_id: int):
         "subtotal_before_tax": sum_before,
         "subtotal_after_tax": sum_after,
         "tax_amount": tax_amount,
-        "discount_percent": discount_percent,
-        "discount_amount": discount_amount,
+        "discount_percent": Decimal('0'),  # No longer applicable
+        "discount_amount": total_item_discount,  # Sum of all item discounts
         "additional_discount": additional_discount,
         "expense": expense,
         "total_qty": int(q),
@@ -248,7 +251,13 @@ async def get_all_penjualan(
 
     # Apply filters
     if status_penjualan is not None and status_penjualan != StatusPembelianEnum.ALL:
-        query = query.filter(Penjualan.status_penjualan == status_penjualan)
+        if status_penjualan == StatusPembelianEnum.ACTIVE or status_penjualan == StatusPembelianEnum.PROCESSED:
+             query = query.filter(
+            (Penjualan.status_penjualan == StatusPembelianEnum.ACTIVE) |
+            (Penjualan.status_penjualan == StatusPembelianEnum.PROCESSED)
+        )
+        else :
+            query = query.filter(Penjualan.status_penjualan == status_penjualan)
     if status_pembayaran is not None and status_pembayaran != StatusPembayaranEnum.ALL:
         query = query.filter(Penjualan.status_pembayaran == status_pembayaran)
     if customer_id:  # Changed: customer_id filter
@@ -309,11 +318,9 @@ async def get_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
 
     return penjualan
 
-
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_db)):
     """Create new penjualan in DRAFT status"""
-
 
     validate_penjualan_items_stock(db, request.items)
 
@@ -325,7 +332,7 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
         top_id=request.top_id,
         sales_date=request.sales_date,
         sales_due_date=request.sales_due_date,
-        discount=request.discount,
+        # Remove discount reference since it doesn't exist in the model
         additional_discount=request.additional_discount,
         expense=request.expense,
         status_penjualan=StatusPembelianEnum.DRAFT
@@ -354,7 +361,8 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
             item_id=item_request.item_id,
             item_name=item.name,
             qty=item_request.qty,
-            unit_price=unit_price,  # ← USE USER INPUT!
+            unit_price=unit_price,
+            discount=getattr(item_request, 'discount', 0),  
             tax_percentage=item_request.tax_percentage,
             total_price=total_price
         )
@@ -369,7 +377,6 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
         "detail": "penjualan created successfully",
         "id": new_penjualan.id,
     }
-
 @router.put("/{penjualan_id}", response_model=PenjualanResponse)
 async def update_penjualan(
     penjualan_id: int,
@@ -381,9 +388,12 @@ async def update_penjualan(
         raise HTTPException(status_code=404, detail="penjualan not found")
     validate_draft_status(penjualan)
 
-
     update_data = request.dict(exclude_unset=True)
     items_data = update_data.pop("items", None)
+    
+    # Remove discount from update_data since it doesn't exist in the model
+    update_data.pop("discount", None)
+    
     for field, value in update_data.items():
         setattr(penjualan, field, value)
 
@@ -405,6 +415,7 @@ async def update_penjualan(
             unit_price = Decimal(str(item_req["unit_price"]))
             qty = int(item_req["qty"])
             tax_percentage = int(item_req.get("tax_percentage", 0))
+            discount = Decimal(str(item_req.get("discount", 0)))  # Get item-level discount
 
             total_price = calculate_item_total(qty, unit_price)
 
@@ -415,6 +426,7 @@ async def update_penjualan(
                 qty=qty,
                 unit_price=unit_price,        
                 total_price=total_price,
+                discount=discount,  # Set item-level discount
                 tax_percentage=tax_percentage,
             ))
 
@@ -671,43 +683,13 @@ async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
             detail=f"Error archiving penjualan: {str(e)}"
         )
 
-# Statistics endpoints
-@router.get("/stats/summary")
-async def get_penjualan_summary(db: Session = Depends(get_db)):
-    """Get penjualan statistics summary"""
-
-    total_count = db.query(func.count(Penjualan.id)).scalar()
-    draft_count = db.query(func.count(Penjualan.id)).filter(
-        Penjualan.status_penjualan == StatusPembelianEnum.DRAFT
-    ).scalar()
-    active_count = db.query(func.count(Penjualan.id)).filter(
-        Penjualan.status_penjualan == StatusPembelianEnum.ACTIVE
-    ).scalar()
-    completed_count = db.query(func.count(Penjualan.id)).filter(
-        Penjualan.status_penjualan == StatusPembelianEnum.COMPLETED
-    ).scalar()
-
-    total_value = db.query(func.sum(Penjualan.total_price)).scalar() or 0
-    unpaid_value = db.query(func.sum(Penjualan.total_price)).filter(
-        Penjualan.status_pembayaran == StatusPembayaranEnum.UNPAID
-    ).scalar() or 0
-
-    return {
-        "total_penjualan": total_count,
-        "draft_count": draft_count,
-        "active_count": active_count,
-        "completed_count": completed_count,
-        "total_value": total_value,
-        "unpaid_value": unpaid_value
-    }
-
 
 @router.get("/{penjualan_id}/invoice/html", response_class=HTMLResponse)
 async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: Session = Depends(get_db)):
     penjualan = (
         db.query(Penjualan)
         .options(
-            joinedload(Penjualan.customer_rel),  # Load the customer relationship
+            joinedload(Penjualan.customer_rel),
             joinedload(Penjualan.penjualan_items)
             .joinedload(PenjualanItem.item_rel)
             .joinedload(Item.attachments)
@@ -733,26 +715,32 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
             "tax_percentage": it.tax_percentage,
             "unit_price": it.unit_price,
             "total_price": it.total_price,
+            "discount": it.discount,  # Include item-level discount
         })
 
     subtotal = Decimal(0)
     tax_amount = Decimal(0)
+    total_item_discount = Decimal(0)  # Track total item discounts
+    
     for item in penjualan.penjualan_items:
         item_total = Decimal(str(item.total_price or 0))
         subtotal += item_total
+        total_item_discount += Decimal(str(item.discount or 0))  # Sum item discounts
         if item.tax_percentage:
             item_tax = item_total * Decimal(str(item.tax_percentage)) / Decimal('100')
             tax_amount += item_tax
 
-    discount = Decimal(str(penjualan.discount or 0))
+    # Remove penjualan.discount reference since it doesn't exist
     additional_discount = Decimal(str(penjualan.additional_discount or 0))
-    final_total = subtotal - discount - additional_discount
+    final_total = subtotal - total_item_discount - additional_discount  # Use item discounts
     expense = Decimal(str(penjualan.expense or 0))
     grand_total = final_total + tax_amount + expense
 
     totals = {
         "subtotal": subtotal,
         "tax_amount": tax_amount,
+        "total_item_discount": total_item_discount,  
+        "additional_discount": additional_discount,
         "final_total": final_total,
         "grand_total": grand_total,
     }

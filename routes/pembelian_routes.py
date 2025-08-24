@@ -248,7 +248,14 @@ async def get_all_pembelian(
 
     # Apply filters
     if status_pembelian is not None and status_pembelian != StatusPembelianEnum.ALL:
-        query = query.filter(Pembelian.status_pembelian == status_pembelian)
+        if status_pembelian == StatusPembelianEnum.ACTIVE or status_pembelian == StatusPembelianEnum.PROCESSED:
+             query = query.filter(
+            (Pembelian.status_pembelian == StatusPembelianEnum.ACTIVE) |
+            (Pembelian.status_pembelian == StatusPembelianEnum.PROCESSED)
+        )
+        else :
+            query = query.filter(Pembelian.status_pembelian == status_pembelian)
+            
     if status_pembayaran is not None and status_pembayaran != StatusPembayaranEnum.ALL:
         query = query.filter(Pembelian.status_pembayaran == status_pembayaran)
     if vendor_id:  # Changed: vendor_id filter
@@ -276,6 +283,8 @@ async def get_all_pembelian(
             "status_pembelian": pembelian.status_pembelian,
             "sales_date": pembelian.sales_date,
             "total_paid": pembelian.total_paid.quantize(Decimal('0.0001')),
+            "total_return": pembelian.total_return.quantize(Decimal('0.0001')),
+            
             "total_qty": pembelian.total_qty,
             "total_price": pembelian.total_price.quantize(Decimal('0.0001')),
             "vendor_name": vendor_name,  # Changed: vendor_name instead of customer_name

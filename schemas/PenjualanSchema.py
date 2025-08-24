@@ -2,7 +2,6 @@ from pydantic import BaseModel, Field, validator, field_validator
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
 
 from models.Pembelian import StatusPembelianEnum
 from models.Penjualan import StatusPembayaranEnum, StatusPembelianEnum
@@ -12,6 +11,7 @@ from models.Penjualan import StatusPembayaranEnum, StatusPembelianEnum
 class PenjualanItemBase(BaseModel):
     item_id: Optional[int] = None
     qty: int
+    discount: Decimal
     unit_price: Decimal
     tax_percentage : Optional[int] = 0
 
@@ -53,6 +53,7 @@ class PenjualanItemResponse(BaseModel):
     # Item details
     qty: int
     unit_price: Decimal
+    discount: Decimal
     total_price: Decimal
     tax_percentage: Optional[int] = 0
 
@@ -128,7 +129,7 @@ class PenjualanResponse(BaseModel):
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
 
-    discount: Decimal
+   
     additional_discount: Decimal
     expense: Decimal
     total_qty: int
