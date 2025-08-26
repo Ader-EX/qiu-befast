@@ -77,7 +77,7 @@ def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(g
             pembelian = db.query(Pembelian).filter(
                 Pembelian.id == detail.pembelian_id,
                 Pembelian.is_deleted == False,
-                Pembelian.status_pembelian.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
+                Pembelian.status_pembelian.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED])
             ).first()
             if not pembelian:
                 raise HTTPException(status_code=404, detail=f"Active Pembelian with ID {detail.pembelian_id} not found")
@@ -89,7 +89,7 @@ def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(g
             penjualan = db.query(Penjualan).filter(
                 Penjualan.id == detail.penjualan_id,
                 Penjualan.is_deleted == False,
-                Penjualan.status_penjualan.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
+                Penjualan.status_penjualan.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED])
             ).first()
             if not penjualan:
                 raise HTTPException(status_code=404, detail=f"Active Penjualan with ID {detail.penjualan_id} not found")

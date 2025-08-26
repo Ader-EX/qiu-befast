@@ -18,7 +18,7 @@ from schemas.PembayaranSchemas import PembayaranPengembalianType
 class PengembalianDetailBase(BaseModel):
     pembelian_id: Optional[int] = None
     penjualan_id: Optional[int] = None
-    total_paid: Decimal = Field(default=Decimal('0.00'), ge=0)  # This represents the return amount
+    total_return: Decimal = Field(default=Decimal('0.00'), ge=0)  # This represents the return amount
 
 class PengembalianDetailCreate(PengembalianDetailBase):
     @model_validator(mode='after')

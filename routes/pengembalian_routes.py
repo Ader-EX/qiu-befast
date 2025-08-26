@@ -34,7 +34,7 @@ def update_return_status(db: Session, reference_id: int, reference_type: Pembaya
     else:
         filters.append(PengembalianDetails.penjualan_id == reference_id)
 
-    total_returns = db.query(func.sum(PengembalianDetails.total_paid)) \
+    total_returns = db.query(func.sum(PengembalianDetails.total_return)) \
                          .join(Pengembalian, PengembalianDetails.pengembalian_id == Pengembalian.id) \
                          .filter(*filters) \
                          .scalar() or Decimal("0.00")
@@ -54,9 +54,9 @@ def update_return_status(db: Session, reference_id: int, reference_type: Pembaya
     elif total_paid > 0:
         record.status_pembayaran = StatusPembayaranEnum.HALF_PAID
         if reference_type == PembayaranPengembalianType.PEMBELIAN:
-            record.status_pembelian = StatusPembelianEnum.COMPLETED
+            record.status_pembelian = StatusPembelianEnum.PROCESSED
         else:
-            record.status_penjualan = StatusPembelianEnum.COMPLETED
+            record.status_penjualan = StatusPembelianEnum.PROCESSED
     else:
         record.status_pembayaran = StatusPembayaranEnum.UNPAID
 
@@ -78,7 +78,7 @@ def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Dep
             pembelian = db.query(Pembelian).filter(
                 Pembelian.id == detail.pembelian_id,
                 Pembelian.is_deleted == False,
-                Pembelian.status_pembelian.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
+                Pembelian.status_pembelian.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED])
             ).first()
             if not pembelian:
                 raise HTTPException(status_code=404, detail=f"Active Pembelian with ID {detail.pembelian_id} not found")
@@ -90,7 +90,7 @@ def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Dep
             penjualan = db.query(Penjualan).filter(
                 Penjualan.id == detail.penjualan_id,
                 Penjualan.is_deleted == False,
-                Penjualan.status_penjualan.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
+                Penjualan.status_penjualan.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED])
             ).first()
             if not penjualan:
                 raise HTTPException(status_code=404, detail=f"Active Penjualan with ID {detail.penjualan_id} not found")
@@ -306,7 +306,7 @@ def update_pengembalian(
                     pembelian = db.query(Pembelian).filter(
                         Pembelian.id == detail.pembelian_id,
                         Pembelian.is_deleted == False,
-                        Pembelian.status_pembelian.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
+                        Pembelian.status_pembelian.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED])
                     ).first()
                     if not pembelian:
                         raise HTTPException(
@@ -318,7 +318,7 @@ def update_pengembalian(
                     penjualan = db.query(Penjualan).filter(
                         Penjualan.id == detail.penjualan_id,
                         Penjualan.is_deleted == False,
-                        Penjualan.status_penjualan.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
+                        Penjualan.status_penjualan.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED])
                     ).first()
                     if not penjualan:
                         raise HTTPException(
