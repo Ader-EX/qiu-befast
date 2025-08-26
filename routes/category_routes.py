@@ -1,5 +1,5 @@
 import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from starlette import status
@@ -13,6 +13,11 @@ from utils import soft_delete_record
 
 router = APIRouter()
 
+
+def _build_categories_lookup(db: Session) -> Dict[str, int]:
+    """Build a lookup dictionary for categories by name."""
+    categories = db.query(Category).filter(Category.deleted_at.is_(None)).all()
+    return {cat.name.lower().strip(): cat.id for cat in categories}
 # Get all
 @router.get("", response_model=PaginatedResponse[CategoryOut])
 async def get_all_categories(

@@ -1,6 +1,9 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional
-from fastapi import APIRouter, Depends, Form, Request, UploadFile, File
+
+import pandas as pd
+from fastapi import APIRouter, Depends, Form, Request, UploadFile, File, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from starlette.exceptions import HTTPException
@@ -12,10 +15,17 @@ import uuid
 from models.Item import Item
 from database import get_db
 from models.AllAttachment import AllAttachment, ParentType
+from routes.category_routes import _build_categories_lookup
+from routes.satuan_routes import _build_satuans_lookup
 from schemas.CategorySchemas import CategoryOut
 from schemas.ItemSchema import ItemResponse, ItemTypeEnum
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.SatuanSchemas import SatuanOut
+import pandas as pd
+import io
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel
+from decimal import Decimal
 
 from utils import generate_unique_record_code, soft_delete_record
 
@@ -35,6 +45,245 @@ def get_item_prefix(item_type: ItemTypeEnum) -> str:
     else:
         raise ValueError(f"Unsupported item type: {item_type}")
 
+
+
+
+class ImportResult(BaseModel):
+    total_processed: int
+    successful_imports: int
+    failed_imports: int
+    errors: List[Dict[str, Any]]
+    warnings: List[Dict[str, Any]]
+
+class ImportOptions(BaseModel):
+    skip_on_error: bool = True
+    update_existing: bool = False
+    default_item_type: ItemTypeEnum = ItemTypeEnum.FINISH_GOOD
+
+def _create_new_item(db: Session, item_data: Dict[str, Any]):
+    """Create a new item."""
+    new_item = Item(**item_data)
+    db.add(new_item)
+    db.flush()
+
+def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_id: int):
+    """Update an existing item."""
+    item = db.query(Item).filter(Item.id == existing_item_id).first()
+    if item:
+        for key, value in item_data.items():
+            if hasattr(item, key):
+                setattr(item, key, value)
+
+
+@router.post("/import-excel", response_model=ImportResult)
+async def import_items_from_excel(
+        file: UploadFile = File(...),
+        skip_on_error: bool = Query(True, description="Skip rows with errors instead of failing completely"),
+        update_existing: bool = Query(False, description="Update existing items if SKU already exists"),
+        default_item_type: ItemTypeEnum = Query(ItemTypeEnum.FINISH_GOOD, description="Default item type if not specified"),
+        db: Session = Depends(get_db)
+):
+    """
+    Import items from Excel/CSV file using the template format.
+
+    Expected columns:
+    - Item Code (optional)
+    - Nama Item (required)
+    - SKU (required, unique)
+    - Kategori 1 (optional, by name)
+    - Kategori 2 (optional, by name)
+    - Jumlah Unit (optional, defaults to 0)
+    - Harga Jual (required)
+    - Satuan Unit (required, by name)
+    """
+
+    # Validate file type
+    if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
+        raise HTTPException(status_code=400, detail="File must be Excel (.xlsx, .xls) or CSV (.csv)")
+
+    try:
+        # Read file content
+        content = await file.read()
+
+        # Parse based on file type
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep=';')
+        else:
+            df = pd.read_excel(io.BytesIO(content))
+
+        df.columns = df.columns.str.strip()
+
+        column_mapping = {
+            'Item Code': 'code',
+            'Nama Item': 'name',
+            'SKU': 'sku',
+            'Kategori 1': 'kategori_1',
+            'Kategori 2': 'kategori_2',
+            'Jumlah Unit': 'jumlah_unit',
+            'Harga Jual': 'harga_jual',
+            'Satuan Unit': 'satuan_unit'
+        }
+
+        required_columns = ['Nama Item', 'SKU', 'Harga Jual', 'Satuan Unit']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required columns: {', '.join(missing_columns)}"
+            )
+
+        df = df.rename(columns=column_mapping)
+
+        categories_lookup = _build_categories_lookup(db)
+        satuans_lookup = _build_satuans_lookup(db)
+        existing_skus = _get_existing_skus(db)
+
+        # Process each row
+        result = ImportResult(
+            total_processed=len(df),
+            successful_imports=0,
+            failed_imports=0,
+            errors=[],
+            warnings=[]
+        )
+
+        for index, row in df.iterrows():
+            try:
+                item_data = _process_row(
+                    row, index, categories_lookup, satuans_lookup,
+                    existing_skus, default_item_type, update_existing
+                )
+
+                if item_data is None:
+                    continue  # Skip this row
+
+                # Create or update item
+                if update_existing and item_data['sku'] in existing_skus:
+                    _update_existing_item(db, item_data, existing_skus[item_data['sku']])
+                    result.warnings.append({
+                        'row': index + 2,
+                        'message': f"Updated existing item with SKU: {item_data['sku']}"
+                    })
+                else:
+                    _create_new_item(db, item_data)
+
+                result.successful_imports += 1
+
+            except Exception as e:
+                error_msg = str(e)
+                result.errors.append({
+                    'row': index + 2,
+                    'sku': row.get('sku', 'N/A'),
+                    'error': error_msg
+                })
+                result.failed_imports += 1
+
+                if not skip_on_error:
+                    db.rollback()
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Import failed at row {index + 2}: {error_msg}"
+                    )
+
+
+
+        # Commit all changes
+        db.commit()
+
+        return result
+
+    except pd.errors.EmptyDataError:
+        raise HTTPException(status_code=400, detail="File is empty or has no data")
+    except pd.errors.ParserError as e:
+        raise HTTPException(status_code=400, detail=f"Error parsing file: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+
+
+
+
+def _get_existing_skus(db: Session) -> Dict[str, int]:
+    """Get existing SKUs to check for duplicates."""
+    items = db.query(Item.sku, Item.id).filter(Item.deleted_at.is_(None)).all()
+    return {item.sku: item.id for item in items}
+
+def _process_row(
+        row,
+        index: int,
+        categories_lookup: Dict[str, int],
+        satuans_lookup: Dict[str, int],
+        existing_skus: Dict[str, int],
+        default_item_type: ItemTypeEnum,
+        update_existing: bool
+) -> Optional[Dict[str, Any]]:
+    """Process a single row and return item data."""
+
+
+    if pd.isna(row.get('name')) or not str(row.get('name')).strip():
+        raise ValueError("Nama Item is required")
+
+    if pd.isna(row.get('sku')) or not str(row.get('sku')).strip():
+        raise ValueError("SKU is required")
+
+    if pd.isna(row.get('harga_jual')):
+        raise ValueError("Harga Jual is required")
+
+    if pd.isna(row.get('satuan_unit')) or not str(row.get('satuan_unit')).strip():
+        raise ValueError("Satuan Unit is required")
+
+    sku = str(row['sku']).strip()
+
+    if sku in existing_skus and not update_existing:
+        raise ValueError(f"SKU '{sku}' already exists. Use update_existing=true to update.")
+
+    satuan_symbol = str(row['satuan_unit']).lower().strip()
+    satuan_id = satuans_lookup.get(satuan_symbol)
+    if not satuan_id:
+        raise ValueError(f"Satuan '{row['satuan_unit']}' not found. Please create it first.")
+
+    category_one_id = None
+    category_two_id = None
+
+    if not pd.isna(row.get('kategori_1')) and str(row.get('kategori_1')).strip():
+        cat1_name = str(row['kategori_1']).lower().strip()
+        category_one_id = categories_lookup.get(cat1_name)
+        if not category_one_id:
+            raise ValueError(f"Kategori 1 '{row['kategori_1']}' not found. Please create it first.")
+
+    if not pd.isna(row.get('kategori_2')) and str(row.get('kategori_2')).strip():
+        cat2_name = str(row['kategori_2']).lower().strip()
+        category_two_id = categories_lookup.get(cat2_name)
+        if not category_two_id:
+            raise ValueError(f"Kategori 2 '{row['kategori_2']}' not found. Please create it first.")
+
+    try:
+        price = Decimal(str(row['harga_jual']).replace(',', '.'))
+        if price < 0:
+            raise ValueError("Harga Jual must be positive")
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid Harga Jual: {row['harga_jual']}")
+
+    # Parse quantity
+    total_item = 0
+    if not pd.isna(row.get('jumlah_unit')):
+        try:
+            total_item = int(float(row['jumlah_unit']))
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid Jumlah Unit: {row['jumlah_unit']}")
+
+    return {
+        'code': str(row.get('code', '')).strip() if not pd.isna(row.get('code')) else None,
+        'name': str(row['name']).strip(),
+        'sku': sku,
+        'type': default_item_type,
+        'total_item': total_item,
+        'price': price,
+        'category_one': category_one_id,
+        'category_two': category_two_id,
+        'satuan_id': satuan_id,
+        'is_active': True
+    }
 
 @router.get("/{item_id}", response_model=ItemResponse)
 def get_item_by_id(

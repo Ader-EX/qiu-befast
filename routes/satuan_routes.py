@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from fastapi import FastAPI,  APIRouter
 
@@ -17,6 +17,12 @@ from utils import soft_delete_record
 
 router =APIRouter()
 
+
+
+def _build_satuans_lookup(db: Session) -> Dict[str, int]:
+    """Build a lookup dictionary for satuans by name."""
+    satuans = db.query(Satuan).filter(Satuan.deleted_at.is_(None)).all()
+    return {sat.symbol.lower().strip(): sat.id for sat in satuans}
 
 @router.get("", response_model=PaginatedResponse[SatuanOut])
 async def get_all_satuan(

@@ -22,7 +22,7 @@ class Item(Base, SoftDeleteMixin):
     code= Column(String(100), unique=True, nullable=True)
     type = Column(Enum(ItemTypeEnum))
     name = Column(String(100), nullable=False)
-    sku = Column(String(100), unique=True, nullable=False, index=True)
+    sku = Column(String(100), nullable=False, index=True)
     total_item = Column(Integer, default=0, nullable=False)
     price = Column(Numeric(15,7), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
