@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from database import Base, engine
 from routes import (
     auth_routes, currency_routes, customer_routes, item_routes, vendor_routes,
-    category_routes, pembayaran_routes,pengembalian_routes,satuan_routes,user_routes, warehouse_routes,upload_routes, termofpayment_routes, pembelian_routes, penjualan_routes
+    category_routes,utils_routes, pembayaran_routes,pengembalian_routes,satuan_routes,user_routes, warehouse_routes,upload_routes, termofpayment_routes, pembelian_routes, penjualan_routes
 )
 from fastapi.staticfiles import StaticFiles
 import os
@@ -85,7 +85,9 @@ app.mount("/static", StaticFiles(directory=os.getenv("STATIC_URL")), name="stati
 
 
 app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
+app.include_router(utils_routes.router, prefix="/utils", tags=["Utils"])
 app.include_router(satuan_routes.router, prefix="/satuan", tags=["Satuan"])
+
 app.include_router(termofpayment_routes.router, prefix="/top", tags=["Term of Payment"])
 app.include_router(warehouse_routes.router, prefix="/warehouse", tags=["Warehouse"])
 app.include_router(category_routes.router, prefix="/category", tags=["Category"])
