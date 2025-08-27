@@ -286,6 +286,7 @@ async def get_all_penjualan(
             "status_penjualan": penjualan.status_penjualan,
             "sales_date": penjualan.sales_date,
             "total_paid": penjualan.total_paid.quantize(Decimal('0.0001')),
+            "total_return": penjualan.total_return.quantize(Decimal('0.0001')),
             "total_qty": penjualan.total_qty,
             "total_price": penjualan.total_price.quantize(Decimal('0.0001')),
             "customer_name": customer_name,  # Changed: customer_name instead of customer_name

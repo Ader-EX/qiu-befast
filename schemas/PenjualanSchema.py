@@ -163,6 +163,8 @@ class PenjualanListResponse(BaseModel):
     total_qty: int
     total_price: Decimal
     total_paid: Decimal
+    total_return : Decimal
+
 
     # Customer info (draft or finalized)
     customer_name: Optional[str] = None

@@ -32,7 +32,7 @@ class Penjualan(Base,SoftDeleteMixin):
     total_qty = Column(Integer, nullable=False, default=0)
     total_price = Column(Numeric(15, 7), default=0.00)
     total_paid = Column(Numeric(15, 7), default=0.00)
-    total_return = Column(Numeric(15, 7), default=0.00) # Added for consistency with Pembelian
+    total_return = Column(Numeric(15, 7), default=0.00)
 
     # For DRAFT: store foreign keys to allow editing
     # For finalized: store names to preserve data even if master gets deleted
