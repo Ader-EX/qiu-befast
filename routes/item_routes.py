@@ -73,8 +73,6 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
         for key, value in item_data.items():
             if hasattr(item, key):
                 setattr(item, key, value)
-
-
 @router.post("/import-excel", response_model=ImportResult)
 async def import_items_from_excel(
         file: UploadFile = File(...),
@@ -124,7 +122,7 @@ async def import_items_from_excel(
             'Satuan Unit': 'satuan_unit'
         }
 
-        required_columns = ['Nama Item', 'SKU', 'Harga Jual', 'Satuan Unit']
+        required_columns = ['Nama Item', 'SKU', 'Satuan Unit']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             raise HTTPException(
@@ -137,6 +135,7 @@ async def import_items_from_excel(
         categories_lookup = _build_categories_lookup(db)
         satuans_lookup = _build_satuans_lookup(db)
         existing_skus = _get_existing_skus(db)
+        existing_codes = _get_existing_codes(db)
 
         # Process each row
         result = ImportResult(
@@ -151,7 +150,7 @@ async def import_items_from_excel(
             try:
                 item_data = _process_row(
                     row, index, categories_lookup, satuans_lookup,
-                    existing_skus, default_item_type, update_existing
+                    existing_skus, existing_codes, default_item_type, update_existing  # Add existing_codes parameter
                 )
 
                 if item_data is None:
@@ -182,10 +181,8 @@ async def import_items_from_excel(
                     db.rollback()
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Import failed at row {index + 2}: {error_msg}"
+                        detail=f"{error_msg}"
                     )
-
-
 
         # Commit all changes
         db.commit()
@@ -198,9 +195,7 @@ async def import_items_from_excel(
         raise HTTPException(status_code=400, detail=f"Error parsing file: {str(e)}")
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
-
-
+        raise HTTPException(status_code=400, detail=f"{str(e)}")
 
 
 def _get_existing_skus(db: Session) -> Dict[str, int]:
@@ -208,17 +203,27 @@ def _get_existing_skus(db: Session) -> Dict[str, int]:
     items = db.query(Item.sku, Item.id).filter(Item.deleted_at.is_(None)).all()
     return {item.sku: item.id for item in items}
 
+
+def _get_existing_codes(db: Session) -> Dict[str, int]:
+    """Get existing codes to check for duplicates."""
+    items = db.query(Item.code, Item.id).filter(
+        Item.deleted_at.is_(None),
+        Item.code.isnot(None),
+        Item.code != ''
+    ).all()
+    return {item.code: item.id for item in items}
+
+
 def _process_row(
         row,
         index: int,
         categories_lookup: Dict[str, int],
         satuans_lookup: Dict[str, int],
         existing_skus: Dict[str, int],
+        existing_codes: Dict[str, int],  # Add this parameter
         default_item_type: ItemTypeEnum,
         update_existing: bool
 ) -> Optional[Dict[str, Any]]:
-    """Process a single row and return item data."""
-
 
     if pd.isna(row.get('name')) or not str(row.get('name')).strip():
         raise ValueError("Nama Item is required")
@@ -226,13 +231,17 @@ def _process_row(
     if pd.isna(row.get('sku')) or not str(row.get('sku')).strip():
         raise ValueError("SKU is required")
 
-    if pd.isna(row.get('harga_jual')):
-        raise ValueError("Harga Jual is required")
+    # Harga Jual defaults to 0 if empty
 
     if pd.isna(row.get('satuan_unit')) or not str(row.get('satuan_unit')).strip():
         raise ValueError("Satuan Unit is required")
 
     sku = str(row['sku']).strip()
+
+    # Check for existing code and skip if it exists
+    code = str(row.get('code', '')).strip() if not pd.isna(row.get('code')) else None
+    if code and code in existing_codes:
+        return None  # Skip this row silently
 
     if sku in existing_skus and not update_existing:
         raise ValueError(f"SKU '{sku}' already exists. Use update_existing=true to update.")
@@ -240,7 +249,7 @@ def _process_row(
     satuan_symbol = str(row['satuan_unit']).lower().strip()
     satuan_id = satuans_lookup.get(satuan_symbol)
     if not satuan_id:
-        raise ValueError(f"Satuan '{row['satuan_unit']}' not found. Please create it first.")
+        raise ValueError(f"Satuan '{row['satuan_unit']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
 
     category_one_id = None
     category_two_id = None
@@ -249,18 +258,21 @@ def _process_row(
         cat1_name = str(row['kategori_1']).lower().strip()
         category_one_id = categories_lookup.get(cat1_name)
         if not category_one_id:
-            raise ValueError(f"Kategori 1 '{row['kategori_1']}' not found. Please create it first.")
+            raise ValueError(f"Kategori 1 '{row['kategori_1']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
 
     if not pd.isna(row.get('kategori_2')) and str(row.get('kategori_2')).strip():
         cat2_name = str(row['kategori_2']).lower().strip()
         category_two_id = categories_lookup.get(cat2_name)
         if not category_two_id:
-            raise ValueError(f"Kategori 2 '{row['kategori_2']}' not found. Please create it first.")
+            raise ValueError(f"Kategori 2 '{row['kategori_2']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
 
     try:
-        price = Decimal(str(row['harga_jual']).replace(',', '.'))
-        if price < 0:
-            raise ValueError("Harga Jual must be positive")
+        if pd.isna(row.get('harga_jual')) or str(row.get('harga_jual')).strip() == '':
+            price = Decimal('0')
+        else:
+            price = Decimal(str(row['harga_jual']).replace(',', '.'))
+            if price < 0:
+                raise ValueError("Harga Jual must be positive")
     except (ValueError, TypeError):
         raise ValueError(f"Invalid Harga Jual: {row['harga_jual']}")
 
@@ -273,7 +285,7 @@ def _process_row(
             raise ValueError(f"Invalid Jumlah Unit: {row['jumlah_unit']}")
 
     return {
-        'code': str(row.get('code', '')).strip() if not pd.isna(row.get('code')) else None,
+        'code': code,
         'name': str(row['name']).strip(),
         'sku': sku,
         'type': default_item_type,
@@ -299,13 +311,13 @@ def get_item_by_id(
     ).filter(Item.id == item_id, Item.is_deleted == False).first()
 
     if not db_item:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise HTTPException(status_code=404, detail="Item tidak ditemukan")
 
     return construct_item_response(db_item, request)
 
 @router.post("", response_model=ItemResponse)
 async def create_item(
-        images: List[UploadFile] = File(default=[]),  # Move this FIRST
+        images: List[UploadFile] = File(default=[]),
         type: ItemTypeEnum = Form(...),
         name: str = Form(...),
         sku: str = Form(...),
@@ -392,7 +404,7 @@ async def create_item(
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error creating item: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"{str(e)}")
 
 
 @router.get("", response_model=PaginatedResponse[ItemResponse])
@@ -459,7 +471,7 @@ async def update_item(
 ):
     db_item = db.query(Item).filter(Item.id == item_id).first()
     if not db_item:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise HTTPException(status_code=404, detail="Item tidak ditemukan")
 
     existing_item = db.query(Item).filter(Item.sku == sku, Item.id != item_id).first()
     if existing_item:
@@ -522,7 +534,7 @@ async def update_item(
 def delete_item(item_id: int, db: Session = Depends(get_db)):
     db_item = db.query(Item).filter(Item.id == item_id).first()
     if not db_item:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise HTTPException(status_code=404, detail="Item tidak ditemukan")
 
     try:
         for attachment in db_item.attachments:
