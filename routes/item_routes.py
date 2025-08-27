@@ -73,6 +73,162 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
         for key, value in item_data.items():
             if hasattr(item, key):
                 setattr(item, key, value)
+
+@router.get("/{item_id}", response_model=ItemResponse)
+def get_item_by_id(
+        request: Request,
+        item_id: int,
+        db: Session = Depends(get_db),
+):
+    db_item = db.query(Item).options(
+        joinedload(Item.category_one_rel),
+        joinedload(Item.category_two_rel),
+        joinedload(Item.satuan_rel),
+        joinedload(Item.attachments),
+    ).filter(Item.id == item_id, Item.is_deleted == False).first()
+
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Item tidak ditemukan")
+
+    return construct_item_response(db_item, request)
+
+@router.post("", response_model=ItemResponse)
+async def create_item(
+        images: List[UploadFile] = File(default=[]),
+        type: ItemTypeEnum = Form(...),
+        name: str = Form(...),
+        sku: str = Form(...),
+        total_item: int = Form(0),
+        price: float = Form(...),
+        is_active: bool = Form(True),
+        category_one: Optional[int] = Form(None),
+        category_two: Optional[int] = Form(None),
+        satuan_id: int = Form(...),
+
+        db: Session = Depends(get_db),
+):
+    if len(images) > 3:
+        raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
+
+    pattern = get_item_prefix(type)
+
+    # SKU validation
+    existing_item = db.query(Item).filter(Item.sku == sku).first()
+    if existing_item:
+        if existing_item.is_deleted:
+            existing_item.type = type
+            existing_item.code = generate_unique_record_code(db, Item, pattern)
+            existing_item.name = name
+            existing_item.total_item = total_item
+            existing_item.price = price
+            existing_item.is_active = is_active
+            existing_item.category_one = category_one
+            existing_item.category_two = category_two
+            existing_item.satuan_id = satuan_id
+
+            existing_item.is_deleted = False
+            existing_item.deleted_at = None
+            db.commit()
+            db.refresh(existing_item)
+            return existing_item
+        else:
+            raise HTTPException(status_code=400, detail="SKU already exists")
+
+    try:
+        db_item = Item(
+            type=type,
+            name=name,
+            code=generate_unique_record_code(db, Item, pattern),
+            sku=sku,
+            total_item=total_item,
+            price=price,
+            is_active=is_active,
+            category_one=category_one,
+            category_two=category_two,
+            satuan_id=satuan_id,
+
+        )
+
+        db.add(db_item)
+        db.commit()
+        db.refresh(db_item)
+
+        # Handle images
+        for image in images:
+            if image.filename:
+                ext = os.path.splitext(image.filename)[1]
+                unique_filename = f"{uuid.uuid4()}{ext}"
+                save_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
+
+                with open(save_path, "wb") as buffer:
+                    shutil.copyfileobj(image.file, buffer)
+
+                attachment = AllAttachment(
+                    parent_type=ParentType.ITEMS,
+                    item_id=db_item.id,
+                    filename=image.filename,
+                    file_path=save_path,
+                    file_size=os.path.getsize(save_path),
+                    mime_type=image.content_type,
+                    created_at=datetime.now(),
+                )
+                db.add(attachment)
+
+        db.commit()
+        db.refresh(db_item)
+
+        return db_item
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"{str(e)}")
+
+@router.get("", response_model=PaginatedResponse[ItemResponse])
+def get_items(
+        request: Request,
+        db: Session = Depends(get_db),
+        page: int = 1,
+        rowsPerPage: int = 5,
+        search_key: Optional[str] = None,
+        item_type: Optional[ItemTypeEnum] = None,
+        is_active: Optional[bool] = None,
+        sortBy: Optional[Literal["name", "price", "sku", "created_at"]] = None,
+        sortOrder: Optional[Literal["asc", "desc"]] = "asc",
+):
+    query = db.query(Item).options(
+        joinedload(Item.category_one_rel),
+        joinedload(Item.category_two_rel),
+        joinedload(Item.satuan_rel),
+        joinedload(Item.attachments),
+    ).filter(Item.is_deleted == False)
+
+    if search_key:
+        query = query.filter(
+            or_(
+                Item.name.ilike(f"%{search_key}%"),
+                Item.sku.ilike(f"%{search_key}%"),
+            )
+        )
+
+    if item_type:
+        query = query.filter(Item.type == item_type)
+
+    if is_active is not None:
+        query = query.filter(Item.is_active == is_active)
+
+    if sortBy:
+        sort_column = getattr(Item, sortBy)
+        query = query.order_by(sort_column.desc() if sortOrder == "desc" else sort_column.asc())
+
+    total_count = query.count()
+    paginated_data = query.offset((page - 1) * rowsPerPage).limit(rowsPerPage).all()
+
+    items_out = [construct_item_response(item, request) for item in paginated_data]
+
+    return {"data": items_out, "total": total_count}
+
+
+
 @router.post("/import-excel", response_model=ImportResult)
 async def import_items_from_excel(
         file: UploadFile = File(...),
@@ -296,160 +452,6 @@ def _process_row(
         'satuan_id': satuan_id,
         'is_active': True
     }
-
-@router.get("/{item_id}", response_model=ItemResponse)
-def get_item_by_id(
-        request: Request,
-        item_id: int,
-        db: Session = Depends(get_db),
-):
-    db_item = db.query(Item).options(
-        joinedload(Item.category_one_rel),
-        joinedload(Item.category_two_rel),
-        joinedload(Item.satuan_rel),
-        joinedload(Item.attachments),
-    ).filter(Item.id == item_id, Item.is_deleted == False).first()
-
-    if not db_item:
-        raise HTTPException(status_code=404, detail="Item tidak ditemukan")
-
-    return construct_item_response(db_item, request)
-
-@router.post("", response_model=ItemResponse)
-async def create_item(
-        images: List[UploadFile] = File(default=[]),
-        type: ItemTypeEnum = Form(...),
-        name: str = Form(...),
-        sku: str = Form(...),
-        total_item: int = Form(0),
-        price: float = Form(...),
-        is_active: bool = Form(True),
-        category_one: Optional[int] = Form(None),
-        category_two: Optional[int] = Form(None),
-        satuan_id: int = Form(...),
-
-        db: Session = Depends(get_db),
-):
-    if len(images) > 3:
-        raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
-
-    pattern = get_item_prefix(type)
-
-    # SKU validation
-    existing_item = db.query(Item).filter(Item.sku == sku).first()
-    if existing_item:
-        if existing_item.is_deleted:
-            existing_item.type = type
-            existing_item.code = generate_unique_record_code(db, Item, pattern)
-            existing_item.name = name
-            existing_item.total_item = total_item
-            existing_item.price = price
-            existing_item.is_active = is_active
-            existing_item.category_one = category_one
-            existing_item.category_two = category_two
-            existing_item.satuan_id = satuan_id
-
-            existing_item.is_deleted = False
-            existing_item.deleted_at = None
-            db.commit()
-            db.refresh(existing_item)
-            return existing_item
-        else:
-            raise HTTPException(status_code=400, detail="SKU already exists")
-
-    try:
-        db_item = Item(
-            type=type,
-            name=name,
-            code=generate_unique_record_code(db, Item, pattern),
-            sku=sku,
-            total_item=total_item,
-            price=price,
-            is_active=is_active,
-            category_one=category_one,
-            category_two=category_two,
-            satuan_id=satuan_id,
-
-        )
-
-        db.add(db_item)
-        db.commit()
-        db.refresh(db_item)
-
-        # Handle images
-        for image in images:
-            if image.filename:
-                ext = os.path.splitext(image.filename)[1]
-                unique_filename = f"{uuid.uuid4()}{ext}"
-                save_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
-
-                with open(save_path, "wb") as buffer:
-                    shutil.copyfileobj(image.file, buffer)
-
-                attachment = AllAttachment(
-                    parent_type=ParentType.ITEMS,
-                    item_id=db_item.id,
-                    filename=image.filename,
-                    file_path=save_path,
-                    file_size=os.path.getsize(save_path),
-                    mime_type=image.content_type,
-                    created_at=datetime.now(),
-                )
-                db.add(attachment)
-
-        db.commit()
-        db.refresh(db_item)
-
-        return db_item
-
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=f"{str(e)}")
-
-
-@router.get("", response_model=PaginatedResponse[ItemResponse])
-def get_items(
-        request: Request,
-        db: Session = Depends(get_db),
-        page: int = 1,
-        rowsPerPage: int = 5,
-        search_key: Optional[str] = None,
-        item_type: Optional[ItemTypeEnum] = None,
-        is_active: Optional[bool] = None,
-        sortBy: Optional[Literal["name", "price", "sku", "created_at"]] = None,
-        sortOrder: Optional[Literal["asc", "desc"]] = "asc",
-):
-    query = db.query(Item).options(
-        joinedload(Item.category_one_rel),
-        joinedload(Item.category_two_rel),
-        joinedload(Item.satuan_rel),
-        joinedload(Item.attachments),
-    ).filter(Item.is_deleted == False)
-
-    if search_key:
-        query = query.filter(
-            or_(
-                Item.name.ilike(f"%{search_key}%"),
-                Item.sku.ilike(f"%{search_key}%"),
-            )
-        )
-
-    if item_type:
-        query = query.filter(Item.type == item_type)
-
-    if is_active is not None:
-        query = query.filter(Item.is_active == is_active)
-
-    if sortBy:
-        sort_column = getattr(Item, sortBy)
-        query = query.order_by(sort_column.desc() if sortOrder == "desc" else sort_column.asc())
-
-    total_count = query.count()
-    paginated_data = query.offset((page - 1) * rowsPerPage).limit(rowsPerPage).all()
-
-    items_out = [construct_item_response(item, request) for item in paginated_data]
-
-    return {"data": items_out, "total": total_count}
 
 
 @router.put("/{item_id}", response_model=ItemResponse)
