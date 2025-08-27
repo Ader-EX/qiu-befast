@@ -491,7 +491,6 @@ async def update_item(
         db_item.satuan_id = satuan_id
 
 
-        # Handle images
         if images and any(img.filename for img in images):
             if len(images) > 3:
                 raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
