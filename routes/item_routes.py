@@ -467,10 +467,35 @@ async def update_item(
         category_one: Optional[int] = Form(None),
         category_two: Optional[int] = Form(None),
         satuan_id: int = Form(...),
-
         images: List[UploadFile] = File(default=[]),
         db: Session = Depends(get_db),
 ):
+    # Validate file sizes before processing
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB per file
+    MAX_TOTAL_SIZE = 30 * 1024 * 1024  # 30MB total
+
+    total_size = 0
+    for image in images:
+        if image.filename:
+            # Read file size (this doesn't load the entire file into memory)
+            image.file.seek(0, 2)  # Seek to end
+            file_size = image.file.tell()
+            image.file.seek(0)  # Reset to beginning
+
+            if file_size > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File {image.filename} is too large. Maximum size is 10MB per file."
+                )
+
+            total_size += file_size
+
+    if total_size > MAX_TOTAL_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Total file size is too large. Maximum total size is 30MB."
+        )
+
     db_item = db.query(Item).filter(Item.id == item_id).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Item tidak ditemukan")
@@ -490,19 +515,28 @@ async def update_item(
         db_item.category_two = category_two
         db_item.satuan_id = satuan_id
 
-
         if images and any(img.filename for img in images):
             if len(images) > 3:
                 raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
 
+            # Remove existing attachments
             existing_attachments = db.query(AllAttachment).filter(AllAttachment.item_id == item_id).all()
             for attachment in existing_attachments:
                 if os.path.exists(attachment.file_path):
                     os.remove(attachment.file_path)
                 db.delete(attachment)
 
+            # Add new attachments
             for image in images:
                 if image.filename:
+                    # Validate file type
+                    allowed_types = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+                    if image.content_type not in allowed_types:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"File type {image.content_type} not allowed. Allowed types: JPEG, PNG, GIF, WebP"
+                        )
+
                     ext = os.path.splitext(image.filename)[1]
                     unique_filename = f"{uuid.uuid4()}{ext}"
                     save_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
@@ -526,10 +560,12 @@ async def update_item(
 
         return construct_item_response(db_item, request)
 
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating item: {str(e)}")
-
 
 @router.delete("/{item_id}")
 def delete_item(item_id: int, db: Session = Depends(get_db)):
