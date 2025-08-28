@@ -134,3 +134,5 @@ class PembelianItem(Base):
             # if you don't care about type filtering, just:
             # return self.item_rel.attachments[0].url
         return None
+    
+    

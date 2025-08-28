@@ -50,4 +50,36 @@ class SalesReportResponse(BaseModel):
     title: str
     date_from: datetime
     date_to: datetime
-    rows: List[SalesReportRow]
+    data: List[SalesReportRow]
+    total : int
+    
+    
+    
+class PurchaseReportRow(BaseModel):
+    date: datetime
+    vendor: str
+    no_pembelian: str
+    status: str  # "Paid/Unpaid/Half_paid" etc. (stringified enum)
+    item_code: Optional[str] = None
+    item_name: Optional[str] = None
+    qty: int
+    price: Decimal
+    sub_total: Decimal
+    total: Decimal
+    tax: Decimal
+    grand_total: Decimal
+
+    class Config:
+        # Ensure Decimals serialize cleanly to JSON
+        json_encoders = {Decimal: lambda v: str(v)}
+
+
+class PurchaseReportResponse(BaseModel):
+    title: str
+    date_from: datetime
+    date_to: datetime
+    data: List[PurchaseReportRow]
+    total : int
+
+    class Config:
+        json_encoders = {Decimal: lambda v: str(v)}
