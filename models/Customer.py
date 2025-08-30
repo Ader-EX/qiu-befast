@@ -8,7 +8,8 @@ from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 
 class Customer(Base,SoftDeleteMixin):
     __tablename__ = "customers"
-    id = Column(String(50), primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50),nullable=False, unique=True)
     name = Column(String(50), nullable=False)
     address = Column(String(255) , nullable=False)
     is_active = Column(Boolean, default=True)

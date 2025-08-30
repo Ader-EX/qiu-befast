@@ -20,7 +20,7 @@ class Pembayaran(Base):
     payment_date = Column(DateTime, nullable=False)
 
     reference_type = Column(Enum(PembayaranPengembalianType), nullable=False)
-    customer_id = Column(String(50), ForeignKey("customers.id"), nullable=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
     vendor_id = Column(String(50), ForeignKey("vendors.id"), nullable=True)
     currency_id = Column(Integer, ForeignKey("currencies.id"), nullable=False)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False)

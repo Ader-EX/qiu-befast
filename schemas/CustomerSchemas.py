@@ -4,21 +4,35 @@ from schemas.CurrencySchemas import CurrencyOut
 
 
 class CustomerBase(BaseModel):
-    id:str
+    pass
+
+class CustomerCreate(CustomerBase):
+    code :str
     name: str
     address: str
     kode_lambung: Optional[str] = None
     is_active: Optional[bool] = True
     currency_id: int
-
-class CustomerCreate(CustomerBase):
     pass
 
 class CustomerUpdate(CustomerBase):
+    code :str
+    name: str
+    address: str
+    kode_lambung: Optional[str] = None
+    is_active: Optional[bool] = True
+    currency_id: int
     pass
 
 
 class CustomerOut(CustomerBase):
+    id:int
+    code :str
+    name: str
+    address: str
+    kode_lambung: Optional[str] = None
+    is_active: Optional[bool] = True
+    currency_id: int
     curr_rel: Optional[CurrencyOut] = None
     pass
 

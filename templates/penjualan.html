@@ -132,21 +132,21 @@
         </div>
 
         <div class="totals-row">
-          <div class="label">Discount</div>
-          <div class="value">{{ idr(penjualan.discount) }}</div>
+          <div class="label">Item Discounts</div>
+          <div class="value destructive">-{{ idr(totals.item_discounts) }}</div>
         </div>
 
         <div class="totals-row">
           <div class="label">Additional Discount</div>
           <div class="value destructive">
-            {{ idr(penjualan.additional_discount) }}
+            -{{ idr(totals.additional_discount) }}
           </div>
         </div>
 
         <div style="height: 16px"></div>
 
         <div class="summary-row">
-          <div>Total</div>
+          <div>Total (Before Tax)</div>
           <div>{{ idr(totals.final_total) }}</div>
         </div>
         <div class="summary-row" style="font-weight: 400; font-size: 14px">

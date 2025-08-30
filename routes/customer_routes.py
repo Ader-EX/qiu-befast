@@ -57,22 +57,29 @@ async def get_customer(customer_id: str, db: Session = Depends(get_db)):
 # Create
 @router.post("", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
 async def create_customer(customer_data: CustomerCreate, db: Session = Depends(get_db)):
-    existing_customer = db.query(Customer).filter(Customer.id == customer_data.id).first()
+    # 🔍 Check if customer with same code exists (active OR deleted)
+    existing_customer = db.query(Customer).filter(Customer.code == customer_data.code).first()
+
     if existing_customer:
-        if  existing_customer.is_active:
+        if existing_customer.is_deleted:
+            # ✅ Revive soft-deleted customer
             for field, value in customer_data.dict().items():
                 setattr(existing_customer, field, value)
             existing_customer.is_deleted = False
             existing_customer.deleted_at = None
+            existing_customer.is_active = True
             db.commit()
             db.refresh(existing_customer)
             return existing_customer
+
         else:
+            # ❌ Prevent duplicate active codes
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Customer with ID '{customer_data.id}' already exists."
+                detail=f"Customer dengan code '{customer_data.code}' sudah ada."
             )
 
+    # 🔍 Validate currency
     currency = db.query(Currency).filter(
         Currency.id == customer_data.currency_id,
         Currency.is_active == True
@@ -83,7 +90,7 @@ async def create_customer(customer_data: CustomerCreate, db: Session = Depends(g
             detail=f"Currency with ID '{customer_data.currency_id}' not found."
         )
 
-
+    # ✅ Create a new customer
     customer = Customer(**customer_data.dict())
     db.add(customer)
     db.commit()

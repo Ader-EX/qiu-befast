@@ -38,7 +38,7 @@ class Penjualan(Base,SoftDeleteMixin):
     # For finalized: store names to preserve data even if master gets deleted
     # Draft mode - foreign keys (nullable when finalized)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
-    customer_id = Column(String(50), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
+    customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
     top_id = Column(Integer, ForeignKey("term_of_payments.id", ondelete="SET NULL"), nullable=True)
 
     # Finalized mode - stored names (nullable when draft)

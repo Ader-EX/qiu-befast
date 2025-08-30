@@ -704,9 +704,30 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
     BASE_URL = os.getenv("BASE_URL", "https://qiu-system.qiuparts.com")
 
     enhanced_items = []
+    subtotal_before_discount = Decimal('0')  # Subtotal before any discounts
+    total_item_discounts = Decimal('0')      # Sum of all item discounts
+    tax_amount = Decimal('0')
+    
     for it in penjualan.penjualan_items:
         raw = it.item_rel.primary_image_url if it.item_rel else None
         img_url = to_public_image_url(raw, request, BASE_URL)
+        
+        # Calculate item totals
+        qty = Decimal(str(it.qty or 0))
+        unit_price = Decimal(str(it.unit_price or 0))
+        tax_pct = Decimal(str(it.tax_percentage or 0))
+        item_discount = Decimal(str(it.discount or 0))  # This is the per-item discount
+        
+        # Calculate item subtotal before discount and tax
+        item_subtotal_before_discount = qty * unit_price
+        
+        # Calculate item tax (applied after discount)
+        item_subtotal_after_discount = item_subtotal_before_discount - item_discount
+        item_tax = item_subtotal_after_discount * (tax_pct / Decimal(100))
+        
+        # Total price for this item (after discount + tax)
+        item_total_price = item_subtotal_after_discount + item_tax
+        
         enhanced_items.append({
             "item": it,
             "image_url": img_url,
@@ -714,36 +735,45 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
             "qty": it.qty,
             "satuan_name": it.satuan_name,
             "tax_percentage": it.tax_percentage,
-            "unit_price": it.unit_price,
-            "total_price": it.total_price,
-            "discount": it.discount,  # Include item-level discount
+            "unit_price": unit_price,
+            "item_discount": item_discount,
+            "item_subtotal_before_discount": item_subtotal_before_discount,
+            "item_subtotal_after_discount": item_subtotal_after_discount,
+            "item_tax": item_tax,
+            "total_price": item_total_price,  # or use it.total_price if it's calculated correctly
+            "discount": item_discount,  # Keep for backward compatibility
         })
+        
+        # Accumulate totals
+        subtotal_before_discount += item_subtotal_before_discount
+        total_item_discounts += item_discount
+        tax_amount += item_tax
 
-    subtotal = Decimal(0)
-    tax_amount = Decimal(0)
-    total_item_discount = Decimal(0)  # Track total item discounts
-    
-    for item in penjualan.penjualan_items:
-        item_total = Decimal(str(item.total_price or 0))
-        subtotal += item_total
-        total_item_discount += Decimal(str(item.discount or 0))  # Sum item discounts
-        if item.tax_percentage:
-            item_tax = item_total * Decimal(str(item.tax_percentage)) / Decimal('100')
-            tax_amount += item_tax
-
-    # Remove penjualan.discount reference since it doesn't exist
+    # Calculate additional discount and final totals
     additional_discount = Decimal(str(penjualan.additional_discount or 0))
-    final_total = subtotal - total_item_discount - additional_discount  # Use item discounts
     expense = Decimal(str(penjualan.expense or 0))
-    grand_total = final_total + tax_amount + expense
+    
+    # Calculate subtotal after item discounts but before additional discount
+    subtotal_after_item_discounts = subtotal_before_discount - total_item_discounts
+    
+    # Calculate final total before tax (after all discounts)
+    final_total_before_tax = subtotal_after_item_discounts - additional_discount
+    
+    # Grand total (final total + tax + expense)
+    grand_total = final_total_before_tax + tax_amount + expense
 
+    # Match the template expectations
     totals = {
-        "subtotal": subtotal,
+        "subtotal": subtotal_before_discount,           # Raw subtotal before any discounts
+        "item_discounts": total_item_discounts,         # Sum of all per-item discounts  
+        "additional_discount": additional_discount,     # Additional discount from penjualan
+        "subtotal_after_discounts": subtotal_after_item_discounts,  # After item discounts
+        "final_total": final_total_before_tax,          # After all discounts, before tax
         "tax_amount": tax_amount,
-        "total_item_discount": total_item_discount,  
-        "additional_discount": additional_discount,
-        "final_total": final_total,
+        "expense": expense,
         "grand_total": grand_total,
+        # Keep backward compatibility
+        "total_item_discount": total_item_discounts,  # Your original key
     }
 
     return templates.TemplateResponse(
