@@ -140,3 +140,7 @@ class PenjualanItem(Base):
                 if att.parent_type.name == "ITEMS":
                     return att.url
         return None
+        
+    @property
+    def item_code(self) -> Optional[str]:
+        return self.item_rel.code if self.item_rel else None

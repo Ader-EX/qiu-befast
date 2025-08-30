@@ -38,6 +38,7 @@ class PenjualanItemUpdate(PenjualanItemBase):
 
 class PenjualanItemResponse(BaseModel):
     id: int
+    
     penjualan_id: int
 
     # Draft mode fields
@@ -45,6 +46,8 @@ class PenjualanItemResponse(BaseModel):
 
     # Finalized mode fields
     item_name: Optional[str] = None
+    item_code: Optional[str] = None  
+    
     item_sku: Optional[str] = None
     item_type: Optional[str] = None
     satuan_name: Optional[str] = None
@@ -75,7 +78,7 @@ class AttachmentResponse(BaseModel):
 class PenjualanBase(BaseModel):
     
     warehouse_id: Optional[int] = None
-    customer_id: Optional[str] = None
+    customer_id: Optional[int] = None
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
@@ -104,7 +107,7 @@ class PenjualanCreate(PenjualanBase):
 class PenjualanUpdate(BaseModel):
     
     warehouse_id: Optional[int] = None
-    customer_id: Optional[str] = None
+    customer_id: Optional[int] = None
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
@@ -136,7 +139,7 @@ class PenjualanResponse(BaseModel):
     total_price: Decimal
 
     warehouse_id: Optional[int] = None
-    customer_id: Optional[str] = None
+    customer_id: Optional[int] = None
     top_id: Optional[int] = None
 
     warehouse_name: Optional[str] = None

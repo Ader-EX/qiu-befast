@@ -24,7 +24,7 @@ from models.Penjualan import Penjualan, PenjualanItem
 from models.Item import Item
 
 from models.AllAttachment import ParentType, AllAttachment
-from routes.upload_routes import to_public_image_url, templates
+from routes.upload_routes import get_public_image_url, to_public_image_url, templates
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PenjualanSchema import PenjualanCreate, PenjualanListResponse, PenjualanResponse, PenjualanStatusUpdate, PenjualanUpdate, SuccessResponse, TotalsResponse, UploadResponse
 from utils import generate_unique_record_number
