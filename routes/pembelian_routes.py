@@ -21,7 +21,7 @@ from models.Vendor import Vendor  # Changed from Customer to Vendor
 from models.Item import Item
 from models.Pembelian import Pembelian, StatusPembelianEnum,PembelianItem, StatusPembayaranEnum
 from models.AllAttachment import ParentType, AllAttachment
-from routes.upload_routes import to_public_image_url, templates
+from routes.upload_routes import get_public_image_url, to_public_image_url, templates
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PembelianSchema import TotalsResponse, PembelianListResponse, PembelianResponse, PembelianCreate, \
     PembelianUpdate, PembelianStatusUpdate, UploadResponse, SuccessResponse
@@ -738,8 +738,9 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
     tax_amount = Decimal('0')
     
     for it in pembelian.pembelian_items:
-        raw = it.item_rel.primary_image_url if it.item_rel else None
-        img_url = to_public_image_url(raw, request, BASE_URL)
+        raw_image_path = it.item_rel.primary_image_url if it.item_rel else None
+        # Use the improved function that handles VPS environment properly
+        img_url = get_public_image_url(raw_image_path, BASE_URL)
         
         # Calculate item totals
         qty = Decimal(str(it.qty or 0))
@@ -815,7 +816,7 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
             "totals": totals,
             "company": {
                 "name": "PT. Jayagiri Indo Asia",
-                "logo_url": "static/logo.png",
+                "logo_url": get_public_image_url("logo.png", BASE_URL),  # Also use for logo
                 "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
                 "website": "www.qiupart.com",
                 "bank_name": "Bank Mandiri",
