@@ -42,7 +42,6 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR" ,default="uploads/items")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
-
 def to_public_image_url(raw: str, request: Request, base_url: str) -> str:
     """
     Normalize any 'primary_image_url' into an absolute HTTPS URL.

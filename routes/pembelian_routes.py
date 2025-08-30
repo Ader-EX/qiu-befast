@@ -715,6 +715,7 @@ async def get_pembelian_summary(db: Session = Depends(get_db)):
         "unpaid_value": unpaid_value
     }
 
+
 @router.get("/{pembelian_id}/invoice/html", response_class=HTMLResponse)
 async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: Session = Depends(get_db)):
     pembelian = (
@@ -730,7 +731,7 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
     if not pembelian:
         raise HTTPException(status_code=404, detail="Pembelian not found")
 
-    BASE_URL = os.getenv("BASE_URL", "https://qiu-system.qiuparts.com")
+    BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
     enhanced_items = []
     subtotal_before_discount = Decimal('0')  # Subtotal before any discounts
@@ -738,9 +739,9 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
     tax_amount = Decimal('0')
     
     for it in pembelian.pembelian_items:
-        raw_image_path = it.item_rel.primary_image_url if it.item_rel else None
-        # Use the improved function that handles VPS environment properly
-        img_url = get_public_image_url(raw_image_path, BASE_URL)
+        # FIXED: Use primary_image_url which returns raw path, not full URL
+        raw_image_path = it.primary_image_url if it.item_rel else None
+        img_url = get_public_image_url(raw_image_path, BASE_URL) if raw_image_path else None
         
         # Calculate item totals
         qty = Decimal(str(it.qty or 0))
@@ -770,7 +771,7 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
             "item_subtotal_before_discount": item_subtotal_before_discount,
             "item_subtotal_after_discount": item_subtotal_after_discount,
             "item_tax": item_tax,
-            "total_price": item_total_price,  # or use it.total_price if it's calculated correctly
+            "total_price": item_total_price,
         })
         
         # Accumulate totals
@@ -793,11 +794,11 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
 
     # Match the template expectations
     totals = {
-        "subtotal": subtotal_before_discount,           # Raw subtotal before any discounts
-        "item_discounts": total_item_discounts,         # Sum of all per-item discounts  
-        "additional_discount": additional_discount,     # Additional discount from pembelian
-        "subtotal_after_discounts": subtotal_after_item_discounts,  # After item discounts
-        "final_total": final_total_before_tax,          # After all discounts, before tax
+        "subtotal": subtotal_before_discount,
+        "item_discounts": total_item_discounts,
+        "additional_discount": additional_discount,
+        "subtotal_after_discounts": subtotal_after_item_discounts,
+        "final_total": final_total_before_tax,
         "tax_amount": tax_amount,
         "expense": expense,
         "grand_total": grand_total,
@@ -816,7 +817,7 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
             "totals": totals,
             "company": {
                 "name": "PT. Jayagiri Indo Asia",
-                "logo_url": get_public_image_url("logo.png", BASE_URL),  # Also use for logo
+                "logo_url": get_public_image_url("logo.png", BASE_URL),
                 "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
                 "website": "www.qiupart.com",
                 "bank_name": "Bank Mandiri",

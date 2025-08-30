@@ -116,13 +116,26 @@ class PenjualanItem(Base):
     item_rel = relationship("Item", back_populates="penjualan_items")
 
     @property
-    def image_url(self) -> Optional[str]:
+    def primary_image_url(self) -> Optional[str]:
         """
-        Prefer the first attachment uploaded for this Item (ParentType.ITEMS).
-        Falls back to None if no item image exists.
+        Return the RAW image path/filename for processing by URL helper functions.
+        This should return the file path or filename, NOT a full URL.
         """
         if self.item_rel and self.item_rel.attachments:
-            # Assumes an attachment model with 'parent_type' and 'url' attributes
+            for att in self.item_rel.attachments:
+                if att.parent_type.name == "ITEMS":
+                    # Return the filename or file_path, NOT the full URL
+                    return att.file_path  # or att.file_path - whatever contains just the path/filename
+        return None
+
+    @property
+    def image_url(self) -> Optional[str]:
+        """
+        DEPRECATED: Use primary_image_url with URL helper functions instead.
+        This property is kept for backward compatibility but should not be used
+        in new code as it can cause URL duplication issues.
+        """
+        if self.item_rel and self.item_rel.attachments:
             for att in self.item_rel.attachments:
                 if att.parent_type.name == "ITEMS":
                     return att.url

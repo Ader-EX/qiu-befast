@@ -701,7 +701,7 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
     if not penjualan:
         raise HTTPException(status_code=404, detail="Penjualan not found")
 
-    BASE_URL = os.getenv("BASE_URL", "https://qiu-system.qiuparts.com")
+    BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
     enhanced_items = []
     subtotal_before_discount = Decimal('0')  # Subtotal before any discounts
@@ -709,8 +709,9 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
     tax_amount = Decimal('0')
     
     for it in penjualan.penjualan_items:
-        raw = it.item_rel.primary_image_url if it.item_rel else None
-        img_url = to_public_image_url(raw, request, BASE_URL)
+        # FIXED: Use primary_image_url which returns raw path, not full URL
+        raw_image_path = it.primary_image_url if it.item_rel else None
+        img_url = get_public_image_url(raw_image_path, BASE_URL) if raw_image_path else None
         
         # Calculate item totals
         qty = Decimal(str(it.qty or 0))
@@ -740,7 +741,7 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
             "item_subtotal_before_discount": item_subtotal_before_discount,
             "item_subtotal_after_discount": item_subtotal_after_discount,
             "item_tax": item_tax,
-            "total_price": item_total_price,  # or use it.total_price if it's calculated correctly
+            "total_price": item_total_price,
             "discount": item_discount,  # Keep for backward compatibility
         })
         
@@ -785,7 +786,7 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
             "totals": totals,
             "company": {
                 "name": "PT. Jayagiri Indo Asia",
-                "logo_url": "static/logo.png",
+                "logo_url": get_public_image_url("logo.png", BASE_URL),  # FIXED: Use helper function
                 "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
                 "website": "www.qiupart.com",
                 "bank_name": "Bank Mandiri",
