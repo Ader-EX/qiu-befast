@@ -185,12 +185,11 @@ async def get_penjualan_laporan(
     base_query = (
         db.query(
             Penjualan.sales_date.label("date"),
-            # Prefer stored name; fall back to related object name
             Penjualan.customer_name.label("customer_name_stored"),
             Customer.name.label("customer_name_rel"),
             Customer.kode_lambung,
             Penjualan.no_penjualan,
-            Penjualan.status_pembayaran,   # display as "Paid/Unpaid"
+            Penjualan.status_pembayaran,
             PenjualanItem.item_sku,
             PenjualanItem.item_name,
             PenjualanItem.qty,
@@ -203,8 +202,8 @@ async def get_penjualan_laporan(
         .filter(
             Penjualan.is_deleted.is_(False),
             Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
-            Penjualan.created_at >= from_date,
-            Penjualan.created_at <= to_date,
+            Penjualan.sales_date >= from_date.date(),  # Changed from created_at to sales_date
+            Penjualan.sales_date <= to_date.date(),    # Changed from created_at to sales_date
         )
     )
 
@@ -341,10 +340,11 @@ async def get_pembelian_laporan(
         .filter(
             Pembelian.is_deleted.is_(False),
             Pembelian.status_pembelian != StatusPembelianEnum.DRAFT,
-            Pembelian.created_at >= from_date,
-            Pembelian.created_at <= to_date,
+            Pembelian.sales_date >= from_date.date(),  # Changed from created_at to sales_date
+            Pembelian.sales_date <= to_date.date(),    # Changed from created_at to sales_date
         )
     )
+
     
     total_count = base_query.count()
     print(f"DEBUG: Final query count: {total_count}")
@@ -456,10 +456,10 @@ async def download_penjualan_laporan(
         .filter(
             Penjualan.is_deleted.is_(False),
             Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
-            Penjualan.created_at >= from_date,
-            Penjualan.created_at <= to_date,
+            Penjualan.sales_date >= from_date.date(),  # Changed from created_at to sales_date
+            Penjualan.sales_date <= to_date.date(),    # Changed from created_at to sales_date
         )
-        .order_by(Penjualan.created_at.asc(), Penjualan.no_penjualan.asc(), PenjualanItem.id.asc())
+        .order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc(), PenjualanItem.id.asc())
     )
 
     rows = query.all()
@@ -569,11 +569,11 @@ async def download_pembelian_laporan(
         .filter(
             Pembelian.is_deleted.is_(False),
             Pembelian.status_pembelian != StatusPembelianEnum.DRAFT,
-            Pembelian.created_at >= from_date,
-            Pembelian.created_at <= to_date,
+            Pembelian.sales_date >= from_date.date(),  # Changed from created_at to sales_date
+            Pembelian.sales_date <= to_date.date(),    # Changed from created_at to sales_date
         )
-        .order_by(Pembelian.created_at.asc(), Pembelian.no_pembelian.asc(), PembelianItem.id.asc())
-    )
+       .order_by(Pembelian.sales_date.asc(), Pembelian.no_pembelian.asc(), PembelianItem.id.asc())
+       )
 
     rows = query.all()
 
