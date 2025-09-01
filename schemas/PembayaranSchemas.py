@@ -94,7 +94,8 @@ class PembayaranUpdate(BaseModel):
 
 # Response schemas with related data
 class CustomerResponse(BaseModel):
-    id: str
+    id: int
+    code: str
     name: str
     address: Optional[str] = None
 
@@ -133,7 +134,7 @@ class PembayaranResponse(BaseModel):
     payment_date: datetime
 
     reference_type: PembayaranPengembalianType
-    customer_id: Optional[str] = None
+    customer_id: Optional[int] = None
     vendor_id: Optional[str] = None
     currency_id: int
     warehouse_id: int

@@ -395,7 +395,6 @@ async def update_pembelian(
     pembelian = db.query(Pembelian).filter(Pembelian.id == pembelian_id).first()
     if not pembelian:
         raise HTTPException(status_code=404, detail="Pembelian not found")
-    validate_draft_status(pembelian)
 
     # 2) Unique no_pembelian check
     if request.no_pembelian and request.no_pembelian != pembelian.no_pembelian:

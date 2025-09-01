@@ -9,9 +9,10 @@ from pydantic_core.core_schema import ValidationInfo
 from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
 import enum
 
+from schemas.ItemSchema import AttachmentResponse
 from schemas.PembelianSchema import PembelianResponse
 from schemas.PenjualanSchema import PenjualanResponse
-from schemas.PembayaranSchemas import PembayaranPengembalianType
+from schemas.PembayaranSchemas import CustomerResponse, PembayaranPengembalianType
 
 
 # Return Detail schemas
@@ -85,14 +86,7 @@ class PengembalianUpdate(BaseModel):
 
     pengembalian_details: Optional[List[PengembalianDetailCreate]] = None
 
-# Response schemas with related data
-class CustomerResponse(BaseModel):
-    id: str
-    name: str
-    address: Optional[str] = None
 
-    class Config:
-        from_attributes = True
 
 class VendorResponse(BaseModel):
     id: str
@@ -135,6 +129,7 @@ class PengembalianResponse(BaseModel):
     warehouse_rel: Optional[WarehouseResponse] = None
     curr_rel: Optional[CurrencyResponse] = None
     pengembalian_details: List[PengembalianDetailResponse] = []
+    attachments: List[AttachmentResponse] = []
 
     # Computed fields
     reference_numbers: List[str] = Field(default_factory=list)

@@ -42,8 +42,18 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
     now = datetime.now()
     this_month = now.month
     this_year = now.year
-    last_month = (now.replace(day=1) - timedelta(days=1)).month
-    last_month_year = (now.replace(day=1) - timedelta(days=1)).year
+    
+    # Better way to calculate last month
+    first_day_this_month = now.replace(day=1)
+    last_month_date = first_day_this_month - timedelta(days=1)
+    last_month = last_month_date.month
+    last_month_year = last_month_date.year
+
+    # Helper function to safely calculate percentage
+    def calculate_percentage(current, previous):
+        if previous == 0:
+            return 100.0 if current > 0 else 0.0
+        return ((current - previous) / previous * 100)
 
     # Products
     total_products = db.query(Item).count()
@@ -55,7 +65,7 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
         extract('month', Item.created_at) == last_month,
         extract('year', Item.created_at) == last_month_year
     ).count()
-    percentage_month_products = ((this_month_products - last_month_products) / last_month_products * 100) if last_month_products > 0 else 100.0 if this_month_products > 0 else 0.0
+    percentage_month_products = calculate_percentage(this_month_products, last_month_products)
     status_month_products = get_status(this_month_products, last_month_products)
 
     # Customers
@@ -68,11 +78,11 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
         extract('month', Customer.created_at) == last_month,
         extract('year', Customer.created_at) == last_month_year
     ).count()
-    percentage_month_customer = ((this_month_customer - last_month_customer) / last_month_customer * 100) if last_month_customer > 0 else 100.0 if this_month_customer > 0 else 0.0
+    percentage_month_customer = calculate_percentage(this_month_customer, last_month_customer)
     status_month_customer = get_status(this_month_customer, last_month_customer)
 
-    # Pembelian
-    total_pembelian = db.query(func.coalesce(func.sum(Pembelian.total_price), 0)).scalar()
+    # Pembelian - More robust null handling
+    total_pembelian = db.query(func.coalesce(func.sum(Pembelian.total_price), 0)).scalar() or 0
     this_month_pembelian = db.query(func.coalesce(func.sum(Pembelian.total_price), 0)).filter(
         extract('month', Pembelian.created_at) == this_month,
         extract('year', Pembelian.created_at) == this_year
@@ -81,11 +91,11 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
         extract('month', Pembelian.created_at) == last_month,
         extract('year', Pembelian.created_at) == last_month_year
     ).scalar() or 0
-    percentage_month_pembelian = ((this_month_pembelian - last_month_pembelian) / last_month_pembelian * 100) if last_month_pembelian > 0 else 100.0 if this_month_pembelian > 0 else 0.0
+    percentage_month_pembelian = calculate_percentage(this_month_pembelian, last_month_pembelian)
     status_month_pembelian = get_status(this_month_pembelian, last_month_pembelian)
 
-    # Penjualan
-    total_penjualan = db.query(func.coalesce(func.sum(Penjualan.total_price), 0)).scalar()
+    # Penjualan - More robust null handling
+    total_penjualan = db.query(func.coalesce(func.sum(Penjualan.total_price), 0)).scalar() or 0
     this_month_penjualan = db.query(func.coalesce(func.sum(Penjualan.total_price), 0)).filter(
         extract('month', Penjualan.created_at) == this_month,
         extract('year', Penjualan.created_at) == this_year
@@ -94,7 +104,7 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
         extract('month', Penjualan.created_at) == last_month,
         extract('year', Penjualan.created_at) == last_month_year
     ).scalar() or 0
-    percentage_month_penjualan = ((this_month_penjualan - last_month_penjualan) / last_month_penjualan * 100) if last_month_penjualan > 0 else 100.0 if this_month_penjualan > 0 else 0.0
+    percentage_month_penjualan = calculate_percentage(this_month_penjualan, last_month_penjualan)
     status_month_penjualan = get_status(this_month_penjualan, last_month_penjualan)
 
     return DashboardStatistics(
@@ -196,16 +206,20 @@ async def get_penjualan_laporan(
             PenjualanItem.unit_price,
             PenjualanItem.discount,
             PenjualanItem.tax_percentage,
+            Item.code.label("item_code"),   # 👈 will now resolve
         )
         .join(Customer, Customer.id == Penjualan.customer_id, isouter=True)
         .join(PenjualanItem, PenjualanItem.penjualan_id == Penjualan.id)
+        .join(Item, Item.id == PenjualanItem.item_id, isouter=True)   # 👈 added join
         .filter(
             Penjualan.is_deleted.is_(False),
             Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
-            Penjualan.sales_date >= from_date.date(),  # Changed from created_at to sales_date
-            Penjualan.sales_date <= to_date.date(),    # Changed from created_at to sales_date
+            Penjualan.sales_date >= from_date.date(),
+            Penjualan.sales_date <= to_date.date(),
         )
+        .order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc(), PenjualanItem.id.asc())
     )
+
 
     # Get total count
     total_count = base_query.count()
@@ -329,6 +343,7 @@ async def get_pembelian_laporan(
             Pembelian.no_pembelian,
             Pembelian.status_pembayaran,
             PembelianItem.item_sku,
+            Item.code.label("item_code"),   # 👈 will now resolve
             PembelianItem.item_name,
             PembelianItem.qty,
             PembelianItem.unit_price,
@@ -337,13 +352,15 @@ async def get_pembelian_laporan(
         )
         .join(Vendor, Vendor.id == Pembelian.vendor_id, isouter=True)
         .join(PembelianItem, PembelianItem.pembelian_id == Pembelian.id)
+        .join(Item, Item.id == PembelianItem.item_id, isouter=True)   # 👈 added join
         .filter(
             Pembelian.is_deleted.is_(False),
             Pembelian.status_pembelian != StatusPembelianEnum.DRAFT,
-            Pembelian.sales_date >= from_date.date(),  # Changed from created_at to sales_date
-            Pembelian.sales_date <= to_date.date(),    # Changed from created_at to sales_date
+            Pembelian.sales_date >= from_date.date(),
+            Pembelian.sales_date <= to_date.date(),
         )
     )
+
 
     
     total_count = base_query.count()
@@ -396,7 +413,7 @@ async def get_pembelian_laporan(
                 no_pembelian=r.no_pembelian,
                 status=(r.status_pembayaran.name.capitalize() if hasattr(r.status_pembayaran, "name")
                         else str(r.status_pembayaran)),
-                item_code=r.item_sku,
+                item_code=r.item_code,
                 item_name=r.item_name,
                 qty=qty,
                 price=price,
@@ -415,8 +432,6 @@ async def get_pembelian_laporan(
         data=report_rows,
         total=total_count,
     )
-
-
 @router.get(
     "/penjualan/download",
     status_code=status.HTTP_200_OK,
@@ -450,14 +465,15 @@ async def download_penjualan_laporan(
             PenjualanItem.unit_price,
             PenjualanItem.discount,
             PenjualanItem.tax_percentage,
+            Item.code.label("item_code") 
         )
         .join(Customer, Customer.id == Penjualan.customer_id, isouter=True)
         .join(PenjualanItem, PenjualanItem.penjualan_id == Penjualan.id)
         .filter(
             Penjualan.is_deleted.is_(False),
             Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
-            Penjualan.sales_date >= from_date.date(),  # Changed from created_at to sales_date
-            Penjualan.sales_date <= to_date.date(),    # Changed from created_at to sales_date
+            Penjualan.sales_date >= from_date.date(),
+            Penjualan.sales_date <= to_date.date(),
         )
         .order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc(), PenjualanItem.id.asc())
     )
@@ -467,9 +483,9 @@ async def download_penjualan_laporan(
     def _dec(x) -> Decimal:
         return Decimal(str(x or 0))
 
-    # Create CSV content
+    # Create CSV content with proper encoding
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
     
     # Write header
     writer.writerow([
@@ -502,32 +518,37 @@ async def download_penjualan_laporan(
         grand_total = total + tax
 
         writer.writerow([
-            r.date.strftime('%Y-%m-%d') if r.date else '',
+            r.date.strftime('%d/%m/%Y') if r.date else '',
             r.customer_name_stored or r.customer_name_rel or "—",
             getattr(r, "kode_lambung", None) or '',
             r.no_penjualan or '',
             (r.status_pembayaran.name.capitalize() if hasattr(r.status_pembayaran, "name")
              else str(r.status_pembayaran)),
-            r.item_sku or '',
+            r.item_code or '',
             r.item_name or '',
-            qty,
-            float(price),
-            float(sub_total),
-            float(total),
-            float(tax),
-            float(grand_total)
+            str(qty),  # Convert to string to avoid formatting issues
+            str(float(price)),
+            str(float(sub_total)),
+            str(float(total)),
+            str(float(tax)),
+            str(float(grand_total))
         ])
 
-    output.seek(0)
+    # Get the CSV content
+    csv_content = output.getvalue()
+    output.close()
     
     # Generate filename
     filename = f"laporan_penjualan_{from_date:%Y%m%d}_{to_date:%Y%m%d}.csv"
     
-    # Return as streaming response
+    # Return as streaming response with proper headers
     return StreamingResponse(
-        io.BytesIO(output.getvalue().encode('utf-8')),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        io.BytesIO(csv_content.encode('utf-8-sig')),  # Use UTF-8-sig for better Excel compatibility
+        media_type="text/csv",  # Keep as text/csv
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "text/csv; charset=utf-8"
+        }
     )
 
 
@@ -569,20 +590,20 @@ async def download_pembelian_laporan(
         .filter(
             Pembelian.is_deleted.is_(False),
             Pembelian.status_pembelian != StatusPembelianEnum.DRAFT,
-            Pembelian.sales_date >= from_date.date(),  # Changed from created_at to sales_date
-            Pembelian.sales_date <= to_date.date(),    # Changed from created_at to sales_date
+            Pembelian.sales_date >= from_date.date(),
+            Pembelian.sales_date <= to_date.date(),
         )
-       .order_by(Pembelian.sales_date.asc(), Pembelian.no_pembelian.asc(), PembelianItem.id.asc())
-       )
+        .order_by(Pembelian.sales_date.asc(), Pembelian.no_pembelian.asc(), PembelianItem.id.asc())
+    )
 
     rows = query.all()
 
     def _dec(x) -> Decimal:
         return Decimal(str(x or 0))
 
-    # Create CSV content
+    # Create CSV content with proper encoding
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
     
     # Write header
     writer.writerow([
@@ -614,29 +635,34 @@ async def download_pembelian_laporan(
         grand_total = total + tax
 
         writer.writerow([
-            r.date.strftime('%Y-%m-%d') if r.date else '',
+            r.date.strftime('%d/%m/%Y') if r.date else '',
             r.vendor_name_stored or r.vendor_name_rel or "—",
             r.no_pembelian or '',
             (r.status_pembayaran.name.capitalize() if hasattr(r.status_pembayaran, "name")
              else str(r.status_pembayaran)),
             r.item_sku or '',
             r.item_name or '',
-            qty,
-            float(price),
-            float(sub_total),
-            float(total),
-            float(tax),
-            float(grand_total)
+            str(qty),  # Convert to string to avoid formatting issues
+            str(float(price)),
+            str(float(sub_total)),
+            str(float(total)),
+            str(float(tax)),
+            str(float(grand_total))
         ])
 
-    output.seek(0)
+    # Get the CSV content
+    csv_content = output.getvalue()
+    output.close()
     
     # Generate filename
     filename = f"laporan_pembelian_{from_date:%Y%m%d}_{to_date:%Y%m%d}.csv"
     
-    # Return as streaming response
+    # Return as streaming response with proper headers
     return StreamingResponse(
-        io.BytesIO(output.getvalue().encode('utf-8')),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        io.BytesIO(csv_content.encode('utf-8-sig')),  # Use UTF-8-sig for better Excel compatibility
+        media_type="text/csv",  # Keep as text/csv
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "text/csv; charset=utf-8"
+        }
     )

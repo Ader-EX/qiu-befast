@@ -387,7 +387,6 @@ async def update_penjualan(
     penjualan = db.query(Penjualan).filter(Penjualan.id == penjualan_id).first()
     if not penjualan:
         raise HTTPException(status_code=404, detail="penjualan not found")
-    validate_draft_status(penjualan)
 
     update_data = request.dict(exclude_unset=True)
     items_data = update_data.pop("items", None)
