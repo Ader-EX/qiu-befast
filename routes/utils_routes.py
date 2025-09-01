@@ -206,7 +206,7 @@ async def get_penjualan_laporan(
             PenjualanItem.unit_price,
             PenjualanItem.discount,
             PenjualanItem.tax_percentage,
-            Item.code.label("item_code"),   # 👈 will now resolve
+            Item.code.label("item_code"),  
         )
         .join(Customer, Customer.id == Penjualan.customer_id, isouter=True)
         .join(PenjualanItem, PenjualanItem.penjualan_id == Penjualan.id)
@@ -257,7 +257,7 @@ async def get_penjualan_laporan(
                 no_penjualan=r.no_penjualan,
                 status=(r.status_pembayaran.name.capitalize() if hasattr(r.status_pembayaran, "name")
                         else str(r.status_pembayaran)),
-                item_code=r.item_sku,
+                item_code=r.item_code,
                 item_name=r.item_name,
                 qty=qty,
                 price=price,
