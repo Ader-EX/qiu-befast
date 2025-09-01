@@ -1,69 +1,63 @@
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, and_, func
+from sqlalchemy import func
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime
 from decimal import Decimal
 
 from database import get_db
 from models.Pengembalian import Pengembalian, PengembalianDetails
 from models.Pembelian import Pembelian, StatusPembayaranEnum, StatusPembelianEnum
 from models.Penjualan import Penjualan
+from routes.pembayaran_routes import update_payment_status  # <-- reuse the single status engine
 from schemas.PembayaranSchemas import PembayaranPengembalianType
 from schemas.PengembalianSchema import (
     PengembalianCreate, PengembalianUpdate, PengembalianResponse,
-    PengembalianListResponse, PengembalianFilter, PengembalianDetailResponse
+    PengembalianListResponse, PengembalianDetailResponse
 )
-from utils import soft_delete_record, generate_unique_record_number
+from utils import generate_unique_record_number
 
 router = APIRouter()
 
-# Helper function to update return status
-def update_return_status(db: Session, reference_id: int, reference_type: PembayaranPengembalianType):
+
+# NEW: Recalculate total_return from ACTIVE pengembalians, then reuse update_payment_status
+def recalc_return_and_update_payment_status(db: Session, reference_id: int, reference_type: PembayaranPengembalianType) -> None:
+    """
+    1) Recalculate and persist total_return on the referenced record (Pembelian/Penjualan)
+       from ACTIVE pengembalian rows.
+    2) Delegate to update_payment_status (which uses total_paid + total_return to set statuses).
+    """
     if reference_type == PembayaranPengembalianType.PEMBELIAN:
         record = db.query(Pembelian).filter(Pembelian.id == reference_id).first()
+        detail_filter = (PengembalianDetails.pembelian_id == reference_id)
     else:
         record = db.query(Penjualan).filter(Penjualan.id == reference_id).first()
+        detail_filter = (PengembalianDetails.penjualan_id == reference_id)
 
     if not record:
         return
 
-    filters = [Pengembalian.status == StatusPembelianEnum.ACTIVE]
-    if reference_type == PembayaranPengembalianType.PEMBELIAN:
-        filters.append(PengembalianDetails.pembelian_id == reference_id)
-    else:
-        filters.append(PengembalianDetails.penjualan_id == reference_id)
+    total_returns = (
+        db.query(func.coalesce(func.sum(PengembalianDetails.total_return), 0))
+          .join(Pengembalian, PengembalianDetails.pengembalian_id == Pengembalian.id)
+          .filter(Pengembalian.status == StatusPembelianEnum.ACTIVE)
+          .filter(detail_filter)
+          .scalar()
+        or Decimal("0.00")
+    )
 
-    total_returns = db.query(func.sum(PengembalianDetails.total_return)) \
-                         .join(Pengembalian, PengembalianDetails.pengembalian_id == Pengembalian.id) \
-                         .filter(*filters) \
-                         .scalar() or Decimal("0.00")
+    # Persist recalculated total_return on the referenced document
+    record.total_return = Decimal(str(total_returns))
+    db.flush()  # ensure the new total_return is visible to update_payment_status
 
-    record.total_return = total_returns
-
-    total_paid = record.total_paid or Decimal("0.00")
-    total_outstanding = record.total_price - (total_paid + record.total_return)
-
-    # Update status pembayaran
-    if total_outstanding <= 0:
-        record.status_pembayaran = StatusPembayaranEnum.PAID
-        if reference_type == PembayaranPengembalianType.PEMBELIAN:
-            record.status_pembelian = StatusPembelianEnum.COMPLETED
-        else:
-            record.status_penjualan = StatusPembelianEnum.COMPLETED
-    elif total_paid > 0:
-        record.status_pembayaran = StatusPembayaranEnum.HALF_PAID
-        if reference_type == PembayaranPengembalianType.PEMBELIAN:
-            record.status_pembelian = StatusPembelianEnum.PROCESSED
-        else:
-            record.status_penjualan = StatusPembelianEnum.PROCESSED
-    else:
-        record.status_pembayaran = StatusPembayaranEnum.UNPAID
+    # Let the shared payment status function compute statuses using total_paid + total_return
+    update_payment_status(db, reference_id, reference_type)
+    # NOTE: no commit here; callers control the transaction boundaries.
 
 
 @router.post("", response_model=PengembalianResponse)
 def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Depends(get_db)):
-    """Create a new return record"""
+    """Create a new return record (DRAFT)"""
 
     # Validate return details exist
     if not pengembalian_data.pengembalian_details or len(pengembalian_data.pengembalian_details) == 0:
@@ -97,8 +91,7 @@ def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Dep
 
     # Create return record - EXCLUDE total_paid from pengembalian_dict
     pengembalian_dict = pengembalian_data.model_dump(exclude={'pengembalian_details'})
-    # Remove total_paid if it exists since it doesn't belong in Pengembalian model
-    pengembalian_dict.pop('total_paid', None)
+    pengembalian_dict.pop('total_paid', None)  # ensure not on header
 
     pengembalian = Pengembalian(**pengembalian_dict)
 
@@ -122,10 +115,12 @@ def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Dep
         )
         db.add(detail)
 
+    # NOTE: do NOT update statuses yet — this pengembalian is still DRAFT.
     db.commit()
     db.refresh(pengembalian)
 
     return pengembalian
+
 
 @router.get("", response_model=PengembalianListResponse)
 def get_pengembalians(
@@ -147,7 +142,6 @@ def get_pengembalians(
 
     total = query.count()
 
-    # Get paginated results with relationships
     pengembalians = query.options(
         joinedload(Pengembalian.pengembalian_details).joinedload(PengembalianDetails.pembelian_rel),
         joinedload(Pengembalian.pengembalian_details).joinedload(PengembalianDetails.penjualan_rel),
@@ -163,6 +157,7 @@ def get_pengembalians(
         limit=limit
     )
 
+
 @router.get("/{pengembalian_id}", response_model=PengembalianResponse)
 def get_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
     """Get return record by ID"""
@@ -175,12 +170,13 @@ def get_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
         joinedload(Pengembalian.curr_rel)
     ).filter(
         Pengembalian.id == pengembalian_id,
-        ).first()
+    ).first()
 
     if not pengembalian:
         raise HTTPException(status_code=404, detail="Pengembalian not found")
 
     return pengembalian
+
 
 @router.put("/{pengembalian_id}/finalize")
 def finalize_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
@@ -188,7 +184,7 @@ def finalize_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
 
     pengembalian = db.query(Pengembalian).filter(
         Pengembalian.id == pengembalian_id,
-        ).first()
+    ).first()
 
     if not pengembalian:
         raise HTTPException(status_code=404, detail="Pengembalian not found")
@@ -202,16 +198,18 @@ def finalize_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
     pengembalian.status = StatusPembelianEnum.ACTIVE
     db.flush()
 
+    # Recalc returns and update payment status for each affected reference
     for detail in pengembalian.pengembalian_details:
         if detail.pembelian_id:
-            update_return_status(db, detail.pembelian_id, PembayaranPengembalianType.PEMBELIAN)
+            recalc_return_and_update_payment_status(db, detail.pembelian_id, PembayaranPengembalianType.PEMBELIAN)
         elif detail.penjualan_id:
-            update_return_status(db, detail.penjualan_id, PembayaranPengembalianType.PENJUALAN)
+            recalc_return_and_update_payment_status(db, detail.penjualan_id, PembayaranPengembalianType.PENJUALAN)
 
     db.commit()
     db.refresh(pengembalian)
 
     return {"message": "Pengembalian finalized successfully", "pengembalian": pengembalian}
+
 
 @router.put("/{pengembalian_id}", response_model=PengembalianResponse)
 def update_pengembalian(
@@ -223,7 +221,7 @@ def update_pengembalian(
 
     pengembalian = db.query(Pengembalian).filter(
         Pengembalian.id == pengembalian_id,
-        ).first()
+    ).first()
 
     if not pengembalian:
         raise HTTPException(status_code=404, detail="Pengembalian not found")
@@ -238,15 +236,14 @@ def update_pengembalian(
 
     # Check if reference type is changing
     reference_type_changed = (
-            pengembalian_data.reference_type is not None and
-            pengembalian_data.reference_type != old_reference_type
+        pengembalian_data.reference_type is not None and
+        pengembalian_data.reference_type != old_reference_type
     )
 
     # If reference type is changing, validate the new data consistency
     if reference_type_changed:
         new_reference_type = pengembalian_data.reference_type
 
-        # Validate that customer_id/vendor_id matches the new reference type
         if new_reference_type == PembayaranPengembalianType.PENJUALAN:
             if pengembalian_data.customer_id is None and pengembalian.customer_id is None:
                 raise HTTPException(
@@ -358,21 +355,23 @@ def update_pengembalian(
     db.commit()
     db.refresh(pengembalian)
 
-    # Update return status for old references
+    # Recalc & update statuses for old references (in case details/reference mapping changed)
     for old_pembelian_id, old_penjualan_id in old_details:
         if old_pembelian_id:
-            update_return_status(db, old_pembelian_id, PembayaranPengembalianType.PEMBELIAN)
+            recalc_return_and_update_payment_status(db, old_pembelian_id, PembayaranPengembalianType.PEMBELIAN)
         elif old_penjualan_id:
-            update_return_status(db, old_penjualan_id, PembayaranPengembalianType.PENJUALAN)
+            recalc_return_and_update_payment_status(db, old_penjualan_id, PembayaranPengembalianType.PENJUALAN)
 
+    db.commit()  # persist the recalculated statuses
     return pengembalian
+
 
 @router.delete("/{pengembalian_id}")
 def delete_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
     """Delete return record by ID"""
     pengembalian = db.query(Pengembalian).filter(
         Pengembalian.id == pengembalian_id,
-        ).first()
+    ).first()
 
     if not pengembalian:
         raise HTTPException(status_code=404, detail="Pengembalian not found")
@@ -396,18 +395,20 @@ def delete_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
         db.delete(pengembalian)
         db.commit()
 
-        # Update return status for all affected records after deletion
+        # Recalc & update statuses for all affected records after deletion
         for pembelian_id in processed_pembelian_ids:
-            update_return_status(db, pembelian_id, PembayaranPengembalianType.PEMBELIAN)
+            recalc_return_and_update_payment_status(db, pembelian_id, PembayaranPengembalianType.PEMBELIAN)
 
         for penjualan_id in processed_penjualan_ids:
-            update_return_status(db, penjualan_id, PembayaranPengembalianType.PENJUALAN)
+            recalc_return_and_update_payment_status(db, penjualan_id, PembayaranPengembalianType.PENJUALAN)
 
+        db.commit()
         return {"message": "Pengembalian deleted successfully"}
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error deleting pengembalian: {str(e)}")
+
 
 @router.get("/{pengembalian_id}/details", response_model=List[PengembalianDetailResponse])
 def get_pengembalian_details(pengembalian_id: int, db: Session = Depends(get_db)):
@@ -415,7 +416,7 @@ def get_pengembalian_details(pengembalian_id: int, db: Session = Depends(get_db)
 
     pengembalian = db.query(Pengembalian).filter(
         Pengembalian.id == pengembalian_id,
-        ).first()
+    ).first()
 
     if not pengembalian:
         raise HTTPException(status_code=404, detail="Pengembalian not found")
@@ -427,13 +428,14 @@ def get_pengembalian_details(pengembalian_id: int, db: Session = Depends(get_db)
 
     return details
 
+
 @router.put("/{pengembalian_id}/draft")
 def revert_to_draft(pengembalian_id: int, db: Session = Depends(get_db)):
     """Revert an active return back to draft status"""
 
     pengembalian = db.query(Pengembalian).filter(
         Pengembalian.id == pengembalian_id,
-        ).first()
+    ).first()
 
     if not pengembalian:
         raise HTTPException(status_code=404, detail="Pengembalian not found")
@@ -451,10 +453,11 @@ def revert_to_draft(pengembalian_id: int, db: Session = Depends(get_db)):
 
     # Revert to draft
     pengembalian.status = StatusPembelianEnum.DRAFT
+    db.flush()
 
-    # Update return status for all related records (recalculate without this return)
+    # Update payment status for all related records (recalculate without this return)
     for reference_id, reference_type in reference_ids:
-        update_return_status(db, reference_id, reference_type)
+        recalc_return_and_update_payment_status(db, reference_id, reference_type)
 
     db.commit()
     db.refresh(pengembalian)

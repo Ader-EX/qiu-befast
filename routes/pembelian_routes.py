@@ -76,6 +76,7 @@ def validate_pembelian_items_stock(db: Session, items_data: List) -> None:
         elif isinstance(item_data, dict):
             # For dictionary data
             validate_item_stock(db, item_data['item_id'], item_data['qty'])
+            
 def calculate_pembelian_totals(db: Session, pembelian_id: int):
     items = (
         db.query(PembelianItem)
