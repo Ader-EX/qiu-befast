@@ -62,7 +62,7 @@ class PembayaranBase(BaseModel):
 
 
 class PembayaranCreate(PembayaranBase):
-    customer_id: Optional[str] = None
+    customer_id: Optional[int] = None
     vendor_id: Optional[str] = None
     pembayaran_details: List[PembayaranDetailCreate] = Field(..., min_length=1)
 
@@ -194,7 +194,7 @@ class PembayaranListResponse(BaseModel):
 # Filter schema for queries
 class PembayaranFilter(BaseModel):
     reference_type: Optional[PembayaranPengembalianType] = None
-    customer_id: Optional[str] = None
+    customer_id: Optional[int] = None
     vendor_id: Optional[str] = None
     warehouse_id: Optional[int] = None
     currency_id: Optional[int] = None
