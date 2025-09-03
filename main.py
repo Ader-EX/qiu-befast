@@ -90,7 +90,7 @@ app.include_router(penjualan_routes.router, prefix="/penjualan", tags=["Penjuala
 app.include_router(pembayaran_routes.router, prefix="/pembayaran", tags=["Pembayaran"], dependencies=[Depends(verify_access_token)])
 app.include_router(pengembalian_routes.router, prefix="/pengembalian", tags=["Pengembalian"], dependencies=[Depends(verify_access_token)])
 app.include_router(user_routes.router, prefix="/users", tags=["Penjualan"], dependencies=[Depends(verify_access_token)])
-app.include_router(upload_routes.router, prefix="/upload", tags=["Upload"], dependencies=[Depends(verify_access_token)])
+app.include_router(upload_routes.router, prefix="/upload", tags=["Upload"])
 
 # app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
 # app.include_router(utils_routes.router, prefix="/utils", tags=["Utils"])
