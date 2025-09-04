@@ -232,7 +232,8 @@ def save_uploaded_file(file: UploadFile, pembelian_id: str) -> str:
 async def get_all_pembelian(
         status_pembelian: Optional[StatusPembelianEnum] = Query(None),
         status_pembayaran: Optional[StatusPembayaranEnum] = Query(None),
-        vendor_id: Optional[str] = Query(None),  # Changed: vendor_id instead of customer_id
+        vendor_id: Optional[str] = Query(None),
+        search_key : Optional[str] =Query(None),
         warehouse_id: Optional[int] = Query(None),
         page: int = Query(1, ge=1),
         size: int = Query(50, ge=1, le=100),
@@ -256,7 +257,9 @@ async def get_all_pembelian(
         )
         else :
             query = query.filter(Pembelian.status_pembelian == status_pembelian)
-            
+    if search_key:
+        query = query.filter(Pembelian.id.ilike(f"%{search_key}%"))
+
     if status_pembayaran is not None and status_pembayaran != StatusPembayaranEnum.ALL:
         query = query.filter(Pembelian.status_pembayaran == status_pembayaran)
     if vendor_id:  # Changed: vendor_id filter

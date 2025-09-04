@@ -236,6 +236,7 @@ async def get_all_penjualan(
         status_pembayaran: Optional[StatusPembayaranEnum] = Query(None),
         customer_id: Optional[str] = Query(None),  # Changed: customer_id instead of customer_id
         warehouse_id: Optional[int] = Query(None),
+        search_key : Optional[str] = Query(None),
         page: int = Query(1, ge=1),
         size: int = Query(50, ge=1, le=100),
         db: Session = Depends(get_db)
@@ -260,6 +261,8 @@ async def get_all_penjualan(
             query = query.filter(Penjualan.status_penjualan == status_penjualan)
     if status_pembayaran is not None and status_pembayaran != StatusPembayaranEnum.ALL:
         query = query.filter(Penjualan.status_pembayaran == status_pembayaran)
+    if search_key:
+        query = query.filter(Penjualan.id.ilike(f"%{search_key}%"))
     if customer_id:  # Changed: customer_id filter
         query = query.filter(Penjualan.customer_id == customer_id)
     if warehouse_id:
