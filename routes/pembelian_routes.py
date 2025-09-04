@@ -258,7 +258,7 @@ async def get_all_pembelian(
         else :
             query = query.filter(Pembelian.status_pembelian == status_pembelian)
     if search_key:
-        query = query.filter(Pembelian.id.ilike(f"%{search_key}%"))
+        query = query.filter(Pembelian.no_pembelian.ilike(f"%{search_key}%"))
 
     if status_pembayaran is not None and status_pembayaran != StatusPembayaranEnum.ALL:
         query = query.filter(Pembelian.status_pembayaran == status_pembayaran)

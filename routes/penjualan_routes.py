@@ -262,7 +262,7 @@ async def get_all_penjualan(
     if status_pembayaran is not None and status_pembayaran != StatusPembayaranEnum.ALL:
         query = query.filter(Penjualan.status_pembayaran == status_pembayaran)
     if search_key:
-        query = query.filter(Penjualan.id.ilike(f"%{search_key}%"))
+        query = query.filter(Penjualan.no_penjualan.ilike(f"%{search_key}%"))
     if customer_id:  # Changed: customer_id filter
         query = query.filter(Penjualan.customer_id == customer_id)
     if warehouse_id:
