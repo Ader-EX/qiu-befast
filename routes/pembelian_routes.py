@@ -34,22 +34,36 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_FILE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/jpg"]
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
+
 def calculate_item_totals(item: PembelianItem) -> None:
-    """Calculate all totals for a pembelian item based on your model structure"""
+    """
+    Line totals (pembelian):
+      base = qty * unit_price
+      taxable_base = base - discount
+      line_tax = taxable_base * (tax% / 100)
+      total_price = taxable_base + line_tax
+
+    Stored fields:
+      - sub_total = base (pre-discount, pre-tax)  ← matches your UI "Sub Total"
+      - total_price = final line total (after discount + tax)
+      - price_after_tax = total_price / qty  (average unit price incl. tax & any line discount)
+    """
     qty = Decimal(str(item.qty or 0))
     unit_price = Decimal(str(item.unit_price or 0))
     tax_percentage = Decimal(str(item.tax_percentage or 0))
     discount = Decimal(str(item.discount or 0))
-    
-    # Calculate price after tax per unit
-    tax_multiplier = Decimal('1') + (tax_percentage / Decimal('100'))
-    item.price_after_tax = unit_price * tax_multiplier
-    
-    # Calculate subtotal (qty * unit_price)
-    item.sub_total = qty * unit_price
-    
-    # Calculate total price (qty * price_after_tax - discount)
-    item.total_price = (qty * item.price_after_tax) - discount
+
+    base = qty * unit_price
+    taxable_base = base - discount
+    if taxable_base < 0:
+        taxable_base = Decimal('0')  # safety clamp
+
+    line_tax = (taxable_base * tax_percentage) / Decimal('100')
+    total_price = taxable_base + line_tax
+
+    item.sub_total = base
+    item.total_price = total_price
+    item.price_after_tax = (total_price / qty) if qty else Decimal('0')
 
 def validate_item_exists(db: Session, item_id: int) -> Item:
     """Validate if item exists and return it"""
@@ -73,60 +87,62 @@ def update_item_stock(db: Session, item_id: int, qty_change: int) -> None:
     item.total_item = item.total_item + qty_change
 
 def calculate_pembelian_totals(db: Session, pembelian_id: int):
-    """Calculate pembelian totals from all items based on your model structure"""
-    items = (
-        db.query(PembelianItem)
-        .filter(PembelianItem.pembelian_id == pembelian_id)
-        .all()
-    )
+    items = db.query(PembelianItem).filter(PembelianItem.pembelian_id == pembelian_id).all()
 
     total_subtotal = Decimal('0')
     total_discount = Decimal('0')
-    total_before_discount = Decimal('0')
     total_tax = Decimal('0')
 
-    for item in items:
-        # Recalculate item totals first
-        calculate_item_totals(item)
-        
-        qty = Decimal(str(item.qty or 0))
-        unit_price = Decimal(str(item.unit_price or 0))
-        tax_percentage = Decimal(str(item.tax_percentage or 0))
-        discount = Decimal(str(item.discount or 0))
-        
-        # Add to totals
-        total_subtotal += item.sub_total
+    for line in items:
+        # Ensure per-line values follow the same rules
+        calculate_item_totals(line)
+
+        qty = Decimal(str(line.qty or 0))
+        unit = Decimal(str(line.unit_price or 0))
+        tax_pct = Decimal(str(line.tax_percentage or 0))
+        discount = Decimal(str(line.discount or 0))
+
+        base = qty * unit
+        taxable_base = base - discount
+        if taxable_base < 0:
+            taxable_base = Decimal('0')
+
+        line_tax = (taxable_base * tax_pct) / Decimal('100')
+
+        total_subtotal += base
         total_discount += discount
-        
-        # Calculate tax amount for this item
-        tax_amount = (qty * unit_price * tax_percentage) / Decimal('100')
-        total_tax += tax_amount
+        total_tax += line_tax
 
     pembelian = db.query(Pembelian).filter(Pembelian.id == pembelian_id).first()
+    if not pembelian:
+        raise HTTPException(status_code=404, detail="Pembelian not found")
 
-    # Get additional discount and expense
     additional_discount = Decimal(str(pembelian.additional_discount or 0))
     expense = Decimal(str(pembelian.expense or 0))
 
-    # Calculate totals based on your model structure
+    subtotal_after_item_discounts = total_subtotal - total_discount
+    final_total_before_tax = subtotal_after_item_discounts - additional_discount
+    total_price = final_total_before_tax + total_tax + expense
+
+    # Persist
     pembelian.total_subtotal = total_subtotal
     pembelian.total_discount = total_discount
     pembelian.additional_discount = additional_discount
-    pembelian.total_before_discount = total_subtotal - total_discount - additional_discount
+    pembelian.total_before_discount = final_total_before_tax  
     pembelian.total_tax = total_tax
     pembelian.expense = expense
-    pembelian.total_price = pembelian.total_before_discount + total_tax + expense
-    
+    pembelian.total_price = total_price
+
     db.commit()
 
     return {
         "total_subtotal": total_subtotal,
         "total_discount": total_discount,
         "additional_discount": additional_discount,
-        "total_before_discount": pembelian.total_before_discount,
+        "total_before_discount": final_total_before_tax,
         "total_tax": total_tax,
         "expense": expense,
-        "total_price": pembelian.total_price,
+        "total_price": total_price,
     }
 
 def finalize_pembelian(db: Session, pembelian_id: int):
