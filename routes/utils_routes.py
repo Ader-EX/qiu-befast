@@ -165,8 +165,6 @@ async def get_laba_rugi(
         profit_or_loss=profit_or_loss
     )
 
-
-
 @router.get(
     "/penjualan",
     status_code=status.HTTP_200_OK,
@@ -220,7 +218,7 @@ async def get_penjualan_laporan(
     report_rows: List[SalesReportRow] = []
     
     for sale in sales:
-        # Get all items for this sale
+        # Get all items for this sale with proper Item.name
         items_query = (
             db.query(
                 PenjualanItem.item_sku,
@@ -229,7 +227,8 @@ async def get_penjualan_laporan(
                 PenjualanItem.unit_price,
                 PenjualanItem.discount,
                 PenjualanItem.tax_percentage,
-                Item.code.label("item_code")
+                Item.code.label("item_code"),
+                Item.name.label("actual_item_name")  # Get the actual item name from Item model
             )
             .join(Item, Item.id == PenjualanItem.item_id, isouter=True)
             .filter(PenjualanItem.penjualan_id == sale.id)
@@ -237,19 +236,22 @@ async def get_penjualan_laporan(
         )
 
         # Concatenate item details and calculate totals
-        item_details = []
+        item_codes = []
+        item_names = []  # Separate list for item names
         total_subtotal = Decimal("0")
         total_discount = Decimal("0")
         total_tax = Decimal("0")
         total_qty = 0
 
         for item in items_query:
-            # Build item detail string
+            # Build item detail strings
             item_code = item.item_code or item.item_sku or "N/A"
-            item_name = item.item_name or "N/A"
+            # Use actual Item.name first, fallback to PenjualanItem.item_name
+            item_name = item.actual_item_name or item.item_name or "N/A"
             qty = int(item.qty or 0)
             
-            item_details.append(f"{item_code} - {item_name}")
+            item_codes.append(item_code)
+            item_names.append(item_name)
             
             # Calculate totals
             price = _dec(item.unit_price)
@@ -268,7 +270,8 @@ async def get_penjualan_laporan(
             total_qty += qty
 
         # Join items with comma
-        items_str = ", ".join(item_details) if item_details else "No items"
+        item_codes_str = ", ".join(item_codes) if item_codes else "No items"
+        item_names_str = ", ".join(item_names) if item_names else "No items"
         
         # Calculate final totals
         final_total = total_subtotal - total_discount
@@ -284,8 +287,8 @@ async def get_penjualan_laporan(
                 no_penjualan=sale.no_penjualan,
                 status=(sale.status_pembayaran.name.capitalize() if hasattr(sale.status_pembayaran, "name")
                         else str(sale.status_pembayaran)),
-                item_code=items_str,  # Use concatenated items instead of single item_code
-                item_name=f"{len(item_details)} items (Total Qty: {total_qty})",  # Summary instead of single item_name
+                item_code=item_codes_str,  # Concatenated item codes
+                item_name=item_names_str,  # Concatenated actual item names from Item.name
                 qty=total_qty,
                 price=total_subtotal / total_qty if total_qty > 0 else Decimal("0"),  # Average price
                 sub_total=total_subtotal,
@@ -323,7 +326,7 @@ async def get_pembelian_laporan(
     purchases_query = (
         db.query(
             Pembelian.id,
-            Pembelian.sales_date.label("date"),  # Keep as sales_date since that's your schema
+            Pembelian.sales_date.label("date"),
             Pembelian.vendor_name.label("vendor_name_stored"),
             Vendor.name.label("vendor_name_rel"),
             Pembelian.no_pembelian,
@@ -351,7 +354,7 @@ async def get_pembelian_laporan(
     report_rows: List[PurchaseReportRow] = []
     
     for purchase in purchases:
-        # Get all items for this purchase
+        # Get all items for this purchase with proper Item.name
         items_query = (
             db.query(
                 PembelianItem.item_sku,
@@ -360,7 +363,8 @@ async def get_pembelian_laporan(
                 PembelianItem.unit_price,
                 PembelianItem.discount,
                 PembelianItem.tax_percentage,
-                Item.code.label("item_code")
+                Item.code.label("item_code"),
+                Item.name.label("actual_item_name")  # Get the actual item name from Item model
             )
             .join(Item, Item.id == PembelianItem.item_id, isouter=True)
             .filter(PembelianItem.pembelian_id == purchase.id)
@@ -368,19 +372,22 @@ async def get_pembelian_laporan(
         )
 
         # Concatenate item details and calculate totals
-        item_details = []
+        item_codes = []
+        item_names = []  # Separate list for item names
         total_subtotal = Decimal("0")
         total_discount = Decimal("0")
         total_tax = Decimal("0")
         total_qty = 0
 
         for item in items_query:
-            # Build item detail string
+            # Build item detail strings
             item_code = item.item_code or item.item_sku or "N/A"
-            item_name = item.item_name or "N/A"
+            # Use actual Item.name first, fallback to PembelianItem.item_name
+            item_name = item.actual_item_name or item.item_name or "N/A"
             qty = int(item.qty or 0)
             
-            item_details.append(f"{item_code} - {item_name}")
+            item_codes.append(item_code)
+            item_names.append(item_name)
             
             # Calculate totals
             price = _dec(item.unit_price)
@@ -399,7 +406,8 @@ async def get_pembelian_laporan(
             total_qty += qty
 
         # Join items with comma
-        items_str = ", ".join(item_details) if item_details else "No items"
+        item_codes_str = ", ".join(item_codes) if item_codes else "No items"
+        item_names_str = ", ".join(item_names) if item_names else "No items"
         
         # Calculate final totals
         final_total = total_subtotal - total_discount
@@ -414,8 +422,8 @@ async def get_pembelian_laporan(
                 no_pembelian=purchase.no_pembelian,
                 status=(purchase.status_pembayaran.name.capitalize() if hasattr(purchase.status_pembayaran, "name")
                         else str(purchase.status_pembayaran)),
-                item_code=items_str,  # Use concatenated items instead of single item_code
-                item_name=f"{len(item_details)} items (Total Qty: {total_qty})",  # Summary instead of single item_name
+                item_code=item_codes_str,  # Concatenated item codes
+                item_name=item_names_str,  # Concatenated actual item names from Item.name
                 qty=total_qty,
                 price=total_subtotal / total_qty if total_qty > 0 else Decimal("0"),  # Average price
                 sub_total=total_subtotal,
@@ -433,6 +441,8 @@ async def get_pembelian_laporan(
         data=report_rows,
         total=total_count,
     )
+
+
 @router.get(
     "/penjualan/download",
     status_code=status.HTTP_200_OK,
@@ -466,10 +476,12 @@ async def download_penjualan_laporan(
             PenjualanItem.unit_price,
             PenjualanItem.discount,
             PenjualanItem.tax_percentage,
-            Item.code.label("item_code") 
+            Item.code.label("item_code"),
+            Item.name.label("actual_item_name")  # Get actual item name
         )
         .join(Customer, Customer.id == Penjualan.customer_id, isouter=True)
         .join(PenjualanItem, PenjualanItem.penjualan_id == Penjualan.id)
+        .join(Item, Item.id == PenjualanItem.item_id, isouter=True)  # Join with Item table
         .filter(
             Penjualan.is_deleted.is_(False),
             Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
@@ -518,6 +530,9 @@ async def download_penjualan_laporan(
         tax = (total * tax_pct / Decimal(100))
         grand_total = total + tax
 
+        # Use actual Item.name first, fallback to PenjualanItem.item_name
+        actual_item_name = r.actual_item_name or r.item_name or ''
+
         writer.writerow([
             r.date.strftime('%d/%m/%Y') if r.date else '',
             r.customer_name_stored or r.customer_name_rel or "—",
@@ -526,8 +541,8 @@ async def download_penjualan_laporan(
             (r.status_pembayaran.name.capitalize() if hasattr(r.status_pembayaran, "name")
              else str(r.status_pembayaran)),
             r.item_code or '',
-            r.item_name or '',
-            str(qty),  # Convert to string to avoid formatting issues
+            actual_item_name,  # Use the actual item name from Item model
+            str(qty),
             str(float(price)),
             str(float(sub_total)),
             str(float(total)),
@@ -544,8 +559,8 @@ async def download_penjualan_laporan(
     
     # Return as streaming response with proper headers
     return StreamingResponse(
-        io.BytesIO(csv_content.encode('utf-8-sig')),  # Use UTF-8-sig for better Excel compatibility
-        media_type="text/csv",  # Keep as text/csv
+        io.BytesIO(csv_content.encode('utf-8-sig')),
+        media_type="text/csv",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Content-Type": "text/csv; charset=utf-8"
@@ -585,9 +600,12 @@ async def download_pembelian_laporan(
             PembelianItem.unit_price,
             PembelianItem.discount,
             PembelianItem.tax_percentage,
+            Item.code.label("item_code"),
+            Item.name.label("actual_item_name")  # Get actual item name
         )
         .join(Vendor, Vendor.id == Pembelian.vendor_id, isouter=True)
         .join(PembelianItem, PembelianItem.pembelian_id == Pembelian.id)
+        .join(Item, Item.id == PembelianItem.item_id, isouter=True)  # Join with Item table
         .filter(
             Pembelian.is_deleted.is_(False),
             Pembelian.status_pembelian != StatusPembelianEnum.DRAFT,
@@ -635,6 +653,9 @@ async def download_pembelian_laporan(
         tax = (total * tax_pct / Decimal(100))
         grand_total = total + tax
 
+        # Use actual Item.name first, fallback to PembelianItem.item_name
+        actual_item_name = r.actual_item_name or r.item_name or ''
+
         writer.writerow([
             r.date.strftime('%d/%m/%Y') if r.date else '',
             r.vendor_name_stored or r.vendor_name_rel or "—",
@@ -642,8 +663,8 @@ async def download_pembelian_laporan(
             (r.status_pembayaran.name.capitalize() if hasattr(r.status_pembayaran, "name")
              else str(r.status_pembayaran)),
             r.item_sku or '',
-            r.item_name or '',
-            str(qty),  # Convert to string to avoid formatting issues
+            actual_item_name,  # Use the actual item name from Item model
+            str(qty),
             str(float(price)),
             str(float(sub_total)),
             str(float(total)),
@@ -660,12 +681,10 @@ async def download_pembelian_laporan(
     
     # Return as streaming response with proper headers
     return StreamingResponse(
-        io.BytesIO(csv_content.encode('utf-8-sig')),  # Use UTF-8-sig for better Excel compatibility
-        media_type="text/csv",  # Keep as text/csv
+        io.BytesIO(csv_content.encode('utf-8-sig')),
+        media_type="text/csv",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Content-Type": "text/csv; charset=utf-8"
         }
     )
-    
-
