@@ -16,28 +16,28 @@ router = APIRouter()
 # Get all
 @router.get("", response_model=PaginatedResponse[WarehouseOut])
 async def get_all_warehouses(
-    db: Session = Depends(get_db),
-    skip: int = 0,
-    limit: int = 10,
-    is_active : Optional[bool] = None,
-    search: Optional[str] = Query(None, description="Search warehouse by name"),
+        db: Session = Depends(get_db),
+        skip: int = 0,
+        limit: int = 10,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = Query(None, description="Search warehouse by name"),
 ):
     query = db.query(Warehouse).filter(Warehouse.is_deleted == False)
 
     if is_active is not None:
-        query.filter(Warehouse.is_active == is_active)
+        query = query.filter(Warehouse.is_active == is_active)
 
     if search:
         query = query.filter(Warehouse.name.ilike(f"%{search}%"))
-        
-    total_count = query.count()
 
+    total_count = query.count()
     paginated_data = query.offset(skip).limit(limit).all()
 
     return {
         "data": paginated_data,
         "total": total_count
     }
+
 
 @router.get("/{warehouse_id}", response_model=WarehouseOut)
 async def get_warehouse(warehouse_id: int, db: Session = Depends(get_db)):

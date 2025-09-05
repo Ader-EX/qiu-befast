@@ -54,7 +54,7 @@ class PengembalianBase(BaseModel):
 
 
 class PengembalianCreate(PengembalianBase):
-    customer_id: Optional[str] = None
+    customer_id: Optional[int] = None
     vendor_id: Optional[str] = None
     pengembalian_details: List[PengembalianDetailCreate] = Field(..., min_length=1)
 
@@ -81,7 +81,7 @@ class PengembalianUpdate(BaseModel):
     payment_date: Optional[datetime] = None
     currency_id: Optional[int] = None
     warehouse_id: Optional[int] = None
-    customer_id: Optional[str] = None
+    customer_id: Optional[int] = None
     vendor_id: Optional[str] = None
 
     pengembalian_details: Optional[List[PengembalianDetailCreate]] = None
@@ -120,7 +120,7 @@ class PengembalianResponse(BaseModel):
     payment_date: datetime
 
     reference_type: PembayaranPengembalianType
-    customer_id: Optional[str] = None
+    customer_id: Optional[int] = None
     vendor_id: Optional[str] = None
     currency_id: int
     warehouse_id: int
@@ -179,7 +179,7 @@ class PengembalianListResponse(BaseModel):
 # Filter schema for queries
 class PengembalianFilter(BaseModel):
     reference_type: Optional[PembayaranPengembalianType] = None
-    customer_id: Optional[str] = None
+    customer_id: Optional[int] = None
     vendor_id: Optional[str] = None
     warehouse_id: Optional[int] = None
     currency_id: Optional[int] = None
