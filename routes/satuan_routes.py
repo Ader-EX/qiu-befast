@@ -29,10 +29,14 @@ async def get_all_satuan(
         db: Session = Depends(get_db),
         is_active: Optional[bool] = None,
         search_key: Optional[str] = None,
+        contains_deleted : Optional[bool] = False,
         skip: int = Query(0, ge=0),
         limit: int = Query(5, ge=1, le=1000)
 ):
-    query = db.query(Satuan).filter(Satuan.is_deleted == False)
+    
+    query = db.query(Satuan)
+    if contains_deleted is False :
+        query = query.filter(Satuan.is_deleted == False)
 
     if is_active is not None:
         query = query.filter(Satuan.is_active == is_active)

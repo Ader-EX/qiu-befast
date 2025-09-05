@@ -18,10 +18,12 @@ def get_all_vendors(
         page: int = 1,
         rowsPerPage: int = 10,
         is_active: Optional[bool] = None,
+        contains_deleted: Optional[bool] = False, 
         search_key: Optional[str] = None,
 ):
-    query = db.query(Vendor).options(joinedload(Vendor.top_rel), joinedload(Vendor.curr_rel)).filter(Vendor.is_deleted == False)
-
+    query = db.query(Vendor).options(joinedload(Vendor.top_rel), joinedload(Vendor.curr_rel))
+    if contains_deleted is False:
+        query = query.filter(Vendor.is_deleted == False)
     if is_active is not None:
         query = query.filter(Vendor.is_active == is_active)
 

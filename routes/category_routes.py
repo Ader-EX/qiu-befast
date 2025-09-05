@@ -24,12 +24,16 @@ async def get_all_categories(
         cat_type: int = 0,
         is_active: Optional[bool] = None,
         search_key : Optional[str] = None,
+        contains_deleted: Optional[bool] = False, 
         skip: int = Query(0, ge=0),
         limit: int = Query(5, ge=1, le=1000),
         db: Session = Depends(get_db)
 ):
 
-    query = db.query(Category).filter(Category.is_deleted == False)
+    query = db.query(Category)
+    
+    if contains_deleted is False:
+        query = query.filter(Category.is_deleted == False)
 
     if  is_active is not None:
         query =  query.filter(Category.is_active == is_active)

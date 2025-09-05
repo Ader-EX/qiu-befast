@@ -191,6 +191,8 @@ def get_items(
         rowsPerPage: int = 5,
         search_key: Optional[str] = None,
         item_type: Optional[ItemTypeEnum] = None,
+        
+        contains_deleted: Optional[bool] = False,
         is_active: Optional[bool] = None,
         sortBy: Optional[Literal["name", "price", "sku", "created_at"]] = None,
         sortOrder: Optional[Literal["asc", "desc"]] = "asc",
@@ -200,7 +202,10 @@ def get_items(
         joinedload(Item.category_two_rel),
         joinedload(Item.satuan_rel),
         joinedload(Item.attachments),
-    ).filter(Item.is_deleted == False)
+    )
+    
+    if contains_deleted is False:
+        query = query.filter(Item.is_deleted == False)
 
     if search_key:
         query = query.filter(

@@ -20,11 +20,15 @@ def get_all_Customer(
         db: Session = Depends(get_db),
         page: int = 1,
         rowsPerPage: int = 10,
+        
+        contains_deleted: Optional[bool] = False,
         is_active: Optional[bool] = None,
         search_key: Optional[str] = None,
 ):
-    query = db.query(Customer).options( joinedload(Customer.curr_rel)).filter(Customer.is_deleted == False )
+    query = db.query(Customer).options( joinedload(Customer.curr_rel))
 
+    if contains_deleted is False :
+        query = query.filter(Customer.is_deleted == False)
     if is_active is not None:
         query = query.filter(Customer.is_active == is_active)
 

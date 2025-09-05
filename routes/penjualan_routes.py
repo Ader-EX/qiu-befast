@@ -10,7 +10,7 @@ import os
 import shutil
 import enum
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
@@ -28,6 +28,7 @@ from routes.upload_routes import get_public_image_url, to_public_image_url, temp
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PenjualanSchema import PenjualanCreate, PenjualanListResponse, PenjualanResponse, PenjualanStatusUpdate, PenjualanUpdate, SuccessResponse, TotalsResponse, UploadResponse
 from utils import generate_unique_record_number
+from decimal import Decimal, InvalidOperation  # add InvalidOperation
 
 router = APIRouter()
 
@@ -263,7 +264,7 @@ async def get_all_penjualan(
         query = query.filter(Penjualan.status_pembayaran == status_pembayaran)
     if search_key:
         query = query.filter(Penjualan.no_penjualan.ilike(f"%{search_key}%"))
-    if customer_id:  # Changed: customer_id filter
+    if customer_id:  
         query = query.filter(Penjualan.customer_id == customer_id)
     if warehouse_id:
         query = query.filter(Penjualan.warehouse_id == warehouse_id)
@@ -336,7 +337,6 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
         top_id=request.top_id,
         sales_date=request.sales_date,
         sales_due_date=request.sales_due_date,
-        # Remove discount reference since it doesn't exist in the model
         additional_discount=request.additional_discount,
         expense=request.expense,
         status_penjualan=StatusPembelianEnum.DRAFT
@@ -381,63 +381,163 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
         "detail": "penjualan created successfully",
         "id": new_penjualan.id,
     }
+    
+    
+
+
+def _penj_get_item_id(obj):
+    return getattr(obj, "item_id", None) if not isinstance(obj, dict) else obj.get("item_id")
+
+def _penj_normalize_item_payload(obj):
+    data = obj if isinstance(obj, dict) else (obj.dict() if hasattr(obj, "dict") else obj.model_dump())
+
+    try:
+        qty = int(data.get("qty", 0))
+        unit_price = Decimal(str(data.get("unit_price", "0")))
+        tax_percentage = int(data.get("tax_percentage", 0) or 0)
+        discount = Decimal(str(data.get("discount", "0") or 0))
+    except (ValueError, InvalidOperation):
+        raise HTTPException(status_code=400, detail="Invalid numeric values in items")
+
+    return {
+        "item_id": data.get("item_id"),
+        "qty": qty,
+        "unit_price": unit_price,
+        "tax_percentage": tax_percentage,
+        "discount": discount,
+    }
+
+def _penj_validate_items_payload(items_data: List):
+    seen = set()
+    for idx, raw in enumerate(items_data or []):
+        item_id = _penj_get_item_id(raw)
+        if not item_id:
+            raise HTTPException(status_code=400, detail=f"items[{idx}]: item_id is required")
+
+        if item_id in seen:
+            raise HTTPException(status_code=400, detail=f"Duplicate item_id in payload: {item_id}")
+        seen.add(item_id)
+
+        d = _penj_normalize_item_payload(raw)
+        if d["qty"] < 1:
+            raise HTTPException(status_code=400, detail=f"items[{idx}]: qty must be >= 1")
+        if d["unit_price"] < 0:
+            raise HTTPException(status_code=400, detail=f"items[{idx}]: unit_price must be >= 0")
+        if not (0 <= d["tax_percentage"] <= 100):
+            raise HTTPException(status_code=400, detail=f"items[{idx}]: tax_percentage must be between 0 and 100")
+        max_discount = d["unit_price"] * d["qty"]
+        if d["discount"] < 0 or d["discount"] > max_discount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"items[{idx}]: discount must be between 0 and qty*unit_price (<= {max_discount})"
+            )
+
 @router.put("/{penjualan_id}", response_model=PenjualanResponse)
 async def update_penjualan(
     penjualan_id: int,
     request: PenjualanUpdate,
     db: Session = Depends(get_db),
 ):
-    penjualan = db.query(Penjualan).filter(Penjualan.id == penjualan_id).first()
+    # 1) Load + guard
+    penjualan: Penjualan = (
+        db.query(Penjualan)
+        .options(selectinload(Penjualan.penjualan_items))
+        .filter(Penjualan.id == penjualan_id)
+        .first()
+    )
     if not penjualan:
         raise HTTPException(status_code=404, detail="penjualan not found")
 
+    # 2) Enforce unique no_penjualan if changed
+    if request.no_penjualan and request.no_penjualan != penjualan.no_penjualan:
+        exists = db.query(Penjualan).filter(
+            and_(Penjualan.no_penjualan == request.no_penjualan,
+                 Penjualan.id != penjualan_id)
+        ).first()
+        if exists:
+            raise HTTPException(status_code=400, detail="No penjualan already exists")
+
+    # 3) Apply simple field updates (non-items)
     update_data = request.dict(exclude_unset=True)
     items_data = update_data.pop("items", None)
-    
-    # Remove discount from update_data since it doesn't exist in the model
+
+    # Remove any stray header-level discount; model doesn't have it
     update_data.pop("discount", None)
-    
+
+    fields_changed = False
     for field, value in update_data.items():
-        setattr(penjualan, field, value)
+        # Skip None to avoid accidental nulling unless explicitly intended
+        if getattr(penjualan, field, None) != value:
+            setattr(penjualan, field, value)
+            fields_changed = True
 
+    # 4) Items diff/update (only if payload provided)
+    items_changed = False
     if items_data is not None:
-        validate_penjualan_items_stock(db, items_data)
+        _penj_validate_items_payload(items_data)
+        validate_penjualan_items_stock(db, items_data)  # keep stock validation
 
-        db.query(PenjualanItem).filter(
-            PenjualanItem.penjualan_id == penjualan_id
-        ).delete()
+        # Current items map keyed by item_id (string for consistency)
+        current: dict[str, PenjualanItem] = {str(pi.item_id): pi for pi in penjualan.penjualan_items}
+        incoming_ids = set()
 
-        for item_req in items_data:
-            item = db.query(Item).filter(Item.id == item_req["item_id"]).first()
+        for raw in items_data:
+            d = _penj_normalize_item_payload(raw)
+            item_id_key = str(d["item_id"])
+            incoming_ids.add(item_id_key)
+
+            # Ensure the master Item exists
+            item = db.query(Item).filter(Item.id == d["item_id"]).first()
             if not item:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Item with ID {item_req['item_id']} not found",
-                )
+                raise HTTPException(status_code=404, detail=f"Item with ID {d['item_id']} not found")
 
-            unit_price = Decimal(str(item_req["unit_price"]))
-            qty = int(item_req["qty"])
-            tax_percentage = int(item_req.get("tax_percentage", 0))
-            discount = Decimal(str(item_req.get("discount", 0)))  # Get item-level discount
+            new_total = calculate_item_total(d["qty"], d["unit_price"])
 
-            total_price = calculate_item_total(qty, unit_price)
+            if item_id_key in current:
+                pi = current[item_id_key]
+                if (
+                    int(pi.qty or 0) != d["qty"]
+                    or Decimal(str(pi.unit_price or 0)) != d["unit_price"]
+                    or int(pi.tax_percentage or 0) != d["tax_percentage"]
+                    or Decimal(str(pi.discount or 0)) != d["discount"]
+                    or Decimal(str(pi.total_price or 0)) != new_total
+                ):
+                    pi.qty = d["qty"]
+                    pi.unit_price = d["unit_price"]
+                    pi.tax_percentage = d["tax_percentage"]
+                    pi.discount = d["discount"]
+                    pi.total_price = new_total
+                    items_changed = True
+                # else unchanged → no-op
+            else:
+                db.add(PenjualanItem(
+                    penjualan_id=penjualan_id,
+                    item_id=item.id,
+                    item_name=item.name,
+                    qty=d["qty"],
+                    unit_price=d["unit_price"],
+                    tax_percentage=d["tax_percentage"],
+                    discount=d["discount"],
+                    total_price=new_total,
+                ))
+                items_changed = True
 
-            db.add(PenjualanItem(
-                penjualan_id=penjualan_id,
-                item_id=item.id,
-                item_name=item.name,
-                qty=qty,
-                unit_price=unit_price,        
-                total_price=total_price,
-                discount=discount,  # Set item-level discount
-                tax_percentage=tax_percentage,
-            ))
+        # Delete lines removed from payload
+        for item_id_key, pi in list(current.items()):
+            if item_id_key not in incoming_ids:
+                db.delete(pi)
+                items_changed = True
 
-    db.commit()
-    calculate_penjualan_totals(db, penjualan_id)
-    db.commit()
+    # 5) Commit + recalc totals only if something changed
+    if fields_changed or items_changed:
+        db.commit()
+        calculate_penjualan_totals(db, penjualan_id)
+        db.commit()
+    else:
+        db.rollback()  # drop incidental state if nothing changed
 
     return await get_penjualan(penjualan_id, db)
+
 
 @router.post("/{penjualan_id}/finalize", response_model=PenjualanResponse)
 async def finalize_penjualan_endpoint(penjualan_id: int, db: Session = Depends(get_db)):

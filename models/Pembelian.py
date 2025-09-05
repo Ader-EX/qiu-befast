@@ -33,19 +33,22 @@ class Pembelian(Base,SoftDeleteMixin):
     no_pembelian = Column(String(255),unique=True, default="", nullable=False)
     status_pembayaran = Column(Enum(StatusPembayaranEnum), default=StatusPembayaranEnum.UNPAID)
     status_pembelian = Column(Enum(StatusPembelianEnum), default=StatusPembelianEnum.DRAFT)
-  
-    additional_discount = Column(Numeric(15,7), default=0.00)
-    expense = Column(Numeric(15,7), default=0.00)
-
     sales_date = Column(DateTime, nullable=True, default=datetime.now)
     sales_due_date = Column(DateTime, nullable=True, default=lambda: datetime.now() + timedelta(weeks=1))
+  
 
-    # Total quantities and prices will be calculated from items
-    total_qty = Column(Integer, nullable=False, default=0)
+    total_subtotal = Column(Numeric(15,7), default=0.00)
+    
+    total_discount = Column(Numeric(15,7), default=0.00)
+    additional_discount = Column(Numeric(15,7), default=0.00)
+    
+    total_before_discount = Column(Numeric(15,7), default=0.00)
+    
+    total_tax = Column(Numeric(15,7), default=0.00)
+    expense = Column(Numeric(15,7), default=0.00)
     total_price = Column(Numeric(15,7), default=0.00)
     total_paid = Column(Numeric(15,7), default=0.00)
     total_return = Column(Numeric(15,7), default=0.00)
-
     # For DRAFT: store foreign keys to allow editing
     # For finalized: store names to preserve data even if master gets deleted
     # Draft mode - foreign keys (nullable when finalized)
@@ -53,12 +56,7 @@ class Pembelian(Base,SoftDeleteMixin):
     vendor_id = Column(String(50), ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
     top_id = Column(Integer, ForeignKey("term_of_payments.id", ondelete="SET NULL"), nullable=True)
 
-    # Finalized mode - stored names (nullable when draft)
-    warehouse_name = Column(String(255), nullable=True)
-    vendor_name = Column(String(255), nullable=True)
-    vendor_address = Column(Text, nullable=True)
-    top_name = Column(String(255), nullable=True)
-    currency_name  = Column(String(255), nullable=True)
+ 
     created_at = Column(DateTime, default=datetime.now, nullable=False)  
 
     # Relationships (only active in draft mode)
@@ -72,14 +70,7 @@ class Pembelian(Base,SoftDeleteMixin):
     pengembalian_detail_rel= relationship("PengembalianDetails", back_populates="pembelian_rel", cascade="all, delete-orphan")
     
     attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
-    @hybrid_property
-    def vendor_display(self) -> str:
-        # draft‐mode name always wins; but if it’s empty, try the live FK
-        if self.vendor_name:
-            return self.vendor_name
-        if self.vend_rel:
-            return self.vend_rel.name
-        return "—"
+
     
     @hybrid_property
     def remaining(self) -> Decimal:
@@ -103,16 +94,14 @@ class PembelianItem(Base):
     id = Column(Integer, primary_key=True, index=True)
     pembelian_id = Column(Integer, ForeignKey("pembelians.id", ondelete="CASCADE"), nullable=False)
     item_id = Column(Integer, ForeignKey("items.id", ondelete="SET NULL"), nullable=True)
-    item_name = Column(String(255), nullable=True)
-    item_sku = Column(String(100), nullable=True)
-    item_type = Column(String(50), nullable=True)
-    discount = Column(Numeric(15,7), default=0.00)
-    # FINISH_GOOD, RAW_MATERIAL, SERVICE
-    satuan_name = Column(String(100), nullable=True)
-    tax_percentage = Column(Integer, nullable=True, default=0)
-    qty = Column(Integer, nullable=False, default=0)
    
-    unit_price = Column(Numeric(15, 7), nullable=False, default=0.00)
+   
+    qty = Column(Integer, nullable=False, default=0)
+    unit_price = Column(Numeric(15, 7), nullable=False, default=0.00) # harga item per barang
+    tax_percentage = Column(Integer, nullable=True, default=0)
+    discount = Column(Numeric(15,7), default=0.00)
+    price_after_tax =  Column(Numeric(15,7), default=0.00)
+    sub_total  = Column(Numeric(15,7), default=0.00)
     total_price = Column(Numeric(15, 7), nullable=False, default=0.00)  # qty * unit_price
 
     # Relationships

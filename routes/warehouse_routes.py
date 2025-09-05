@@ -20,9 +20,12 @@ async def get_all_warehouses(
         skip: int = 0,
         limit: int = 10,
         is_active: Optional[bool] = None,
+        contains_deleted: Optional[bool] = False, 
         search: Optional[str] = Query(None, description="Search warehouse by name"),
 ):
-    query = db.query(Warehouse).filter(Warehouse.is_deleted == False)
+    query = db.query(Warehouse)
+    if contains_deleted is False :
+        query = query.filter(Warehouse.is_deleted == False)
 
     if is_active is not None:
         query = query.filter(Warehouse.is_active == is_active)
