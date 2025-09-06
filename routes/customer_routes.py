@@ -59,15 +59,38 @@ async def get_customer(customer_id: str, db: Session = Depends(get_db)):
     return customer
 
 # Create
+def generate_customer_code_with_counter(db: Session) -> str:
+    """
+    Alternative approach using a simple counter.
+    This version counts all customers (including deleted ones) to ensure uniqueness.
+    """
+    # Count total customers to determine next code
+    customer_count = db.query(Customer).count()
+    next_number = customer_count + 1
+    
+    # Keep incrementing if code already exists (handles edge cases)
+    while True:
+        customer_code = f"CUS-{next_number:05d}"
+        existing = db.query(Customer).filter(Customer.code == customer_code).first()
+        if not existing:
+            return customer_code
+        next_number += 1
+        
 @router.post("", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
 async def create_customer(customer_data: CustomerCreate, db: Session = Depends(get_db)):
+    # Generate customer code if not provided in data
+    if not hasattr(customer_data, 'code') or not customer_data.code:
+        customer_code = generate_customer_code_with_counter(db)
+    else:
+        customer_code = customer_data.code
+    
     # 🔍 Check if customer with same code exists (active OR deleted)
-    existing_customer = db.query(Customer).filter(Customer.code == customer_data.code).first()
+    existing_customer = db.query(Customer).filter(Customer.code == customer_code).first()
 
     if existing_customer:
         if existing_customer.is_deleted:
             # ✅ Revive soft-deleted customer
-            for field, value in customer_data.dict().items():
+            for field, value in customer_data.dict(exclude={'code'}).items():
                 setattr(existing_customer, field, value)
             existing_customer.is_deleted = False
             existing_customer.deleted_at = None
@@ -80,7 +103,7 @@ async def create_customer(customer_data: CustomerCreate, db: Session = Depends(g
             # ❌ Prevent duplicate active codes
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Customer dengan code '{customer_data.code}' sudah ada."
+                detail=f"Customer dengan code '{customer_code}' sudah ada."
             )
 
     # 🔍 Validate currency
@@ -94,8 +117,10 @@ async def create_customer(customer_data: CustomerCreate, db: Session = Depends(g
             detail=f"Currency with ID '{customer_data.currency_id}' not found."
         )
 
-    # ✅ Create a new customer
-    customer = Customer(**customer_data.dict())
+    # ✅ Create a new customer with generated code
+    customer_dict = customer_data.dict()
+    customer_dict['code'] = customer_code  # Set the generated code
+    customer = Customer(**customer_dict)
     db.add(customer)
     db.commit()
     db.refresh(customer)

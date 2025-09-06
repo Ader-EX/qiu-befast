@@ -13,7 +13,12 @@ class VendorBase(BaseModel):
     top_id: int
     is_active: bool = True
 
-class VendorCreate(VendorBase):
+class VendorCreate(BaseModel):
+    name: str
+    address: str
+    currency_id: int
+    top_id: int
+    is_active: bool = True
     pass
 
 class VendorUpdate(VendorBase):
