@@ -17,7 +17,7 @@
       <!-- HEADER -->
       <div class="header">
         <img
-          src="{{ url_for('static', path='logo.png') }}"
+          src="{{ company.logo_url }}"
           style="width: 150px; height: auto"
           alt="Logo"
         />
@@ -58,13 +58,14 @@
           <div class="title">Kpd Yth.</div>
           <div class="info-row">
             <div class="label">Nama Vendor</div>
-            <div class="value">{{ pembelian.vendor_display }}</div>
+            <div class="value">
+              {{ pembelian.vend_rel.name if pembelian.vend_rel else '—' }}
+            </div>
           </div>
           <div class="info-row">
             <div class="label">Alamat</div>
             <div class="value">
-              {{ pembelian.vendor_address_display if
-              pembelian.vendor_address_display else '-' }}
+              {{ pembelian.vend_rel.address if pembelian.vend_rel else '—' }}
             </div>
           </div>
           <div class="info-row">

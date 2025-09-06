@@ -37,36 +37,151 @@ UPLOAD_DIR = os.getenv("STATIC_URL")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_FILE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/jpg"]
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-
 def calculate_item_totals(item: PenjualanItem) -> None:
     """
-    Line totals:
-      base = qty * unit_price
-      taxable_base = base - discount
-      line_tax = taxable_base * (tax% / 100)
-      total_price = taxable_base + line_tax
-    'price_after_tax' is stored for compatibility as a unit-equivalent:
-      price_after_tax = total_price / qty (if qty > 0), else 0
+    Calculate item totals following the exact frontend logic:
+    1. rowSubTotal = unit * qty (pre-discount, pre-tax)
+    2. taxableBase = max(rowSubTotal - discount, 0)
+    3. rowTax = (taxableBase * taxPct) / 100
+    4. rowTotal = taxableBase + rowTax
     """
     qty = Decimal(str(item.qty or 0))
     unit_price = Decimal(str(item.unit_price or 0))
     tax_percentage = Decimal(str(item.tax_percentage or 0))
     discount = Decimal(str(item.discount or 0))
 
-    base = qty * unit_price
-    taxable_base = base - discount
-    if taxable_base < 0:
-        taxable_base = Decimal('0')  # safety clamp
+    # Frontend logic: rowSubTotal = unit * qty
+    row_sub_total = qty * unit_price
+    
+    # Frontend logic: taxableBase = max(rowSubTotal - discount, 0)
+    taxable_base = max(row_sub_total - discount, Decimal('0'))
+    
+    # Frontend logic: rowTax = (taxableBase * taxPct) / 100
+    row_tax = (taxable_base * tax_percentage) / Decimal('100')
+    
+    # Frontend logic: rowTotal = taxableBase + rowTax
+    row_total = taxable_base + row_tax
 
-    line_tax = (taxable_base * tax_percentage) / Decimal('100')
-    total_price = taxable_base + line_tax
+    # Store calculated values
+    item.sub_total = row_sub_total  # This is rowSubTotal in frontend
+    item.total_price = row_total    # This is rowTotal in frontend
+    
+    # For compatibility - price_after_tax as unit equivalent
+    item.price_after_tax = (row_total / qty) if qty > 0 else Decimal('0')
 
-    item.sub_total = base  # before any discount/tax (matches your UI "Sub Total")
-    item.total_price = total_price
 
-    # For compatibility. If you truly need "unit price after tax", this is a
-    # derived average when discount exists.
-    item.price_after_tax = (total_price / qty) if qty else Decimal('0')
+def calculate_penjualan_totals(db: Session, penjualan_id: int):
+    """
+    Calculate penjualan totals following the exact frontend logic
+    """
+    items = db.query(PenjualanItem).filter(PenjualanItem.penjualan_id == penjualan_id).all()
+
+    # Recalculate each item first
+    for item in items:
+        calculate_item_totals(item)
+
+    # Frontend variables
+    sub_total = Decimal('0')  # sum of all rowSubTotal
+    total_item_discounts = Decimal('0')  # sum of all item discounts
+    total_tax = Decimal('0')  # sum of all rowTax
+    grand_total_items = Decimal('0')  # sum of all rowTotal
+
+    # Calculate row-level totals
+    for item in items:
+        qty = Decimal(str(item.qty or 0))
+        unit_price = Decimal(str(item.unit_price or 0))
+        tax_percentage = Decimal(str(item.tax_percentage or 0))
+        discount = Decimal(str(item.discount or 0))
+
+        # Replicate frontend row calculations exactly
+        row_sub_total = unit_price * qty
+        taxable_base = max(row_sub_total - discount, Decimal('0'))
+        row_tax = (taxable_base * tax_percentage) / Decimal('100')
+        row_total = taxable_base + row_tax
+
+        # Accumulate totals
+        sub_total += row_sub_total
+        total_item_discounts += discount
+        total_tax += row_tax
+        grand_total_items += row_total
+
+    # Get penjualan for additional fields
+    penjualan = db.query(Penjualan).filter(Penjualan.id == penjualan_id).first()
+    if not penjualan:
+        raise HTTPException(status_code=404, detail="Penjualan not found")
+
+    additional_discount = Decimal(str(penjualan.additional_discount or 0))
+    expense = Decimal(str(penjualan.expense or 0))
+
+    # Frontend calculation logic
+    subtotal_after_item_discounts = max(sub_total - total_item_discounts, Decimal('0'))
+    final_total_before_tax = max(subtotal_after_item_discounts - additional_discount, Decimal('0'))
+    total = max(sub_total - total_item_discounts, Decimal('0'))  # This is 'total' in frontend
+    grand_total = final_total_before_tax + total_tax + expense
+
+    # Update penjualan with calculated values
+    penjualan.total_subtotal = sub_total  # This is subTotal in frontend
+    penjualan.total_discount = total_item_discounts  # This is totalItemDiscounts in frontend
+    penjualan.additional_discount = additional_discount
+    penjualan.total_before_discount = final_total_before_tax  # This is finalTotalBeforeTax in frontend
+    penjualan.total_tax = total_tax  # This is totalTax in frontend
+    penjualan.expense = expense
+    penjualan.total_price = grand_total  # This is grandTotal in frontend
+    penjualan.total_qty = sum(int(it.qty or 0) for it in items)
+
+    db.commit()
+
+    return {
+        "total_subtotal": sub_total,  # subTotal in frontend
+        "total_discount": total_item_discounts,  # totalItemDiscounts in frontend
+        "additional_discount": additional_discount,
+        "total_before_discount": final_total_before_tax,  # finalTotalBeforeTax in frontend
+        "total_tax": total_tax,  # totalTax in frontend
+        "expense": expense,
+        "total_price": grand_total,  # grandTotal in frontend
+        "total_qty": penjualan.total_qty,
+        "total_grand_total_items": grand_total_items,  # grandTotalItems in frontend
+        "subtotal_after_item_discounts": subtotal_after_item_discounts,  # For debugging
+        "total": total,  # 'total' variable in frontend
+    }
+
+
+
+def calculate_template_totals(penjualan, enhanced_items):
+    """
+    Calculate totals for the HTML template following frontend logic
+    """
+    subtotal_before_discount = Decimal('0')  # Sum of all rowSubTotal
+    total_item_discounts = Decimal('0')      # Sum of all item discounts
+    tax_amount = Decimal('0')                # Sum of all rowTax
+    
+    for item_data in enhanced_items:
+        # These should already be calculated correctly if using the fixed calculate_item_totals
+        subtotal_before_discount += item_data["item_subtotal_before_discount"]
+        total_item_discounts += item_data["item_discount"]
+        tax_amount += item_data["item_tax"]
+
+    # Additional totals
+    additional_discount = Decimal(str(penjualan.additional_discount or 0))
+    expense = Decimal(str(penjualan.expense or 0))
+    
+    # Calculate intermediate values following frontend logic
+    subtotal_after_item_discounts = max(subtotal_before_discount - total_item_discounts, Decimal('0'))
+    final_total_before_tax = max(subtotal_after_item_discounts - additional_discount, Decimal('0'))
+    grand_total = final_total_before_tax + tax_amount + expense
+
+    return {
+        "subtotal": subtotal_before_discount,           # subTotal in frontend
+        "item_discounts": total_item_discounts,         # totalItemDiscounts in frontend  
+        "additional_discount": additional_discount,     
+        "subtotal_after_discounts": subtotal_after_item_discounts,  # subtotalAfterItemDiscounts in frontend
+        "final_total": final_total_before_tax,          # finalTotalBeforeTax in frontend
+        "tax_amount": tax_amount,                       # totalTax in frontend
+        "expense": expense,
+        "grand_total": grand_total,                     # grandTotal in frontend
+        # Keep backward compatibility
+        "total_item_discount": total_item_discounts,
+    }
 
 
 def validate_item_exists(db: Session, item_id: int) -> Item:
@@ -106,73 +221,6 @@ def update_item_stock(db: Session, item_id: int, qty_change: int) -> None:
                    f"Current: {item.total_item}, Change: {qty_change}"
         )
     item.total_item = new_total
-
-def calculate_penjualan_totals(db: Session, penjualan_id: int):
-    items = db.query(PenjualanItem).filter(PenjualanItem.penjualan_id == penjualan_id).all()
-
-    total_subtotal = Decimal('0')
-    total_discount = Decimal('0')
-    total_tax = Decimal('0')
-    total_grand_total_items = Decimal('0')  # Sum of individual item grand totals
-
-    for line in items:
-        # Recompute per the same rules as frontend
-        calculate_item_totals(line)
-
-        qty = Decimal(str(line.qty or 0))
-        unit = Decimal(str(line.unit_price or 0))
-        tax_pct = Decimal(str(line.tax_percentage or 0))
-        discount = Decimal(str(line.discount or 0))
-
-        # Frontend logic: tax calculated on full amount, then discount applied
-        base = qty * unit  # subtotal (unit * qty)
-        unit_with_tax = unit * (Decimal('1') + tax_pct / Decimal('100'))  # unit price including tax
-        total_with_tax = unit_with_tax * qty  # total including tax
-        item_tax = total_with_tax - base  # tax amount for this line
-        item_grand_total = max(total_with_tax - discount, Decimal('0'))  # grand total after discount
-
-        total_subtotal += base
-        total_discount += discount
-        total_tax += item_tax
-        total_grand_total_items += item_grand_total
-
-    penjualan = db.query(Penjualan).filter(Penjualan.id == penjualan_id).first()
-    if not penjualan:
-        raise HTTPException(status_code=404, detail="Penjualan not found")
-
-    additional_discount = Decimal(str(penjualan.additional_discount or 0))
-    expense = Decimal(str(penjualan.expense or 0))
-
-    # Calculate totals to match frontend
-    subtotal_after_item_discounts = total_subtotal - total_discount
-    final_total_before_tax = max(subtotal_after_item_discounts - additional_discount, Decimal('0'))
-    
-    # Grand total should match the sum of individual item grand totals + additional discount effect + expense
-    # But according to your frontend logic, it's: finalTotalBeforeTax + totalTax + expense
-    total_price = final_total_before_tax + total_tax + expense
-
-    penjualan.total_subtotal = total_subtotal
-    penjualan.total_discount = total_discount
-    penjualan.additional_discount = additional_discount
-    penjualan.total_before_discount = final_total_before_tax 
-    penjualan.total_tax = total_tax
-    penjualan.expense = expense
-    penjualan.total_price = total_price
-    penjualan.total_qty = sum(int(it.qty or 0) for it in items)
-
-    db.commit()
-
-    return {
-        "total_subtotal": total_subtotal,
-        "total_discount": total_discount,
-        "additional_discount": additional_discount,
-        "total_before_discount": final_total_before_tax,
-        "total_tax": total_tax,
-        "expense": expense,
-        "total_price": total_price,
-        "total_qty": penjualan.total_qty,
-        "total_grand_total_items": total_grand_total_items,  # For debugging
-    }
 
 
 def finalize_penjualan(db: Session, penjualan_id: int):
@@ -817,7 +865,6 @@ async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
             detail=f"Error archiving penjualan: {str(e)}"
         )
 
-
 @router.get("/{penjualan_id}/invoice/html", response_class=HTMLResponse)
 async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: Session = Depends(get_db)):
     penjualan = (
@@ -836,78 +883,66 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
 
     BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
+    # Use the fixed calculation function to ensure consistency
+    totals_data = calculate_penjualan_totals(db, penjualan_id)
+
     enhanced_items = []
-    subtotal_before_discount = Decimal('0')  # Subtotal before any discounts
-    total_item_discounts = Decimal('0')      # Sum of all item discounts
-    tax_amount = Decimal('0')
     
     for it in penjualan.penjualan_items:
         # FIXED: Use primary_image_url which returns raw path, not full URL
         raw_image_path = it.primary_image_url if it.item_rel else None
         img_url = get_public_image_url(raw_image_path, BASE_URL) if raw_image_path else None
         
-        # Calculate item totals
+        # Use the calculate_item_totals function to ensure consistency
+        calculate_item_totals(it)
+        
+        # Extract calculated values from the item
         qty = Decimal(str(it.qty or 0))
         unit_price = Decimal(str(it.unit_price or 0))
         tax_pct = Decimal(str(it.tax_percentage or 0))
-        item_discount = Decimal(str(it.discount or 0))  # This is the per-item discount
+        item_discount = Decimal(str(it.discount or 0))
         
-        # Calculate item subtotal before discount and tax
-        item_subtotal_before_discount = qty * unit_price
+        # Calculate using the same frontend logic as the fixed function
+        row_sub_total = qty * unit_price  # Before any discounts/tax
+        taxable_base = max(row_sub_total - item_discount, Decimal('0'))
+        item_tax = (taxable_base * tax_pct) / Decimal('100')
+        item_total_price = taxable_base + item_tax
         
-        # Calculate item tax (applied after discount)
-        item_subtotal_after_discount = item_subtotal_before_discount - item_discount
-        item_tax = item_subtotal_after_discount * (tax_pct / Decimal(100))
-        
-        # Total price for this item (after discount + tax)
-        item_total_price = item_subtotal_after_discount + item_tax
+        item_name = it.item_rel.name if it.item_rel else "Unknown Item"
+        satuan_name = it.item_rel.satuan_rel.name if it.item_rel.satuan_rel else "Unknown Satuan"
         
         enhanced_items.append({
             "item": it,
             "image_url": img_url,
-            "item_name": it.item_name,
+            "item_name": item_name,
             "qty": it.qty,
-            "satuan_name": it.satuan_name,
+            "satuan_name": satuan_name,
             "tax_percentage": it.tax_percentage,
             "unit_price": unit_price,
             "item_discount": item_discount,
-            "item_subtotal_before_discount": item_subtotal_before_discount,
-            "item_subtotal_after_discount": item_subtotal_after_discount,
+            "item_subtotal_before_discount": row_sub_total,
+            "item_subtotal_after_discount": taxable_base,
             "item_tax": item_tax,
             "total_price": item_total_price,
             "discount": item_discount,  # Keep for backward compatibility
         })
-        
-        # Accumulate totals
-        subtotal_before_discount += item_subtotal_before_discount
-        total_item_discounts += item_discount
-        tax_amount += item_tax
 
-    # Calculate additional discount and final totals
+    # Get additional values from penjualan
     additional_discount = Decimal(str(penjualan.additional_discount or 0))
     expense = Decimal(str(penjualan.expense or 0))
-    
-    # Calculate subtotal after item discounts but before additional discount
-    subtotal_after_item_discounts = subtotal_before_discount - total_item_discounts
-    
-    # Calculate final total before tax (after all discounts)
-    final_total_before_tax = subtotal_after_item_discounts - additional_discount
-    
-    # Grand total (final total + tax + expense)
-    grand_total = final_total_before_tax + tax_amount + expense
 
-    # Match the template expectations
+    # Use the calculated totals from the function to ensure consistency
     totals = {
-        "subtotal": subtotal_before_discount,           # Raw subtotal before any discounts
-        "item_discounts": total_item_discounts,         # Sum of all per-item discounts  
-        "additional_discount": additional_discount,     # Additional discount from penjualan
-        "subtotal_after_discounts": subtotal_after_item_discounts,  # After item discounts
-        "final_total": final_total_before_tax,          # After all discounts, before tax
-        "tax_amount": tax_amount,
+        "subtotal": totals_data["total_subtotal"],                    # subTotal from frontend
+        "item_discounts": totals_data["total_discount"],              # totalItemDiscounts from frontend
+        "additional_discount": additional_discount,     
+        "subtotal_after_discounts": totals_data["subtotal_after_item_discounts"],  # subtotalAfterItemDiscounts from frontend
+        "final_total": totals_data["total_before_discount"],          # finalTotalBeforeTax from frontend
+        "tax_amount": totals_data["total_tax"],                       # totalTax from frontend
         "expense": expense,
-        "grand_total": grand_total,
+        "grand_total": totals_data["total_price"],                    # grandTotal from frontend
         # Keep backward compatibility
-        "total_item_discount": total_item_discounts,  # Your original key
+        "total_item_discount": totals_data["total_discount"],
     }
 
     return templates.TemplateResponse(
@@ -919,7 +954,7 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
             "totals": totals,
             "company": {
                 "name": "PT. Jayagiri Indo Asia",
-                "logo_url": get_public_image_url("logo.png", BASE_URL),  # FIXED: Use helper function
+                "logo_url": get_public_image_url("logo.png", BASE_URL),
                 "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
                 "website": "www.qiupart.com",
                 "bank_name": "Bank Mandiri",

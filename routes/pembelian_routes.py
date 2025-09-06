@@ -499,7 +499,7 @@ async def update_pembelian(
                 new_item = PembelianItem(
                     pembelian_id=pembelian_id,
                     item_id=item.id,
-                    item_name=item.name,
+
                     qty=d["qty"],
                     unit_price=d["unit_price"],
                     tax_percentage=d["tax_percentage"],
@@ -810,7 +810,116 @@ async def get_pembelian_summary(db: Session = Depends(get_db)):
         "unpaid_value": unpaid_value
     }
 
+# First, add these calculation functions for Pembelian (similar to Penjualan)
 
+def calculate_pembelian_item_totals(item: PembelianItem) -> None:
+    """
+    Calculate pembelian item totals following the exact frontend logic:
+    1. rowSubTotal = unit * qty (pre-discount, pre-tax)
+    2. taxableBase = max(rowSubTotal - discount, 0)
+    3. rowTax = (taxableBase * taxPct) / 100
+    4. rowTotal = taxableBase + rowTax
+    """
+    qty = Decimal(str(item.qty or 0))
+    unit_price = Decimal(str(item.unit_price or 0))
+    tax_percentage = Decimal(str(item.tax_percentage or 0))
+    discount = Decimal(str(item.discount or 0))
+
+    # Frontend logic: rowSubTotal = unit * qty
+    row_sub_total = qty * unit_price
+    
+    # Frontend logic: taxableBase = max(rowSubTotal - discount, 0)
+    taxable_base = max(row_sub_total - discount, Decimal('0'))
+    
+    # Frontend logic: rowTax = (taxableBase * taxPct) / 100
+    row_tax = (taxable_base * tax_percentage) / Decimal('100')
+    
+    # Frontend logic: rowTotal = taxableBase + rowTax
+    row_total = taxable_base + row_tax
+
+    # Store calculated values
+    item.sub_total = row_sub_total  # This is rowSubTotal in frontend
+    item.total_price = row_total    # This is rowTotal in frontend
+    
+    # For compatibility - price_after_tax as unit equivalent
+    item.price_after_tax = (row_total / qty) if qty > 0 else Decimal('0')
+
+
+def calculate_pembelian_totals(db: Session, pembelian_id: int):
+    """
+    Calculate pembelian totals following the exact frontend logic
+    """
+    items = db.query(PembelianItem).filter(PembelianItem.pembelian_id == pembelian_id).all()
+
+    # Recalculate each item first
+    for item in items:
+        calculate_pembelian_item_totals(item)
+
+    # Frontend variables
+    sub_total = Decimal('0')  # sum of all rowSubTotal
+    total_item_discounts = Decimal('0')  # sum of all item discounts
+    total_tax = Decimal('0')  # sum of all rowTax
+    grand_total_items = Decimal('0')  # sum of all rowTotal
+
+    # Calculate row-level totals
+    for item in items:
+        qty = Decimal(str(item.qty or 0))
+        unit_price = Decimal(str(item.unit_price or 0))
+        tax_percentage = Decimal(str(item.tax_percentage or 0))
+        discount = Decimal(str(item.discount or 0))
+
+        # Replicate frontend row calculations exactly
+        row_sub_total = unit_price * qty
+        taxable_base = max(row_sub_total - discount, Decimal('0'))
+        row_tax = (taxable_base * tax_percentage) / Decimal('100')
+        row_total = taxable_base + row_tax
+
+        # Accumulate totals
+        sub_total += row_sub_total
+        total_item_discounts += discount
+        total_tax += row_tax
+        grand_total_items += row_total
+
+    # Get pembelian for additional fields
+    pembelian = db.query(Pembelian).filter(Pembelian.id == pembelian_id).first()
+    if not pembelian:
+        raise HTTPException(status_code=404, detail="Pembelian not found")
+
+    additional_discount = Decimal(str(pembelian.additional_discount or 0))
+    expense = Decimal(str(pembelian.expense or 0))
+
+    # Frontend calculation logic
+    subtotal_after_item_discounts = max(sub_total - total_item_discounts, Decimal('0'))
+    final_total_before_tax = max(subtotal_after_item_discounts - additional_discount, Decimal('0'))
+    grand_total = final_total_before_tax + total_tax + expense
+
+    # Update pembelian with calculated values
+    pembelian.total_subtotal = sub_total
+    pembelian.total_discount = total_item_discounts
+    pembelian.additional_discount = additional_discount
+    pembelian.total_before_discount = final_total_before_tax
+    pembelian.total_tax = total_tax
+    pembelian.expense = expense
+    pembelian.total_price = grand_total
+    pembelian.total_qty = sum(int(it.qty or 0) for it in items)
+
+    db.commit()
+
+    return {
+        "total_subtotal": sub_total,
+        "total_discount": total_item_discounts,
+        "additional_discount": additional_discount,
+        "total_before_discount": final_total_before_tax,
+        "total_tax": total_tax,
+        "expense": expense,
+        "total_price": grand_total,
+        "total_qty": pembelian.total_qty,
+        "total_grand_total_items": grand_total_items,
+        "subtotal_after_item_discounts": subtotal_after_item_discounts,
+    }
+
+
+# Updated Pembelian Invoice Endpoint
 @router.get("/{pembelian_id}/invoice/html", response_class=HTMLResponse)
 async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: Session = Depends(get_db)):
     pembelian = (
@@ -828,79 +937,68 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
 
     BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
+    # Use the fixed calculation function to ensure consistency
+    totals_data = calculate_pembelian_totals(db, pembelian_id)
+
     enhanced_items = []
-    subtotal_before_discount = Decimal('0')  # Subtotal before any discounts
-    total_item_discounts = Decimal('0')      # Sum of all item discounts
-    tax_amount = Decimal('0')
     
     for it in pembelian.pembelian_items:
         # FIXED: Use primary_image_url which returns raw path, not full URL
         raw_image_path = it.primary_image_url if it.item_rel else None
         img_url = get_public_image_url(raw_image_path, BASE_URL) if raw_image_path else None
         
-        # Calculate item totals
+        # Use the calculate_pembelian_item_totals function to ensure consistency
+        calculate_pembelian_item_totals(it)
+        
+        # Extract calculated values from the item
         qty = Decimal(str(it.qty or 0))
         unit_price = Decimal(str(it.unit_price or 0))
         tax_pct = Decimal(str(it.tax_percentage or 0))
-        item_discount = Decimal(str(it.discount or 0))  # This is the per-item discount
+        item_discount = Decimal(str(it.discount or 0))
         
-        # Calculate item subtotal before discount and tax
-        item_subtotal_before_discount = qty * unit_price
+        # Calculate using the same frontend logic as the fixed function
+        row_sub_total = qty * unit_price  # Before any discounts/tax
+        taxable_base = max(row_sub_total - item_discount, Decimal('0'))
+        item_tax = (taxable_base * tax_pct) / Decimal('100')
+        item_total_price = taxable_base + item_tax
         
-        # Calculate item tax (applied after discount)
-        item_subtotal_after_discount = item_subtotal_before_discount - item_discount
-        item_tax = item_subtotal_after_discount * (tax_pct / Decimal(100))
-        
-        # Total price for this item (after discount + tax)
-        item_total_price = item_subtotal_after_discount + item_tax
+        # FIXED: Use it.item_rel.name instead of it.item_name
+        item_name = it.item_rel.name if it.item_rel else "Unknown Item"
+        satuan_name = it.item_rel.satuan_rel.name if it.item_rel.satuan_rel else "Unknown Satuan"
         
         enhanced_items.append({
             "item": it,
             "image_url": img_url,
-            "item_name": it.item_name,
+            "item_name": item_name,  
             "qty": it.qty,
-            "satuan_name": it.satuan_name,
+            "satuan_name": satuan_name,
             "tax_percentage": it.tax_percentage,
             "unit_price": unit_price,
             "item_discount": item_discount,
-            "item_subtotal_before_discount": item_subtotal_before_discount,
-            "item_subtotal_after_discount": item_subtotal_after_discount,
+            "item_subtotal_before_discount": row_sub_total,
+            "item_subtotal_after_discount": taxable_base,
             "item_tax": item_tax,
             "total_price": item_total_price,
         })
-        
-        # Accumulate totals
-        subtotal_before_discount += item_subtotal_before_discount
-        total_item_discounts += item_discount
-        tax_amount += item_tax
 
-    # Calculate additional discount and final totals
+    # Get additional values from pembelian
     additional_discount = Decimal(str(pembelian.additional_discount or 0))
     expense = Decimal(str(pembelian.expense or 0))
-    
-    # Calculate subtotal after item discounts but before additional discount
-    subtotal_after_item_discounts = subtotal_before_discount - total_item_discounts
-    
-    # Calculate final total before tax (after all discounts)
-    final_total_before_tax = subtotal_after_item_discounts - additional_discount
-    
-    # Grand total (final total + tax + expense)
-    grand_total = final_total_before_tax + tax_amount + expense
 
-    # Match the template expectations
+    # Use the calculated totals from the function to ensure consistency
     totals = {
-        "subtotal": subtotal_before_discount,
-        "item_discounts": total_item_discounts,
+        "subtotal": totals_data["total_subtotal"],
+        "item_discounts": totals_data["total_discount"],
         "additional_discount": additional_discount,
-        "subtotal_after_discounts": subtotal_after_item_discounts,
-        "final_total": final_total_before_tax,
-        "tax_amount": tax_amount,
+        "subtotal_after_discounts": totals_data["subtotal_after_item_discounts"],
+        "final_total": totals_data["total_before_discount"],
+        "tax_amount": totals_data["total_tax"],
         "expense": expense,
-        "grand_total": grand_total,
+        "grand_total": totals_data["total_price"],
         # Keep backward compatibility
-        "subtotal_before_tax": subtotal_before_discount,
-        "total_item_discounts": total_item_discounts,
-        "total_before_tax": final_total_before_tax,
+        "subtotal_before_tax": totals_data["total_subtotal"],
+        "total_item_discounts": totals_data["total_discount"],
+        "total_before_tax": totals_data["total_before_discount"],
     }
 
     return templates.TemplateResponse(

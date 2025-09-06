@@ -76,6 +76,27 @@ class Pembelian(Base,SoftDeleteMixin):
     def remaining(self) -> Decimal:
         return self.total_price - (self.total_paid + self.total_return)
 
+    @hybrid_property
+    def vendor_display(self) -> str:
+        """
+        Return vendor name - prioritize snapshot name, fallback to relationship
+        """
+        if self.vendor_name:
+            return self.vendor_name
+        if self.vend_rel:
+            return self.vend_rel.name
+        return "—"
+    
+    @hybrid_property
+    def warehouse_display(self) -> str:
+        """
+        Return warehouse name - prioritize snapshot name, fallback to relationship
+        """
+        if self.warehouse_name:
+            return self.warehouse_name
+        if self.warehouse_rel:
+            return self.warehouse_rel.name
+        return "—"
 
     @hybrid_property
     def vendor_address_display(self) -> str:

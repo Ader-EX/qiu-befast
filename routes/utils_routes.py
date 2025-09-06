@@ -164,7 +164,7 @@ async def get_laba_rugi(
         total_penjualan=total_penjualan,
         profit_or_loss=profit_or_loss
     )
-
+    
 @router.get(
     "/penjualan",
     status_code=status.HTTP_200_OK,
@@ -190,27 +190,38 @@ async def get_penjualan_laporan(
         db.query(
             Penjualan.id,
             Penjualan.sales_date.label("date"),
-            Penjualan.customer_name.label("customer_name_stored"),
+            Penjualan.customer_name,
             Customer.name.label("customer_name_rel"),
-            Customer.kode_lambung,
+            Customer.kode_lambung.label("customer_kode_lambung_rel"),
             Penjualan.no_penjualan,
             Penjualan.status_pembayaran,
         )
         .join(Customer, Customer.id == Penjualan.customer_id, isouter=True)
         .filter(
-            Penjualan.is_deleted.is_(False),
+            Penjualan.is_deleted == False,  # Use == False like working endpoint
             Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
-            Penjualan.sales_date >= from_date.date(),
-            Penjualan.sales_date <= to_date.date(),
+            Penjualan.sales_date >= from_date,  # Don't convert to .date()
+            Penjualan.sales_date <= to_date,    # Don't convert to .date()
         )
         .order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc())
     )
 
     # Get total count
     total_count = sales_query.count()
+    print(f"DEBUG: Total count: {total_count}")
+    print(f"DEBUG: Date range: {from_date} to {to_date}")
 
     # Get paginated sales
     sales = sales_query.offset(skip).limit(limit).all()
+    print(f"DEBUG: Sales found: {len(sales)}")
+    
+    if sales:
+        print(f"DEBUG: First sale: {sales[0].no_penjualan}, date: {sales[0].date}")
+    else:
+        # Let's check what sales exist
+        all_sales = db.query(Penjualan).filter(Penjualan.is_deleted == False).all()
+        print(f"DEBUG: All sales in DB: {[(s.no_penjualan, s.sales_date, s.status_penjualan) for s in all_sales[:3]]}")
+
 
     def _dec(x) -> Decimal:
         return Decimal(str(x or 0))
@@ -218,17 +229,15 @@ async def get_penjualan_laporan(
     report_rows: List[SalesReportRow] = []
     
     for sale in sales:
-        # Get all items for this sale with proper Item.name
+        # Get all items for this sale
         items_query = (
             db.query(
-                PenjualanItem.item_sku,
-                PenjualanItem.item_name,
                 PenjualanItem.qty,
                 PenjualanItem.unit_price,
                 PenjualanItem.discount,
                 PenjualanItem.tax_percentage,
                 Item.code.label("item_code"),
-                Item.name.label("actual_item_name")  # Get the actual item name from Item model
+                Item.name.label("item_name")
             )
             .join(Item, Item.id == PenjualanItem.item_id, isouter=True)
             .filter(PenjualanItem.penjualan_id == sale.id)
@@ -237,17 +246,16 @@ async def get_penjualan_laporan(
 
         # Concatenate item details and calculate totals
         item_codes = []
-        item_names = []  # Separate list for item names
+        item_names = []
         total_subtotal = Decimal("0")
         total_discount = Decimal("0")
         total_tax = Decimal("0")
         total_qty = 0
 
         for item in items_query:
-            # Build item detail strings
-            item_code = item.item_code or item.item_sku or "N/A"
-            # Use actual Item.name first, fallback to PenjualanItem.item_name
-            item_name = item.actual_item_name or item.item_name or "N/A"
+            # Get item details
+            item_code = item.item_code or "N/A"
+            item_name = item.item_name or "N/A"
             qty = int(item.qty or 0)
             
             item_codes.append(item_code)
@@ -279,18 +287,22 @@ async def get_penjualan_laporan(
             final_total = Decimal("0")
         grand_total = final_total + total_tax
 
+        # Get customer info
+        customer_name = sale.customer_name or sale.customer_name_rel or "—"
+        kode_lambung = sale.customer_kode_lambung_rel or ""
+
         report_rows.append(
             SalesReportRow(
                 date=sale.date,
-                customer=sale.customer_name_stored or sale.customer_name_rel or "—",
-                kode_lambung=getattr(sale, "kode_lambung", None),
+                customer=customer_name,
+                kode_lambung=kode_lambung,
                 no_penjualan=sale.no_penjualan,
                 status=(sale.status_pembayaran.name.capitalize() if hasattr(sale.status_pembayaran, "name")
                         else str(sale.status_pembayaran)),
-                item_code=item_codes_str,  # Concatenated item codes
-                item_name=item_names_str,  # Concatenated actual item names from Item.name
+                item_code=item_codes_str,
+                item_name=item_names_str,
                 qty=total_qty,
-                price=total_subtotal / total_qty if total_qty > 0 else Decimal("0"),  # Average price
+                price=total_subtotal / total_qty if total_qty > 0 else Decimal("0"),
                 sub_total=total_subtotal,
                 total=final_total,
                 tax=total_tax,
@@ -308,6 +320,171 @@ async def get_penjualan_laporan(
     )
 
 
+@router.get(
+    "/penjualan/download",
+    status_code=status.HTTP_200_OK,
+    summary="Download Laporan Penjualan as CSV (all records)",
+)
+async def download_penjualan_laporan(
+        from_date: datetime = Query(..., description="Start datetime (inclusive)"),
+        to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
+        db: Session = Depends(get_db),
+):
+    """
+    Download complete sales report as CSV without pagination.
+    Returns all records matching the date filter - one row per sale with concatenated items.
+    """
+    
+    if to_date is None:
+        to_date = datetime.now()
+
+    # Base query to get sales (same as the main endpoint)
+    sales_query = (
+        db.query(
+            Penjualan.id,
+            Penjualan.sales_date.label("date"),
+            Penjualan.customer_name,
+            Customer.name.label("customer_name_rel"),
+            Customer.kode_lambung.label("customer_kode_lambung_rel"),
+            Penjualan.no_penjualan,
+            Penjualan.status_pembayaran,
+        )
+        .join(Customer, Customer.id == Penjualan.customer_id, isouter=True)
+        .filter(
+            Penjualan.is_deleted == False,
+            Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
+            Penjualan.sales_date >= from_date,
+            Penjualan.sales_date <= to_date,
+        )
+        .order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc())
+    )
+
+    # Get all sales without pagination
+    sales = sales_query.all()
+
+    def _dec(x) -> Decimal:
+        return Decimal(str(x or 0))
+
+    # Create CSV content with proper encoding
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    
+    # Write header
+    writer.writerow([
+        'Date',
+        'Customer',
+        'Kode Lambung',
+        'No Penjualan',
+        'Status',
+        'Item Code',
+        'Item Name',
+        'Qty',
+        'Price',
+        'Sub Total',
+        'Total',
+        'Tax',
+        'Grand Total'
+    ])
+
+    # Process each sale (same logic as main endpoint)
+    for sale in sales:
+        # Get all items for this sale
+        items_query = (
+            db.query(
+                PenjualanItem.qty,
+                PenjualanItem.unit_price,
+                PenjualanItem.discount,
+                PenjualanItem.tax_percentage,
+                Item.code.label("item_code"),
+                Item.name.label("item_name")
+            )
+            .join(Item, Item.id == PenjualanItem.item_id, isouter=True)
+            .filter(PenjualanItem.penjualan_id == sale.id)
+            .all()
+        )
+
+        # Concatenate item details and calculate totals
+        item_codes = []
+        item_names = []
+        total_subtotal = Decimal("0")
+        total_discount = Decimal("0")
+        total_tax = Decimal("0")
+        total_qty = 0
+
+        for item in items_query:
+            # Get item details
+            item_code = item.item_code or "N/A"
+            item_name = item.item_name or "N/A"
+            qty = int(item.qty or 0)
+            
+            item_codes.append(item_code)
+            item_names.append(item_name)
+            
+            # Calculate totals
+            price = _dec(item.unit_price)
+            item_subtotal = price * qty
+            item_discount = _dec(item.discount)
+            item_total = item_subtotal - item_discount
+            if item_total < 0:
+                item_total = Decimal("0")
+            
+            tax_pct = Decimal(str(item.tax_percentage or 0))
+            item_tax = (item_total * tax_pct / Decimal(100))
+            
+            total_subtotal += item_subtotal
+            total_discount += item_discount
+            total_tax += item_tax
+            total_qty += qty
+
+        # Join items with comma
+        item_codes_str = ", ".join(item_codes) if item_codes else "No items"
+        item_names_str = ", ".join(item_names) if item_names else "No items"
+        
+        # Calculate final totals
+        final_total = total_subtotal - total_discount
+        if final_total < 0:
+            final_total = Decimal("0")
+        grand_total = final_total + total_tax
+
+        # Get customer info
+        customer_name = sale.customer_name or sale.customer_name_rel or "—"
+        kode_lambung = sale.customer_kode_lambung_rel or ""
+
+        # Write CSV row
+        writer.writerow([
+            sale.date.strftime('%d/%m/%Y') if sale.date else '',
+            customer_name,
+            kode_lambung,
+            sale.no_penjualan or '',
+            (sale.status_pembayaran.name.capitalize() if hasattr(sale.status_pembayaran, "name")
+             else str(sale.status_pembayaran)),
+            item_codes_str,
+            item_names_str,
+            str(total_qty),
+            str(float(total_subtotal / total_qty if total_qty > 0 else Decimal("0"))),
+            str(float(total_subtotal)),
+            str(float(final_total)),
+            str(float(total_tax)),
+            str(float(grand_total))
+        ])
+
+    # Get the CSV content
+    csv_content = output.getvalue()
+    output.close()
+    
+    # Generate filename
+    filename = f"laporan_penjualan_{from_date:%Y%m%d}_{to_date:%Y%m%d}.csv"
+    
+    # Return as streaming response with proper headers
+    return StreamingResponse(
+        io.BytesIO(csv_content.encode('utf-8-sig')),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "text/csv; charset=utf-8"
+        }
+    )
+    
 @router.get("/pembelian")
 async def get_pembelian_laporan(
     from_date: datetime = Query(...),
@@ -327,7 +504,6 @@ async def get_pembelian_laporan(
         db.query(
             Pembelian.id,
             Pembelian.sales_date.label("date"),
-            Pembelian.vendor_name.label("vendor_name_stored"),
             Vendor.name.label("vendor_name_rel"),
             Pembelian.no_pembelian,
             Pembelian.status_pembayaran,
@@ -357,14 +533,13 @@ async def get_pembelian_laporan(
         # Get all items for this purchase with proper Item.name
         items_query = (
             db.query(
-                PembelianItem.item_sku,
-                PembelianItem.item_name,
+                Item.sku.label("item_sku"),
+                Item.name.label("item_name"),
+                Item.code.label("item_code"),
                 PembelianItem.qty,
                 PembelianItem.unit_price,
                 PembelianItem.discount,
                 PembelianItem.tax_percentage,
-                Item.code.label("item_code"),
-                Item.name.label("actual_item_name")  # Get the actual item name from Item model
             )
             .join(Item, Item.id == PembelianItem.item_id, isouter=True)
             .filter(PembelianItem.pembelian_id == purchase.id)
@@ -382,8 +557,8 @@ async def get_pembelian_laporan(
         for item in items_query:
             # Build item detail strings
             item_code = item.item_code or item.item_sku or "N/A"
-            # Use actual Item.name first, fallback to PembelianItem.item_name
-            item_name = item.actual_item_name or item.item_name or "N/A"
+            # Use Item.name from the joined table
+            item_name = item.item_name or "N/A"
             qty = int(item.qty or 0)
             
             item_codes.append(item_code)
@@ -418,7 +593,7 @@ async def get_pembelian_laporan(
         report_rows.append(
             PurchaseReportRow(
                 date=purchase.date,
-                vendor=purchase.vendor_name_stored or purchase.vendor_name_rel or "—",
+                vendor=purchase.vendor_name_rel or "—",
                 no_pembelian=purchase.no_pembelian,
                 status=(purchase.status_pembayaran.name.capitalize() if hasattr(purchase.status_pembayaran, "name")
                         else str(purchase.status_pembayaran)),
@@ -444,131 +619,6 @@ async def get_pembelian_laporan(
 
 
 @router.get(
-    "/penjualan/download",
-    status_code=status.HTTP_200_OK,
-    summary="Download Laporan Penjualan as CSV (all records)",
-)
-async def download_penjualan_laporan(
-        from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-        to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
-        db: Session = Depends(get_db),
-):
-    """
-    Download complete sales report as CSV without pagination.
-    Returns all records matching the date filter.
-    """
-    
-    if to_date is None:
-        to_date = datetime.now()
-
-    # Query all records without pagination
-    query = (
-        db.query(
-            Penjualan.sales_date.label("date"),
-            Penjualan.customer_name.label("customer_name_stored"),
-            Customer.name.label("customer_name_rel"),
-            Customer.kode_lambung,
-            Penjualan.no_penjualan,
-            Penjualan.status_pembayaran,
-            PenjualanItem.item_sku,
-            PenjualanItem.item_name,
-            PenjualanItem.qty,
-            PenjualanItem.unit_price,
-            PenjualanItem.discount,
-            PenjualanItem.tax_percentage,
-            Item.code.label("item_code"),
-            Item.name.label("actual_item_name")  # Get actual item name
-        )
-        .join(Customer, Customer.id == Penjualan.customer_id, isouter=True)
-        .join(PenjualanItem, PenjualanItem.penjualan_id == Penjualan.id)
-        .join(Item, Item.id == PenjualanItem.item_id, isouter=True)  # Join with Item table
-        .filter(
-            Penjualan.is_deleted.is_(False),
-            Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
-            Penjualan.sales_date >= from_date.date(),
-            Penjualan.sales_date <= to_date.date(),
-        )
-        .order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc(), PenjualanItem.id.asc())
-    )
-
-    rows = query.all()
-
-    def _dec(x) -> Decimal:
-        return Decimal(str(x or 0))
-
-    # Create CSV content with proper encoding
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    
-    # Write header
-    writer.writerow([
-        'Date',
-        'Customer',
-        'Kode Lambung',
-        'No Penjualan',
-        'Status',
-        'Item Code',
-        'Item Name',
-        'Qty',
-        'Price',
-        'Sub Total',
-        'Total',
-        'Tax',
-        'Grand Total'
-    ])
-
-    # Write data rows
-    for r in rows:
-        qty = int(r.qty or 0)
-        price = _dec(r.unit_price)
-        sub_total = price * qty
-        discount = _dec(r.discount)
-        total = sub_total - discount
-        if total < 0:
-            total = Decimal("0")
-        tax_pct = Decimal(str(r.tax_percentage or 0))
-        tax = (total * tax_pct / Decimal(100))
-        grand_total = total + tax
-
-        # Use actual Item.name first, fallback to PenjualanItem.item_name
-        actual_item_name = r.actual_item_name or r.item_name or ''
-
-        writer.writerow([
-            r.date.strftime('%d/%m/%Y') if r.date else '',
-            r.customer_name_stored or r.customer_name_rel or "—",
-            getattr(r, "kode_lambung", None) or '',
-            r.no_penjualan or '',
-            (r.status_pembayaran.name.capitalize() if hasattr(r.status_pembayaran, "name")
-             else str(r.status_pembayaran)),
-            r.item_code or '',
-            actual_item_name,  # Use the actual item name from Item model
-            str(qty),
-            str(float(price)),
-            str(float(sub_total)),
-            str(float(total)),
-            str(float(tax)),
-            str(float(grand_total))
-        ])
-
-    # Get the CSV content
-    csv_content = output.getvalue()
-    output.close()
-    
-    # Generate filename
-    filename = f"laporan_penjualan_{from_date:%Y%m%d}_{to_date:%Y%m%d}.csv"
-    
-    # Return as streaming response with proper headers
-    return StreamingResponse(
-        io.BytesIO(csv_content.encode('utf-8-sig')),
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Type": "text/csv; charset=utf-8"
-        }
-    )
-
-
-@router.get(
     "/pembelian/download",
     status_code=status.HTTP_200_OK,
     summary="Download Laporan Pembelian as CSV (all records)",
@@ -580,42 +630,32 @@ async def download_pembelian_laporan(
 ):
     """
     Download complete purchase report as CSV without pagination.
-    Returns all records matching the date filter.
+    Returns one row per purchase with concatenated item details.
     """
     
     if to_date is None:
         to_date = datetime.now()
 
-    # Query all records without pagination
-    query = (
+    # Base query to get purchases (same as your working /pembelian endpoint)
+    purchases_query = (
         db.query(
+            Pembelian.id,
             Pembelian.sales_date.label("date"),
-            Pembelian.vendor_name.label("vendor_name_stored"),
             Vendor.name.label("vendor_name_rel"),
             Pembelian.no_pembelian,
             Pembelian.status_pembayaran,
-            PembelianItem.item_sku,
-            PembelianItem.item_name,
-            PembelianItem.qty,
-            PembelianItem.unit_price,
-            PembelianItem.discount,
-            PembelianItem.tax_percentage,
-            Item.code.label("item_code"),
-            Item.name.label("actual_item_name")  # Get actual item name
         )
         .join(Vendor, Vendor.id == Pembelian.vendor_id, isouter=True)
-        .join(PembelianItem, PembelianItem.pembelian_id == Pembelian.id)
-        .join(Item, Item.id == PembelianItem.item_id, isouter=True)  # Join with Item table
         .filter(
             Pembelian.is_deleted.is_(False),
             Pembelian.status_pembelian != StatusPembelianEnum.DRAFT,
             Pembelian.sales_date >= from_date.date(),
             Pembelian.sales_date <= to_date.date(),
         )
-        .order_by(Pembelian.sales_date.asc(), Pembelian.no_pembelian.asc(), PembelianItem.id.asc())
+        .order_by(Pembelian.sales_date.asc(), Pembelian.no_pembelian.asc())
     )
 
-    rows = query.all()
+    purchases = purchases_query.all()
 
     def _dec(x) -> Decimal:
         return Decimal(str(x or 0))
@@ -640,35 +680,81 @@ async def download_pembelian_laporan(
         'Grand Total'
     ])
 
-    # Write data rows
-    for r in rows:
-        qty = int(r.qty or 0)
-        price = _dec(r.unit_price)
-        sub_total = price * qty
-        discount = _dec(r.discount)
-        total = sub_total - discount
-        if total < 0:
-            total = Decimal("0")
-        tax_pct = Decimal(str(r.tax_percentage or 0))
-        tax = (total * tax_pct / Decimal(100))
-        grand_total = total + tax
+    # Process each purchase and concatenate items
+    for purchase in purchases:
+        # Get all items for this purchase (same as your working /pembelian endpoint)
+        items_query = (
+            db.query(
+                Item.sku.label("item_sku"),
+                Item.name.label("item_name"),
+                Item.code.label("item_code"),
+                PembelianItem.qty,
+                PembelianItem.unit_price,
+                PembelianItem.discount,
+                PembelianItem.tax_percentage,
+            )
+            .join(Item, Item.id == PembelianItem.item_id, isouter=True)
+            .filter(PembelianItem.pembelian_id == purchase.id)
+            .all()
+        )
 
-        # Use actual Item.name first, fallback to PembelianItem.item_name
-        actual_item_name = r.actual_item_name or r.item_name or ''
+        # Concatenate item details and calculate totals
+        item_codes = []
+        item_names = []
+        total_subtotal = Decimal("0")
+        total_discount = Decimal("0")
+        total_tax = Decimal("0")
+        total_qty = 0
 
+        for item in items_query:
+            # Build item detail strings (same logic as your working endpoint)
+            item_code = item.item_code or item.item_sku or "N/A"
+            item_name = item.item_name or "N/A"
+            qty = int(item.qty or 0)
+            
+            item_codes.append(item_code)
+            item_names.append(item_name)
+            
+            # Calculate totals
+            price = _dec(item.unit_price)
+            item_subtotal = price * qty
+            item_discount = _dec(item.discount)
+            item_total = item_subtotal - item_discount
+            if item_total < 0:
+                item_total = Decimal("0")
+            
+            tax_pct = Decimal(str(item.tax_percentage or 0))
+            item_tax = (item_total * tax_pct / Decimal(100))
+            
+            total_subtotal += item_subtotal
+            total_discount += item_discount
+            total_tax += item_tax
+            total_qty += qty
+
+        # Join items with comma
+        item_codes_str = ", ".join(item_codes) if item_codes else "No items"
+        item_names_str = ", ".join(item_names) if item_names else "No items"
+        
+        # Calculate final totals
+        final_total = total_subtotal - total_discount
+        if final_total < 0:
+            final_total = Decimal("0")
+        grand_total = final_total + total_tax
+
+        # Write single row per purchase with concatenated items
         writer.writerow([
-            r.date.strftime('%d/%m/%Y') if r.date else '',
-            r.vendor_name_stored or r.vendor_name_rel or "—",
-            r.no_pembelian or '',
-            (r.status_pembayaran.name.capitalize() if hasattr(r.status_pembayaran, "name")
-             else str(r.status_pembayaran)),
-            r.item_sku or '',
-            actual_item_name,  # Use the actual item name from Item model
-            str(qty),
-            str(float(price)),
-            str(float(sub_total)),
-            str(float(total)),
-            str(float(tax)),
+            purchase.date.strftime('%d/%m/%Y') if purchase.date else '',
+            purchase.vendor_name_rel or "—",
+            purchase.no_pembelian or '',
+            (purchase.status_pembayaran.name.capitalize() if hasattr(purchase.status_pembayaran, "name")
+             else str(purchase.status_pembayaran)),
+            item_codes_str,  # 🔥 Concatenated item codes
+            item_names_str,  # 🔥 Concatenated item names
+            str(total_qty),  # 🔥 Total quantity across all items
+            str(float(total_subtotal / total_qty if total_qty > 0 else Decimal("0"))),  # Average price
+            str(float(total_subtotal)),
+            str(float(final_total)),
+            str(float(total_tax)),
             str(float(grand_total))
         ])
 
