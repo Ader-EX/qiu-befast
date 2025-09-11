@@ -233,7 +233,6 @@ def get_items(
     return {"data": items_out, "total": total_count}
 
 
-
 @router.post("/import-excel", response_model=ImportResult)
 async def import_items_from_excel(
         file: UploadFile = File(...),
@@ -246,7 +245,6 @@ async def import_items_from_excel(
     Import items from Excel/CSV file using the template format.
 
     Expected columns:
-    - Item Code (optional)
     - Nama Item (required)
     - SKU (required, unique)
     - Kategori 1 (optional, by name)
@@ -254,6 +252,8 @@ async def import_items_from_excel(
     - Jumlah Unit (optional, defaults to 0)
     - Harga Jual (required)
     - Satuan Unit (required, by name)
+
+    Note: Item Code will be auto-generated based on item type
     """
 
     # Validate file type
@@ -273,7 +273,6 @@ async def import_items_from_excel(
         df.columns = df.columns.str.strip()
 
         column_mapping = {
-            'Item Code': 'code',
             'Nama Item': 'name',
             'SKU': 'sku',
             'Kategori 1': 'kategori_1',
@@ -296,7 +295,6 @@ async def import_items_from_excel(
         categories_lookup = _build_categories_lookup(db)
         satuans_lookup = _build_satuans_lookup(db)
         existing_skus = _get_existing_skus(db)
-        existing_codes = _get_existing_codes(db)
 
         # Process each row
         result = ImportResult(
@@ -311,11 +309,16 @@ async def import_items_from_excel(
             try:
                 item_data = _process_row(
                     row, index, categories_lookup, satuans_lookup,
-                    existing_skus, existing_codes, default_item_type, update_existing  # Add existing_codes parameter
+                    existing_skus, default_item_type, update_existing
                 )
 
                 if item_data is None:
                     continue  # Skip this row
+
+                # Generate unique item code
+                prefix = get_item_prefix(item_data['type'])
+                item_code = generate_unique_record_code(db, Item, prefix)
+                item_data['code'] = item_code
 
                 # Create or update item
                 if update_existing and item_data['sku'] in existing_skus:
@@ -365,23 +368,12 @@ def _get_existing_skus(db: Session) -> Dict[str, int]:
     return {item.sku: item.id for item in items}
 
 
-def _get_existing_codes(db: Session) -> Dict[str, int]:
-    """Get existing codes to check for duplicates."""
-    items = db.query(Item.code, Item.id).filter(
-        Item.deleted_at.is_(None),
-        Item.code.isnot(None),
-        Item.code != ''
-    ).all()
-    return {item.code: item.id for item in items}
-
-
 def _process_row(
         row,
         index: int,
         categories_lookup: Dict[str, int],
         satuans_lookup: Dict[str, int],
         existing_skus: Dict[str, int],
-        existing_codes: Dict[str, int],  # Add this parameter
         default_item_type: ItemTypeEnum,
         update_existing: bool
 ) -> Optional[Dict[str, Any]]:
@@ -392,17 +384,10 @@ def _process_row(
     if pd.isna(row.get('sku')) or not str(row.get('sku')).strip():
         raise ValueError("SKU is required")
 
-    # Harga Jual defaults to 0 if empty
-
     if pd.isna(row.get('satuan_unit')) or not str(row.get('satuan_unit')).strip():
         raise ValueError("Satuan Unit is required")
 
     sku = str(row['sku']).strip()
-
-    # Check for existing code and skip if it exists
-    code = str(row.get('code', '')).strip() if not pd.isna(row.get('code')) else None
-    if code and code in existing_codes:
-        return None  # Skip this row silently
 
     if sku in existing_skus and not update_existing:
         raise ValueError(f"SKU '{sku}' already exists. Use update_existing=true to update.")
@@ -446,7 +431,6 @@ def _process_row(
             raise ValueError(f"Invalid Jumlah Unit: {row['jumlah_unit']}")
 
     return {
-        'code': code,
         'name': str(row['name']).strip(),
         'sku': sku,
         'type': default_item_type,
@@ -456,8 +440,8 @@ def _process_row(
         'category_two': category_two_id,
         'satuan_id': satuan_id,
         'is_active': True
+        # Note: 'code' will be generated and added in the main function
     }
-
 
 @router.put("/{item_id}", response_model=ItemResponse)
 async def update_item(
