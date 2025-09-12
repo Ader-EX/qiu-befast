@@ -290,7 +290,7 @@ def update_pembayaran(
                     pembelian = db.query(Pembelian).filter(
                         Pembelian.id == detail.pembelian_id,
                         Pembelian.is_deleted == False,
-                        Pembelian.status_pembelian.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
+                        Pembelian.status_pembelian.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED])
                     ).first()
                     if not pembelian:
                         raise HTTPException(
@@ -302,7 +302,7 @@ def update_pembayaran(
                     penjualan = db.query(Penjualan).filter(
                         Penjualan.id == detail.penjualan_id,
                         Penjualan.is_deleted == False,
-                        Penjualan.status_penjualan.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED])
+                        Penjualan.status_penjualan.in_([StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED])
                     ).first()
                     if not penjualan:
                         raise HTTPException(
