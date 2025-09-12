@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, and_, func
+from sqlalchemy import or_, and_, func, cast, Integer
 from typing import List, Optional
 from datetime import datetime, date
 from decimal import Decimal
@@ -136,7 +136,15 @@ def get_pembayarans(
 ):
     """Get list of payment records with filtering"""
 
-    query = db.query(Pembayaran).filter()
+    query = db.query(Pembayaran).filter().order_by(
+        cast(func.substr(Pembayaran.no_pembayaran,
+                         func.length(Pembayaran.no_pembayaran) - 3), Integer).desc(),
+
+        cast(func.substr(Pembayaran.no_pembayaran,
+                         func.length(Pembayaran.no_pembayaran) - 6, 2), Integer).desc(),
+        # Extract sequence number (third part)
+        cast(func.substr(Pembayaran.no_pembayaran, 7, 4), Integer).desc()
+    )
 
     if reference_type and reference_type != "ALL":
         query = query.filter(Pembayaran.reference_type == reference_type)

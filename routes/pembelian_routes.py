@@ -4,7 +4,7 @@ import random
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, selectinload, joinedload
-from sqlalchemy import and_, func, desc
+from sqlalchemy import and_, func, desc, cast, Integer
 from typing import List, Optional
 import uuid
 import os
@@ -281,7 +281,13 @@ async def get_all_pembelian(
         selectinload(Pembelian.attachments),
         selectinload(Pembelian.vend_rel),
         selectinload(Pembelian.warehouse_rel)
-    ).filter(Pembelian.is_deleted == False)
+    ).filter(Pembelian.is_deleted == False).order_by(
+        cast(func.substr(Pembelian.no_pembelian,
+                         func.length(Pembelian.no_pembelian) - 3), Integer).desc(),
+        cast(func.substr(Pembelian.no_pembelian,
+                         func.length(Pembelian.no_pembelian) - 6, 2), Integer).desc(),
+        cast(func.substr(Pembelian.no_pembelian, 7, 4), Integer).desc()
+    )
 
     # Apply filters
     if status_pembelian is not None and status_pembelian != StatusPembelianEnum.ALL:

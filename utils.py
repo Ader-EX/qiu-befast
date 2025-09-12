@@ -158,7 +158,7 @@ def generate_unique_record_number(
             
             # Generate next sequence number
             nomor_urut = max_seq + 1
-            record_number = f"{prefix}/{nomor_urut:03d}/{bulan}/{tahun}"
+            record_number = f"{prefix}/{nomor_urut:04d}/{bulan}/{tahun}"
             
             # Double-check that this exact record number doesn't exist
             existing_check = db.query(model_class).filter(

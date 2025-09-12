@@ -3,7 +3,7 @@ import random
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, selectinload, joinedload
-from sqlalchemy import and_, func, desc
+from sqlalchemy import and_, func, desc, cast, Integer
 from typing import List, Optional
 import uuid
 import os
@@ -383,6 +383,13 @@ async def get_all_penjualan(
             selectinload(Penjualan.warehouse_rel),
         )
         .filter(Penjualan.is_deleted == False)
+        .order_by(
+            cast(func.substr(Penjualan.no_penjualan,
+                             func.length(Penjualan.no_penjualan) - 3), Integer).desc(),
+            cast(func.substr(Penjualan.no_penjualan,
+                             func.length(Penjualan.no_penjualan) - 6, 2), Integer).desc(),
+            cast(func.substr(Penjualan.no_penjualan, 7, 4), Integer).desc()
+        )
     )
 
     if status_penjualan is not None and status_penjualan != StatusPembelianEnum.ALL:

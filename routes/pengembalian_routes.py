@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, cast, Integer
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
@@ -132,7 +132,13 @@ def get_pengembalians(
 ):
     """Get list of return records with filtering"""
 
-    query = db.query(Pengembalian).filter()
+    query = db.query(Pengembalian).filter().order_by(
+        cast(func.substr(Pengembalian.no_pengembalian,
+                         func.length(Pengembalian.no_pengembalian) - 3), Integer).desc(),
+        cast(func.substr(Pengembalian.no_pengembalian,
+                         func.length(Pengembalian.no_pengembalian) - 6, 2), Integer).desc(),
+        cast(func.substr(Pengembalian.no_pengembalian, 7, 4), Integer).desc()
+    )
 
     if reference_type and reference_type != "ALL":
         query = query.filter(Pengembalian.reference_type == reference_type)
