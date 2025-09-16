@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI,  APIRouter
 
@@ -51,7 +52,11 @@ def login(request: RequestDetails, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == request.username, User.is_active == True).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password atau username salah")
-    user.last_login = datetime.utcnow()
+
+    # Mengatur waktu login ke WIB (UTC+7)
+    indonesian_timezone = ZoneInfo("Asia/Jakarta")
+    user.last_login = datetime.now(indonesian_timezone)
+
     hashed_pass = user.password
     if not verify_password(request.password, hashed_pass):
         raise HTTPException(
