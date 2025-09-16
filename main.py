@@ -14,8 +14,8 @@ import os
 
 load_dotenv()
 
+# app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app = FastAPI()
-
 
 from fastapi.openapi.utils import get_openapi
 from fastapi.security import HTTPBearer
