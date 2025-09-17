@@ -97,9 +97,9 @@ def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Dep
 
     # Generate unique return number based on type
     if pengembalian_data.reference_type == PembayaranPengembalianType.PEMBELIAN:
-        pengembalian.no_pengembalian = generate_unique_record_number(db, Pengembalian, "QR/AR")
+        pengembalian.no_pengembalian = generate_unique_record_number(db, Pengembalian, "QP/RET")
     else:
-        pengembalian.no_pengembalian = generate_unique_record_number(db, Pengembalian, "QR/AP")
+        pengembalian.no_pengembalian = generate_unique_record_number(db, Pengembalian, "QP/RET")
 
     pengembalian.created_at = datetime.now()
     pengembalian.status = StatusPembelianEnum.DRAFT

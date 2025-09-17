@@ -472,7 +472,7 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
         validate_item_stock(db, it.item_id, it.qty)
 
     p = Penjualan(
-        no_penjualan=generate_unique_record_number(db, Penjualan, prefix="QP/SI"),
+        no_penjualan=generate_unique_record_number(db, Penjualan, prefix="QP/PRC"),
         warehouse_id=request.warehouse_id,
         customer_id=request.customer_id,
         top_id=request.top_id,
