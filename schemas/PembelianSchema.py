@@ -86,6 +86,7 @@ class AttachmentResponse(BaseModel):
 class PembelianBase(BaseModel):
     no_pembelian: Optional[str] = None
     warehouse_id: Optional[int] = None
+    sumberdana_id : Optional[int] = None
     vendor_id: Optional[str] = None  # String based on your model
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
@@ -96,7 +97,8 @@ class PembelianBase(BaseModel):
 
 class PembelianCreate(BaseModel):
     warehouse_id: Optional[int] = None
-    vendor_id: Optional[str] = None  # String based on your model
+    vendor_id: Optional[str] = None
+    sumberdana_id : Optional[int] = None
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
@@ -114,6 +116,7 @@ class PembelianCreate(BaseModel):
 class PembelianUpdate(BaseModel):
     no_pembelian: Optional[str] = None
     warehouse_id: Optional[int] = None
+    sumberdana_id : Optional[int] = None
     vendor_id: Optional[str] = None  # String based on your model
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
@@ -159,6 +162,7 @@ class PembelianResponse(BaseModel):
     warehouse_id: Optional[int] = None
     vendor_id: Optional[str] = None  # String in your model
     top_id: Optional[int] = None
+    sumberdana_id : Optional[int] = None
 
 
 

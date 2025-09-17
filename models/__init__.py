@@ -11,5 +11,6 @@ from models import Pembelian
 from models import Pembayaran
 from models import Penjualan
 from models import Pengembalian
+from models import SumberDana
 from models.mixin import  SoftDeleteMixin
 

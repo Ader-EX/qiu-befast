@@ -150,6 +150,7 @@ def finalize_pembelian(db: Session, pembelian_id: int):
     pembelian = db.query(Pembelian).options(
         selectinload(Pembelian.warehouse_rel),
         selectinload(Pembelian.vend_rel),
+        selectinload(Pembelian.sumberdana_rel),
         selectinload(Pembelian.top_rel),
         selectinload(Pembelian.pembelian_items).selectinload(PembelianItem.item_rel)
     ).filter(Pembelian.id == pembelian_id).first()
@@ -161,7 +162,7 @@ def finalize_pembelian(db: Session, pembelian_id: int):
         raise HTTPException(status_code=400, detail="Can only finalize DRAFT pembelians")
 
     # Validate required fields
-    if not pembelian.warehouse_id or not pembelian.vendor_id:
+    if not pembelian.warehouse_id or not pembelian.vendor_id or not pembelian.sumberdana_id:
         raise HTTPException(status_code=400, detail="Warehouse and Vendor are required for finalization")
 
     if not pembelian.pembelian_items:
@@ -280,6 +281,7 @@ async def get_all_pembelian(
         selectinload(Pembelian.pembelian_items),
         selectinload(Pembelian.attachments),
         selectinload(Pembelian.vend_rel),
+        selectinload(Pembelian.sumberdana_rel),
         selectinload(Pembelian.warehouse_rel)
     ).filter(Pembelian.is_deleted == False).order_by(
         cast(func.substr(Pembelian.no_pembelian,
@@ -370,6 +372,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         vendor_id=request.vendor_id,
         top_id=request.top_id,
         sales_date=request.sales_date,
+        sumberdana_id=request.sumberdana_id,
         sales_due_date=request.sales_due_date,
         additional_discount=request.additional_discount or Decimal('0'),
         expense=request.expense or Decimal('0'),

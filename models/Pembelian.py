@@ -55,6 +55,7 @@ class Pembelian(Base,SoftDeleteMixin):
     warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
     vendor_id = Column(String(50), ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
     top_id = Column(Integer, ForeignKey("term_of_payments.id", ondelete="SET NULL"), nullable=True)
+    sumberdana_id =  Column(Integer, ForeignKey("sumberdanas.id", ondelete="SET NULL"), nullable=True)
 
  
     created_at = Column(DateTime, default=datetime.now, nullable=False)  
@@ -63,11 +64,13 @@ class Pembelian(Base,SoftDeleteMixin):
     vend_rel = relationship("Vendor", back_populates="pembelians")
     warehouse_rel = relationship("Warehouse", back_populates="pembelians")
     top_rel = relationship("TermOfPayment", back_populates="pembelians")
+    sumberdana_rel =  relationship("SumberDana", back_populates="pembelians")
 
     # Items relationship
     pembelian_items = relationship("PembelianItem", back_populates="pembelian", cascade="all, delete-orphan")
     pembayaran_detail_rel = relationship("PembayaranDetails", back_populates="pembelian_rel", cascade="all, delete-orphan")
     pengembalian_detail_rel= relationship("PengembalianDetails", back_populates="pembelian_rel", cascade="all, delete-orphan")
+
     
     attachments = relationship("AllAttachment", back_populates="pembelians", cascade="all, delete-orphan")
 

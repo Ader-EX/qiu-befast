@@ -6,7 +6,7 @@ from database import Base, engine
 from dependencies import verify_access_token
 from routes import (
     auth_routes, currency_routes, customer_routes, item_routes, vendor_routes,
-    category_routes,utils_routes, pembayaran_routes,pengembalian_routes,satuan_routes,user_routes, warehouse_routes,upload_routes, termofpayment_routes, pembelian_routes, penjualan_routes
+    category_routes,utils_routes,sumberdana_routes, pembayaran_routes,pengembalian_routes,satuan_routes,user_routes, warehouse_routes,upload_routes, termofpayment_routes, pembelian_routes, penjualan_routes
 )
 from fastapi.staticfiles import StaticFiles
 import os
@@ -51,7 +51,7 @@ app.openapi = custom_openapi
 @app.on_event("startup")
 async def startup_event():
     Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created (TEST VENDOR).")
+    print("✅ Database tables created")
     print("🚀 Starting FastAPI project")
 
 origins = [
@@ -82,6 +82,7 @@ app.include_router(termofpayment_routes.router, prefix="/top", tags=["Term of Pa
 app.include_router(warehouse_routes.router, prefix="/warehouse", tags=["Warehouse"], dependencies=[Depends(verify_access_token)])
 app.include_router(category_routes.router, prefix="/category", tags=["Category"], dependencies=[Depends(verify_access_token)])
 app.include_router(vendor_routes.router, prefix="/vendor", tags=["Vendor"], dependencies=[Depends(verify_access_token)])
+app.include_router(sumberdana_routes.router, prefix="/sumberdana", tags=["Sumber Dana"], dependencies=[Depends(verify_access_token)])
 app.include_router(currency_routes.router, prefix="/currency", tags=["Currency"], dependencies=[Depends(verify_access_token)])
 app.include_router(customer_routes.router, prefix="/customer", tags=["Customer"], dependencies=[Depends(verify_access_token)])
 app.include_router(item_routes.router, prefix="/item", tags=["Item"], dependencies=[Depends(verify_access_token)])
