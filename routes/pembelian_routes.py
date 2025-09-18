@@ -367,7 +367,7 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
     
     # Create pembelian
     pembelian = Pembelian(
-        no_pembelian=generate_unique_record_number(db, Pembelian, prefix="QP/SI"),
+        no_pembelian=generate_unique_record_number(db, Pembelian, prefix="QP/PRC"),
         warehouse_id=request.warehouse_id,
         vendor_id=request.vendor_id,
         top_id=request.top_id,
