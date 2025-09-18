@@ -1,11 +1,12 @@
 from pydantic import BaseModel
-import datetime
+from datetime import datetime
 
 
 class TopCreate(BaseModel):
     name:str
     is_active:bool
     symbol:str
+    created_at: datetime
 
 class TopUpdate(TopCreate):
     pass

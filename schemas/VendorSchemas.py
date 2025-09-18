@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 from models.TermOfPayment import TermOfPayment
@@ -12,6 +14,7 @@ class VendorBase(BaseModel):
     currency_id: int
     top_id: int
     is_active: bool = True
+    created_at: datetime
 
 class VendorCreate(BaseModel):
     name: str

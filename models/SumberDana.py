@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean
+from datetime import datetime
+
+from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -11,5 +13,7 @@ class SumberDana(Base, SoftDeleteMixin):
     name = Column(String(100), nullable=False)
 
     is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now(), nullable=False)
+
     pembelians= relationship("Pembelian", cascade="all,delete", back_populates="sumberdana_rel")
 

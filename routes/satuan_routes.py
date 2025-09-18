@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, date, time
 from typing import List, Optional, Dict
 
 from fastapi import FastAPI,  APIRouter
@@ -31,12 +32,27 @@ async def get_all_satuan(
         search_key: Optional[str] = None,
         contains_deleted : Optional[bool] = False,
         skip: int = Query(0, ge=0),
-        limit: int = Query(5, ge=1, le=1000)
+        limit: int = Query(5, ge=1, le=1000),
+        to_date : Optional[date] = Query(None, description="Filter by date"),
+        from_date : Optional[date] = Query(None, description="Filter by date")
 ):
     
     query = db.query(Satuan)
     if contains_deleted is False :
         query = query.filter(Satuan.is_deleted == False)
+
+
+    if from_date and to_date:
+        query = query.filter(
+            Satuan.created_at.between(
+                datetime.combine(from_date, time.min),
+                datetime.combine(to_date, time.max),
+            )
+        )
+    elif from_date:
+        query = query.filter(Satuan.created_at >= datetime.combine(from_date, time.min))
+    elif to_date:
+        query = query.filter(Satuan.created_at <= datetime.combine(to_date, time.max))
 
     if is_active is not None:
         query = query.filter(Satuan.is_active == is_active)

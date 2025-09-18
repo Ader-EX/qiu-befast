@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, validator
 from typing import Optional
 
@@ -6,6 +8,7 @@ class CategoryBase(BaseModel):
     name: str
     is_active: Optional[bool] = True
     category_type: int = 1
+    created_at: datetime
 
     @validator("category_type")
     def validate_category_type(cls, v):

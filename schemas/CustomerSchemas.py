@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 from typing import Optional, List
 from schemas.CurrencySchemas import CurrencyOut
@@ -12,6 +14,7 @@ class CustomerCreate(CustomerBase):
     kode_lambung: Optional[str] = None
     is_active: Optional[bool] = True
     currency_id: int
+    created_at: datetime
     pass
 
 class CustomerUpdate(CustomerBase):

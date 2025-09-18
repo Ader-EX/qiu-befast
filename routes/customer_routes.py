@@ -1,5 +1,6 @@
+from datetime import datetime, date, time
 from typing import List, Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from starlette import status
@@ -20,10 +21,11 @@ def get_all_Customer(
         db: Session = Depends(get_db),
         page: int = 1,
         rowsPerPage: int = 10,
-        
         contains_deleted: Optional[bool] = False,
         is_active: Optional[bool] = None,
         search_key: Optional[str] = None,
+        to_date : Optional[date] = Query(None, description="Filter by date"),
+        from_date : Optional[date] = Query(None, description="Filter by date")
 ):
     query = db.query(Customer).options( joinedload(Customer.curr_rel))
 
@@ -31,7 +33,17 @@ def get_all_Customer(
         query = query.filter(Customer.is_deleted == False)
     if is_active is not None:
         query = query.filter(Customer.is_active == is_active)
-
+    if from_date and to_date:
+        query = query.filter(
+            Customer.created_at.between(
+                datetime.combine(from_date, time.min),
+                datetime.combine(to_date, time.max),
+            )
+        )
+    elif from_date:
+        query = query.filter(Customer.created_at >= datetime.combine(from_date, time.min))
+    elif to_date:
+        query = query.filter(Customer.created_at <= datetime.combine(to_date, time.max))
     if search_key is not None:
         query = query.filter(or_(
             Customer.name.ilike(f"%{search_key}%"),

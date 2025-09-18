@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import date, datetime, time
+
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
@@ -8,6 +10,7 @@ from models.Currency import Currency
 from models.TermOfPayment import TermOfPayment
 from models.Vendor import Vendor
 from schemas.PaginatedResponseSchemas import PaginatedResponse
+from schemas.UtilsSchemas import SearchableSelectResponse, SearchableSelectResponseVendor
 from schemas.VendorSchemas import VendorCreate, VendorUpdate, VendorOut
 from utils import soft_delete_record
 
@@ -20,6 +23,8 @@ def get_all_vendors(
         is_active: Optional[bool] = None,
         contains_deleted: Optional[bool] = False, 
         search_key: Optional[str] = None,
+        to_date : Optional[date] = Query(None, description="Filter by date"),
+        from_date : Optional[date] = Query(None, description="Filter by date")
 ):
     query = db.query(Vendor).options(joinedload(Vendor.top_rel), joinedload(Vendor.curr_rel))
     if contains_deleted is False:
@@ -32,6 +37,18 @@ def get_all_vendors(
             Vendor.name.ilike(f"%{search_key}%"),
             Vendor.id.ilike(f"%{search_key}%")
         ))
+
+    if from_date and to_date:
+        query = query.filter(
+            Vendor.created_at.between(
+                datetime.combine(from_date, time.min),
+                datetime.combine(to_date, time.max),
+            )
+        )
+    elif from_date:
+        query = query.filter(Vendor.created_at >= datetime.combine(from_date, time.min))
+    elif to_date:
+        query = query.filter(Vendor.created_at <= datetime.combine(to_date, time.max))
 
     total_count = query.count()
 
@@ -52,6 +69,15 @@ def get_vendor(vendor_id: str, db: Session = Depends(get_db)):
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return vendor
+
+
+@router.get("/searchable/{vendor_id}", response_model=SearchableSelectResponseVendor)
+def get_vendor_for_searchable(vendor_id: str, db: Session = Depends(get_db)):
+    vendor = db.query(Vendor).options(joinedload(Vendor.top_rel), joinedload(Vendor.curr_rel)).filter(Vendor.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return vendor
+
 
 
 def generate_vendor_id_with_counter(db: Session) -> str:

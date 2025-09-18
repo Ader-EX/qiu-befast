@@ -1,3 +1,4 @@
+from datetime import datetime, time, date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -19,13 +20,27 @@ async def get_all_currencies(db: Session = Depends(get_db),
                              search_key : Optional[str] = None,
                              contains_deleted: Optional[bool] = False,
                              skip: int = Query(0, ge=0),
-                             limit: int = Query(5, ge=1, le=1000)):
+                             limit: int = Query(5, ge=1, le=1000),
+                             to_date : Optional[date] = Query(None, description="Filter by date"),
+                             from_date : Optional[date] = Query(None, description="Filter by date")):
     query = db.query(Currency)
     if contains_deleted is False :
         query = query.filter(Currency.is_deleted == False)
 
     if  is_active is not None:
         query =  query.filter(Currency.is_active == is_active)
+
+    if from_date and to_date:
+        query = query.filter(
+            Currency.created_at.between(
+                datetime.combine(from_date, time.min),
+                datetime.combine(to_date, time.max),
+            )
+        )
+    elif from_date:
+        query = query.filter(Currency.created_at >= datetime.combine(from_date, time.min))
+    elif to_date:
+        query = query.filter(Currency.created_at <= datetime.combine(to_date, time.max))
 
     if search_key:
         query = query.filter(Currency.name.ilike(f"%{search_key}%"))

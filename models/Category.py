@@ -13,6 +13,7 @@ class Category(Base,SoftDeleteMixin):
     name = Column(String(100), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     category_type = Column(Integer, nullable=False)  # Only 1 and 2
+    created_at = Column(DateTime, default=datetime.now(), nullable=False)
 
     # Relationships
     items_category_one = relationship("Item",cascade="all, delete", foreign_keys="Item.category_one", back_populates="category_one_rel")

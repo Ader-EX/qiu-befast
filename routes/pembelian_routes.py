@@ -10,7 +10,7 @@ import uuid
 import os
 import shutil
 import enum
-from datetime import datetime
+from datetime import datetime, date, time
 from decimal import Decimal
 
 from starlette.responses import HTMLResponse
@@ -273,7 +273,9 @@ async def get_all_pembelian(
         warehouse_id: Optional[int] = Query(None),
         page: int = Query(1, ge=1),
         size: int = Query(50, ge=1, le=100),
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        to_date : Optional[date] = Query(None, description="Filter by date"),
+        from_date : Optional[date] = Query(None, description="Filter by date"),
 ):
     """Get all pembelian with filtering and pagination"""
 
@@ -310,6 +312,19 @@ async def get_all_pembelian(
         query = query.filter(Pembelian.vendor_id == vendor_id)
     if warehouse_id:
         query = query.filter(Pembelian.warehouse_id == warehouse_id)
+
+
+    if from_date and to_date:
+        query = query.filter(
+            Pembelian.created_at.between(
+                datetime.combine(from_date, time.min),
+                datetime.combine(to_date, time.max),
+            )
+        )
+    elif from_date:
+        query = query.filter(Pembelian.created_at >= datetime.combine(from_date, time.min))
+    elif to_date:
+        query = query.filter(Pembelian.created_at <= datetime.combine(to_date, time.max))
 
     # Get total count before pagination
     total = query.count()

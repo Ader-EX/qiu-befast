@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 from typing import Optional
 
@@ -6,6 +8,7 @@ class WarehouseBase(BaseModel):
     name: str
     address: str
     is_active: Optional[bool]
+    created_at: datetime
 
 
 class WarehouseCreate(WarehouseBase):

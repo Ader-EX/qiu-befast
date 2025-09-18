@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date, time
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional
 
@@ -196,6 +196,9 @@ def get_items(
         is_active: Optional[bool] = None,
         sortBy: Optional[Literal["name", "price", "sku", "created_at"]] = None,
         sortOrder: Optional[Literal["asc", "desc"]] = "asc",
+        to_date : Optional[date] = Query(None, description="Filter by date"),
+        from_date : Optional[date] = Query(None, description="Filter by date")
+
 ):
     query = db.query(Item).options(
         joinedload(Item.category_one_rel),
@@ -220,6 +223,18 @@ def get_items(
 
     if is_active is not None:
         query = query.filter(Item.is_active == is_active)
+
+    if from_date and to_date:
+        query = query.filter(
+            Item.created_at.between(
+                datetime.combine(from_date, Item.min),
+                datetime.combine(to_date, Item.max),
+            )
+        )
+    elif from_date:
+        query = query.filter(Item.created_at >= datetime.combine(from_date, time.min))
+    elif to_date:
+        query = query.filter(Item.created_at <= datetime.combine(to_date, time.max))
 
     if sortBy:
         sort_column = getattr(Item, sortBy)
@@ -273,6 +288,7 @@ async def import_items_from_excel(
         df.columns = df.columns.str.strip()
 
         column_mapping = {
+            'Type': 'type',
             'Nama Item': 'name',
             'SKU': 'sku',
             'Kategori 1': 'kategori_1',
@@ -315,7 +331,6 @@ async def import_items_from_excel(
                 if item_data is None:
                     continue  # Skip this row
 
-                # Generate unique item code
                 prefix = get_item_prefix(item_data['type'])
                 item_code = generate_unique_record_code(db, Item, prefix)
                 item_data['code'] = item_code
@@ -366,7 +381,6 @@ def _get_existing_skus(db: Session) -> Dict[str, int]:
     """Get existing SKUs to check for duplicates."""
     items = db.query(Item.sku, Item.id).filter(Item.deleted_at.is_(None)).all()
     return {item.sku: item.id for item in items}
-
 
 def _process_row(
         row,
@@ -422,7 +436,6 @@ def _process_row(
     except (ValueError, TypeError):
         raise ValueError(f"Invalid Harga Jual: {row['harga_jual']}")
 
-    # Parse quantity
     total_item = 0
     if not pd.isna(row.get('jumlah_unit')):
         try:
@@ -430,18 +443,29 @@ def _process_row(
         except (ValueError, TypeError):
             raise ValueError(f"Invalid Jumlah Unit: {row['jumlah_unit']}")
 
+    type_value = str(row.get('type')).strip().lower() if row.get('type') else None
+    type_mapping = {
+        "finish good": ItemTypeEnum.FINISH_GOOD,
+        "raw material": ItemTypeEnum.RAW_MATERIAL,
+        "service": ItemTypeEnum.SERVICE,
+    }
+    if type_value and type_value in type_mapping:
+        item_type = type_mapping[type_value]
+    else:
+        item_type = default_item_type
+
     return {
         'name': str(row['name']).strip(),
         'sku': sku,
-        'type': default_item_type,
+        'type': item_type,
         'total_item': total_item,
         'price': price,
         'category_one': category_one_id,
         'category_two': category_two_id,
         'satuan_id': satuan_id,
         'is_active': True
-        # Note: 'code' will be generated and added in the main function
     }
+
 
 @router.put("/{item_id}", response_model=ItemResponse)
 async def update_item(

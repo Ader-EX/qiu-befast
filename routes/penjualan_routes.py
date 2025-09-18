@@ -9,7 +9,7 @@ import uuid
 import os
 import shutil
 import enum
-from datetime import datetime
+from datetime import datetime, time, date
 from decimal import Decimal, InvalidOperation
 
 from starlette.requests import Request
@@ -373,6 +373,9 @@ async def get_all_penjualan(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    to_date : Optional[date] = Query(None, description="Filter by date"),
+    from_date : Optional[date] = Query(None, description="Filter by date")
+
 ):
     query = (
         db.query(Penjualan)
@@ -410,6 +413,20 @@ async def get_all_penjualan(
         query = query.filter(Penjualan.customer_id == customer_id)
     if warehouse_id:
         query = query.filter(Penjualan.warehouse_id == warehouse_id)
+
+    if from_date and to_date:
+            query = query.filter(
+                Penjualan.created_at.between(
+                    datetime.combine(from_date, time.min),
+                    datetime.combine(to_date, time.max),
+                )
+            )
+    elif from_date:
+        query = query.filter(Penjualan.created_at >= datetime.combine(from_date, time.min))
+    elif to_date:
+        query = query.filter(Penjualan.created_at <= datetime.combine(to_date, time.max))
+
+
 
     total = query.count()
     offset = (page - 1) * size

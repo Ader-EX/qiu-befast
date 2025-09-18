@@ -14,6 +14,7 @@ class Currency(Base,SoftDeleteMixin):
     name = Column(String(100), nullable=False)
     symbol = Column(String(10), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now(), nullable=False)
 
     
     # Relationships

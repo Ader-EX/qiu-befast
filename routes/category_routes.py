@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, date, time
 from typing import List, Optional, Dict
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -27,7 +27,9 @@ async def get_all_categories(
         contains_deleted: Optional[bool] = False, 
         skip: int = Query(0, ge=0),
         limit: int = Query(5, ge=1, le=1000),
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        to_date : Optional[date] = Query(None, description="Filter by date"),
+        from_date : Optional[date] = Query(None, description="Filter by date")
 ):
 
     query = db.query(Category)
@@ -43,6 +45,18 @@ async def get_all_categories(
 
     if cat_type != 0:
         query = query.filter(Category.category_type == cat_type)
+
+    if from_date and to_date:
+        query = query.filter(
+            Category.created_at.between(
+                datetime.combine(from_date, time.min),
+                datetime.combine(to_date, time.max),
+            )
+        )
+    elif from_date:
+        query = query.filter(Category.created_at >= datetime.combine(from_date, time.min))
+    elif to_date:
+        query = query.filter(Category.created_at <= datetime.combine(to_date, time.max))
 
     paginated_data =query.offset(skip).limit(limit).all()
     total_count = query.count()

@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, List
+from typing import Optional, List, Union
 
 from pydantic import BaseModel
 
@@ -44,6 +44,16 @@ class SalesReportRow(BaseModel):
     total: Decimal                         # sub_total - discount
     tax: Decimal                           # total * (tax_percentage/100)
     grand_total: Decimal                   # total + tax
+
+class CurrencyRelation(BaseModel):
+    symbol: str
+
+class SearchableSelectResponse(BaseModel):
+    id: Union[str, int]
+    name: str
+
+class SearchableSelectResponseVendor(SearchableSelectResponse):
+    curr_rel: CurrencyRelation
 
 
 class SalesReportResponse(BaseModel):

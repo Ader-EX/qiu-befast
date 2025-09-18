@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 from typing import Optional
 
@@ -6,6 +8,7 @@ class CurrencyBase(BaseModel):
     name: str
     symbol: str
     is_active: Optional[bool] = True
+    created_at: datetime
 
 
 class CurrencyCreate(CurrencyBase):

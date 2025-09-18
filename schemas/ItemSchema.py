@@ -42,6 +42,7 @@ class ItemBase(BaseModel):
     total_item: int = 0
     price: float
     is_active: bool
+    created_at: datetime
 
     category_one_rel: Optional[CategoryOut] = None
     category_two_rel: Optional[CategoryOut] = None

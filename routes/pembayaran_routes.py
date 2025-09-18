@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, func, cast, Integer
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, time
 from decimal import Decimal
 
 from database import get_db
@@ -132,7 +132,10 @@ def get_pembayarans(
         limit: int = Query(100, ge=1, le=1000),
         reference_type: Optional[PembayaranPengembalianType] = None,
         status: Optional[StatusPembelianEnum] = None,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+
+        to_date : Optional[date] = Query(None, description="Filter by date"),
+        from_date : Optional[date] = Query(None, description="Filter by date"),
 ):
     """Get list of payment records with filtering"""
 
@@ -148,6 +151,19 @@ def get_pembayarans(
 
     if reference_type and reference_type != "ALL":
         query = query.filter(Pembayaran.reference_type == reference_type)
+
+
+    if from_date and to_date:
+        query = query.filter(
+            Pembayaran.created_at.between(
+                datetime.combine(from_date, time.min),
+                datetime.combine(to_date, time.max),
+            )
+        )
+    elif from_date:
+        query = query.filter(Pembayaran.created_at >= datetime.combine(from_date, time.min))
+    elif to_date:
+        query = query.filter(Pembayaran.created_at <= datetime.combine(to_date, time.max))
 
     if status and status != "ALL":
         query = query.filter(Pembayaran.status == status)
