@@ -8,7 +8,7 @@ class CategoryBase(BaseModel):
     name: str
     is_active: Optional[bool] = True
     category_type: int = 1
-    created_at: datetime
+
 
     @validator("category_type")
     def validate_category_type(cls, v):
@@ -27,6 +27,7 @@ class CategoryUpdate(CategoryBase):
 
 class CategoryOut(CategoryBase):
     id: int
+    created_at: datetime
 
     class Config:
         from_attributes = True

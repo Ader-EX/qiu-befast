@@ -8,7 +8,6 @@ class WarehouseBase(BaseModel):
     name: str
     address: str
     is_active: Optional[bool]
-    created_at: datetime
 
 
 class WarehouseCreate(WarehouseBase):
@@ -21,6 +20,7 @@ class WarehouseUpdate(WarehouseBase):
 
 class WarehouseOut(WarehouseBase):
     id: int
+    created_at: datetime
 
     class Config:
         orm_mode = True

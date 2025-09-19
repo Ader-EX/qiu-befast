@@ -14,7 +14,7 @@ class VendorBase(BaseModel):
     currency_id: int
     top_id: int
     is_active: bool = True
-    created_at: datetime
+
 
 class VendorCreate(BaseModel):
     name: str
@@ -30,6 +30,7 @@ class VendorUpdate(VendorBase):
 class VendorOut(VendorBase):
     top_rel : TopOut
     curr_rel : CurrencyOut
+    created_at: datetime
     pass
 
     class Config:

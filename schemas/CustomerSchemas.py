@@ -14,7 +14,7 @@ class CustomerCreate(CustomerBase):
     kode_lambung: Optional[str] = None
     is_active: Optional[bool] = True
     currency_id: int
-    created_at: datetime
+
     pass
 
 class CustomerUpdate(CustomerBase):
@@ -35,6 +35,7 @@ class CustomerOut(CustomerBase):
     is_active: Optional[bool] = True
     currency_id: int
     curr_rel: Optional[CurrencyOut] = None
+    created_at: datetime
     pass
 
     class Config:

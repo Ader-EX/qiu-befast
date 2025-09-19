@@ -6,7 +6,7 @@ class SatuanBase(BaseModel):
     name: str
     symbol: str
     is_active: bool = True
-    created_at: datetime
+
 
 class SatuanCreate(SatuanBase):
     pass
@@ -16,6 +16,7 @@ class SatuanUpdate(SatuanBase):
 
 class SatuanOut(SatuanBase):
     id: int
+    created_at: datetime
 
     class Config:
         from_attributes = True

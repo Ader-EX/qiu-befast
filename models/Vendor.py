@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime, Date
 from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -15,7 +15,7 @@ class Vendor(Base, SoftDeleteMixin):
     currency_id = Column(Integer, ForeignKey("currencies.id"), nullable=False)
     top_id = Column(Integer, ForeignKey("term_of_payments.id"), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.now(), nullable=False)
+    created_at = Column(Date, default=datetime.now(), nullable=False)
     
     # Relationships
     curr_rel = relationship("Currency",cascade="all, delete", back_populates="vend_rel")

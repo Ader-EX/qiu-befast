@@ -8,7 +8,7 @@ class CurrencyBase(BaseModel):
     name: str
     symbol: str
     is_active: Optional[bool] = True
-    created_at: datetime
+
 
 
 class CurrencyCreate(CurrencyBase):
@@ -21,6 +21,7 @@ class CurrencyUpdate(CurrencyBase):
 
 class CurrencyOut(CurrencyBase):
     id: int
+    created_at: datetime
 
     class Config:
         from_attributes = True
