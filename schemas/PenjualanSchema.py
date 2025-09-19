@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator, AliasCh
 
 # Enums come from Pembelian module (shared)
 from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
-from schemas.ItemSchema import ItemResponse  # if you expose related Item as in Pembelian schemas
+from schemas.ItemSchema import ItemResponse
+from schemas.KodeLambungSchema import KodeLambungResponse  # if you expose related Item as in Pembelian schemas
 
 # ---------------------------------
 # Helpers / common aliases & types
@@ -89,6 +90,7 @@ class PenjualanBase(BaseModel):
     customer_id: Optional[int] = None
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
+    kode_lambung_id: Optional[int] = None
     sales_due_date: Optional[datetime] = None
     additional_discount: Optional[NonNegDec] = Decimal("0.00")
     expense: Optional[NonNegDec] = Decimal("0.00")
@@ -104,6 +106,7 @@ class PenjualanCreate(BaseModel):
     expense: Optional[NonNegDec] = Decimal("0.00")
     items: List[PenjualanItemCreate] = Field(default_factory=list)
     currency_amount : float = Decimal("0.00")
+    kode_lambung: str 
 
     @model_validator(mode="after")
     def _require_items(self):
@@ -118,6 +121,8 @@ class PenjualanUpdate(BaseModel):
     customer_id: Optional[int] = None
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
+    kode_lambung: Optional[str] = None
+    kode_lambung_id: Optional[str] = None
     sales_due_date: Optional[datetime] = None
     additional_discount: Optional[NonNegDec] = None
     expense: Optional[NonNegDec] = None
@@ -165,17 +170,20 @@ class PenjualanResponse(BaseModel):
     warehouse_id: Optional[int] = None
     customer_id: Optional[int] = None
     top_id: Optional[int] = None
+    kode_lambung_id: Optional[int] = None
 
     # Finalized snapshot names
     warehouse_name: Optional[str] = None
     customer_name: Optional[str] = None
     top_name: Optional[str] = None
     currency_name: Optional[str] = None
+    kode_lambung_name: Optional[str] = None
 
     # Computed helpers from model
     remaining: Optional[NonNegDec] = None
     customer_display: Optional[str] = None
     customer_address_display: Optional[str] = None
+    kode_lambung_display: Optional[str] = None
 
     # Relations
     items: List[PenjualanItemResponse] = Field(
@@ -183,6 +191,10 @@ class PenjualanResponse(BaseModel):
         validation_alias=AliasChoices("penjualan_items", "items"),
     )
     attachments: List[AttachmentResponse] = Field(default_factory=list)
+    kode_lambung: Optional[KodeLambungResponse] = Field(
+        default=None,
+        validation_alias=AliasChoices("kode_lambung_rel", "kode_lambung"),
+    )
 
 
 class PenjualanStatusUpdate(BaseModel):
@@ -205,6 +217,7 @@ class PenjualanListResponse(BaseModel):
     total_return: NonNegDec
     remaining: NonNegDec
     customer_name : str
+    kode_lambung_name: Optional[str] = None
 
     # Optional counts & names
     items_count: int = 0

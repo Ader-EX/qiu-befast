@@ -9,7 +9,6 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 import jwt
 
-REFRESH_TOKEN_EXPIRE_MINUTES=60 * 24 * 7
 
 
 password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -26,7 +25,7 @@ def create_access_token(subject: Union[str, Any], expires_delta: int = None) -> 
         expires_delta = datetime.now() + expires_delta
 
     else:
-        expires_delta = datetime.now() + timedelta(minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES",30)))
+        expires_delta = datetime.now() + timedelta(minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES",600)))
 
 
     to_encode = {"exp": expires_delta, "sub": str(subject)}
@@ -38,7 +37,7 @@ def create_refresh_token(subject: Union[str, Any], expires_delta: int = None) ->
     if expires_delta is not None:
         expires_delta = datetime.now() + expires_delta
     else:
-        expires_delta = datetime.now() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
+        expires_delta = datetime.now() + timedelta(minutes=600)
 
     to_encode = {"exp": expires_delta, "sub": str(subject)}
     encoded_jwt = jwt.encode(to_encode, os.getenv("JWT_REFRESH_SECRET_KEY"), os.getenv("ALGORITHM"))

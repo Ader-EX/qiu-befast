@@ -34,6 +34,7 @@ class SalesReportRow(BaseModel):
     date: datetime                         # Penjualan.sales_date
     customer: str                          # Penjualan.customer_name or Customer.name
     kode_lambung: Optional[str] = None     # Penjualan.kode_lambung  (if you have this column)
+    kode_lambung_penjualan: Optional[str] = None
     no_penjualan: str                      # Penjualan.no_penjualan
     status: str                            # Payment status (e.g., "Paid")
     item_code: Optional[str] = None        # PenjualanItem.item_sku

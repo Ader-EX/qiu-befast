@@ -17,6 +17,7 @@ from starlette.responses import HTMLResponse
 
 from database import get_db
 from models.Customer import Customer
+from models.KodeLambung import KodeLambung
 from models.Pembayaran import  Pembayaran
 from models.Penjualan import StatusPembayaranEnum, StatusPembelianEnum
 from models.Penjualan import Penjualan, PenjualanItem
@@ -362,13 +363,13 @@ def _validate_items_payload(items_data: List):
 # ------------------------------
 # API Endpoints
 # ------------------------------
-
 @router.get("", response_model=PaginatedResponse[PenjualanListResponse])
 async def get_all_penjualan(
     status_penjualan: Optional[StatusPembelianEnum] = Query(None),
     status_pembayaran: Optional[StatusPembayaranEnum] = Query(None),
     customer_id: Optional[str] = Query(None),
     warehouse_id: Optional[int] = Query(None),
+    kode_lambung_id: Optional[int] = Query(None),  # NEW: Add kode_lambung filter
     search_key: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=100),
@@ -384,6 +385,7 @@ async def get_all_penjualan(
             selectinload(Penjualan.attachments),
             selectinload(Penjualan.customer_rel),
             selectinload(Penjualan.warehouse_rel),
+            selectinload(Penjualan.kode_lambung_rel),  # NEW: Add kode_lambung loading
         )
         .filter(Penjualan.is_deleted == False)
         .order_by(
@@ -413,6 +415,8 @@ async def get_all_penjualan(
         query = query.filter(Penjualan.customer_id == customer_id)
     if warehouse_id:
         query = query.filter(Penjualan.warehouse_id == warehouse_id)
+    if kode_lambung_id:  # NEW: Add kode_lambung filter
+        query = query.filter(Penjualan.kode_lambung_id == kode_lambung_id)
 
     if from_date and to_date:
             query = query.filter(
@@ -436,6 +440,7 @@ async def get_all_penjualan(
     for p in rows:
         customer_name = p.customer_name or (p.customer_rel.name if p.customer_rel else None)
         warehouse_name = p.warehouse_name or (p.warehouse_rel.name if p.warehouse_rel else None)
+        kode_lambung_name = p.kode_lambung_rel.name or (p.kode_lambung_rel.name if p.kode_lambung_rel else None)  # NEW
 
         data.append(
             PenjualanListResponse(
@@ -443,7 +448,7 @@ async def get_all_penjualan(
                 no_penjualan=p.no_penjualan,
                 status_pembayaran=p.status_pembayaran,
                 status_penjualan=p.status_penjualan,
-
+                sales_date=p.sales_date,
                 total_paid=p.total_paid.quantize(Decimal("0.0001")),
                 total_return=p.total_return.quantize(Decimal("0.0001")),
                 total_price=p.total_price.quantize(Decimal("0.0001")),
@@ -452,6 +457,7 @@ async def get_all_penjualan(
                 attachments_count=len(p.attachments),
                 customer_name=customer_name,
                 warehouse_name=warehouse_name,
+                kode_lambung_name=kode_lambung_name,  
             )
         )
 
@@ -468,6 +474,7 @@ async def get_penjualan(penjualan_id: int, db: Session = Depends(get_db)):
             selectinload(Penjualan.customer_rel),
             selectinload(Penjualan.warehouse_rel),
             selectinload(Penjualan.top_rel),
+            selectinload(Penjualan.kode_lambung_rel),  # NEW: Add kode_lambung loading
         )
         .filter(Penjualan.id == penjualan_id)
         .first()
@@ -475,8 +482,6 @@ async def get_penjualan(penjualan_id: int, db: Session = Depends(get_db)):
     if not penjualan:
         raise HTTPException(status_code=404, detail="Penjualan not found")
     return penjualan
-
-
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_db)):
     """
@@ -485,20 +490,27 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
     """
     _validate_items_payload(request.items)
     for it in request.items:
-        
         validate_item_stock(db, it.item_id, it.qty)
+
+    kode_lambung_id = None
+    if request.kode_lambung:
+            kode_lambung = KodeLambung(name=request.kode_lambung)
+            db.add(kode_lambung)
+            db.flush()  
+            kode_lambung_id = kode_lambung.id
 
     p = Penjualan(
         no_penjualan=generate_unique_record_number(db, Penjualan, prefix="QP/SI"),
         warehouse_id=request.warehouse_id,
         customer_id=request.customer_id,
         top_id=request.top_id,
+        kode_lambung_id=kode_lambung_id,
         sales_date=request.sales_date,
         sales_due_date=request.sales_due_date,
         additional_discount=request.additional_discount or Decimal("0"),
         expense=request.expense or Decimal("0"),
         status_penjualan=StatusPembelianEnum.DRAFT,
-        currency_amount = request.currency_amount or Decimal('0')
+        currency_amount=request.currency_amount or Decimal("0"),
     )
     db.add(p)
     db.flush()
@@ -507,9 +519,7 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
         item = validate_item_exists(db, it.item_id)
         unit_price = Decimal(str(it.unit_price)) if it.unit_price is not None else Decimal(str(item.price))
         unit_price_rmb = (
-            Decimal(str(it.unit_price_rmb) )
-            if it.unit_price_rmb is not None
-            else Decimal(str(item.price))
+            Decimal(str(it.unit_price_rmb)) if it.unit_price_rmb is not None else Decimal(str(item.price))
         )
 
         line = PenjualanItem(
@@ -528,7 +538,6 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
     calculate_penjualan_totals(db, p.id)
 
     return {"detail": "Penjualan created successfully", "id": p.id}
-
 
 @router.put("/{penjualan_id}", response_model=PenjualanResponse)
 async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Session = Depends(get_db)):
@@ -556,10 +565,83 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
         if exists:
             raise HTTPException(status_code=400, detail="No penjualan already exists")
 
+    # --- Handle kode_lambung_id changes (explicit re-link) ---
+    if request.kode_lambung_id is not None and request.kode_lambung_id != penjualan.kode_lambung_id:
+        # NOTE: if your model uses int, set PenjualanUpdate.kode_lambung_id: Optional[int]
+        target = db.query(KodeLambung).filter(KodeLambung.id == request.kode_lambung_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="Kode Lambung not found")
+        penjualan.kode_lambung_id = target.id
+
+    # --- Handle kode_lambung (string) with rename-semantics ---
+    # If a new string is provided, we want to "rename" safely.
+    if request.kode_lambung is not None:
+        new_name = request.kode_lambung.strip() or None
+
+        # Current linkage (may be None)
+        current_kl = None
+        if penjualan.kode_lambung_id:
+            current_kl = db.query(KodeLambung).filter(KodeLambung.id == penjualan.kode_lambung_id).first()
+
+        # If no current, behave like "link-or-create by name"
+        if current_kl is None:
+            if new_name:
+                existing = db.query(KodeLambung).filter(KodeLambung.name == new_name).first()
+                if existing:
+                    penjualan.kode_lambung_id = existing.id
+                else:
+                    # create new since not found
+                    created = KodeLambung(name=new_name)
+                    db.add(created)
+                    db.flush()
+                    penjualan.kode_lambung_id = created.id
+            else:
+                # empty string means unlink
+                penjualan.kode_lambung_id = None
+        else:
+            # We have current_kl; decide rename vs reassign.
+            if not new_name:
+                # empty string -> unlink from any kode_lambung
+                penjualan.kode_lambung_id = None
+            elif current_kl.name != new_name:
+                # Count how many penjualan share this kode_lambung_id
+                usage_count = (
+                    db.query(func.count(Penjualan.id))
+                    .filter(Penjualan.kode_lambung_id == current_kl.id)
+                    .scalar()
+                )
+
+                if usage_count <= 1:
+                    # Safe to rename in-place (no side effects on others)
+                    # Also ensure we won't collide with an existing name constraint.
+                    conflict = (
+                        db.query(KodeLambung)
+                        .filter(and_(KodeLambung.name == new_name, KodeLambung.id != current_kl.id))
+                        .first()
+                    )
+                    if conflict:
+                        # If another row already has the new name, re-link to that instead of renaming.
+                        penjualan.kode_lambung_id = conflict.id
+                    else:
+                        current_kl.name = new_name  # rename in-place
+                else:
+                    # Shared by many; do NOT rename in place. Reuse existing by name or create + reassign.
+                    existing = db.query(KodeLambung).filter(KodeLambung.name == new_name).first()
+                    if existing:
+                        penjualan.kode_lambung_id = existing.id
+                    else:
+                        created = KodeLambung(name=new_name)
+                        db.add(created)
+                        db.flush()
+                        penjualan.kode_lambung_id = created.id
+            # else names match: no-op
+
+    # Prepare generic field updates, but exclude kode_lambung fields (handled above)
     update_data = request.dict(exclude_unset=True)
     items_data = update_data.pop("items", None)
-    # guard against stray header 'discount' fields that don't exist
     update_data.pop("discount", None)
+    update_data.pop("kode_lambung", None)
+    update_data.pop("kode_lambung_id", None)
 
     fields_changed = False
     for field, value in update_data.items():
@@ -572,8 +654,6 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
 
     if items_data is not None:
         _validate_items_payload(items_data)
-
-        # Map existing
         current: dict[int, PenjualanItem] = {pi.item_id: pi for pi in penjualan.penjualan_items}
         incoming_ids = set()
 
@@ -589,17 +669,13 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
                 old_qty = int(pi.qty or 0)
                 new_qty = int(d["qty"])
 
-                # If finalized, compute delta for stock:
                 if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
-                    # sales: increase qty → subtract more; decrease qty → add back
                     delta = -(new_qty - old_qty)
                     if delta != 0:
-                        # Check we won’t go below zero when subtracting
                         if delta < 0:
                             validate_item_stock(db, item_id, abs(delta))
                         stock_adjustments.append((item_id, delta))
 
-                # Update line if changed
                 if (
                     old_qty != new_qty
                     or Decimal(str(pi.unit_price or 0)) != d["unit_price"]
@@ -613,9 +689,7 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
                     calculate_item_totals(pi)
                     items_changed = True
             else:
-                # New line
                 if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
-                    # New sales line → subtract full qty
                     validate_item_stock(db, item_id, d["qty"])
                     stock_adjustments.append((item_id, -int(d["qty"])))
 
@@ -631,16 +705,13 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
                 db.add(nl)
                 items_changed = True
 
-        # Deletions
         for item_id, pi in list(current.items()):
             if item_id not in incoming_ids:
                 if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
-                    # Removing a sales line → return that qty to stock
                     stock_adjustments.append((item_id, int(pi.qty or 0)))
                 db.delete(pi)
                 items_changed = True
 
-        # Apply stock deltas if finalized
         if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
             for item_id, qty_change in stock_adjustments:
                 if qty_change != 0:
@@ -654,6 +725,7 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
         db.rollback()
 
     return await get_penjualan(penjualan_id, db)
+
 
 
 @router.patch("/{penjualan_id}", status_code=status.HTTP_200_OK)
@@ -819,38 +891,36 @@ async def get_totals(penjualan_id: int, db: Session = Depends(get_db)):
 async def recalc_totals(penjualan_id: int, db: Session = Depends(get_db)):
     data = calculate_penjualan_totals(db, penjualan_id)
     return TotalsResponse(**data)
-
 @router.delete("/{penjualan_id}", response_model=SuccessResponse)
 async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
     """
     Delete Penjualan:
-      - If DRAFT and no payments -> HARD DELETE (doc + lines + files).
-      - Else (has payments or not DRAFT) -> SOFT DELETE (archive).
+      - If DRAFT and no payments -> HARD DELETE (doc + lines + files + kode_lambung).
+      - Else -> SOFT DELETE (archive) + also soft-delete kode_lambung.
     """
-
     penjualan = (
         db.query(Penjualan)
         .options(
             selectinload(Penjualan.penjualan_items),
             selectinload(Penjualan.attachments),
-            selectinload(Penjualan.pembayaran_detail_rel),   # load payments to decide path
+            selectinload(Penjualan.pembayaran_detail_rel),
+            selectinload(Penjualan.kode_lambung_rel),  # <-- load the 1-1 partner
         )
         .filter(Penjualan.id == penjualan_id)
         .first()
     )
-
     if not penjualan:
         raise HTTPException(status_code=404, detail="Penjualan not found")
 
-    # If you already enforce DRAFT-only deletion, keep this. Otherwise, remove and rely on the branching below.
-    # This will raise if not DRAFT.
-    validate_draft_status(penjualan)
+    validate_draft_status(penjualan)  # if you require DRAFT for hard delete
 
     has_payments = bool(penjualan.pembayaran_detail_rel)
+    kode_lambung = penjualan.kode_lambung_rel  # may be None
 
-    # --- Path A: HARD DELETE only if DRAFT and no payments ---
+    # --- Path A: HARD DELETE (DRAFT & no payments) ---
     if penjualan.status_penjualan.name == "DRAFT" and not has_payments:
         try:
+            # delete files
             for att in penjualan.attachments:
                 if att.file_path and os.path.exists(att.file_path):
                     try:
@@ -858,7 +928,7 @@ async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
                     except Exception:
                         pass
 
-            # 2) Delete child rows (or rely on cascade="all, delete-orphan")
+            # delete child rows
             db.query(PenjualanItem).filter(
                 PenjualanItem.penjualan_id == penjualan_id
             ).delete(synchronize_session=False)
@@ -867,35 +937,37 @@ async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
                 AllAttachment.penjualan_id == penjualan_id
             ).delete(synchronize_session=False)
 
-            # IMPORTANT: Do NOT delete Pembayaran (shouldn't exist in this branch anyway)
-            # db.query(Pembayaran).filter(Pembayaran.penjualan_id == penjualan_id).delete()
+            # IMPORTANT: detach FK, then delete kode_lambung (1-1 lifecycle)
+            if kode_lambung:
+                penjualan.kode_lambung_id = None
+                db.flush()        # ensure FK cleared before deleting parent row
+                db.delete(kode_lambung)
 
-            # 3) Delete header
+            # delete header
             db.delete(penjualan)
             db.commit()
-
             return SuccessResponse(message="Penjualan (DRAFT) deleted successfully")
         except Exception as e:
             db.rollback()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error deleting penjualan: {str(e)}"
-            )
+            raise HTTPException(status_code=500, detail=f"Error deleting penjualan: {str(e)}")
 
-    # --- Path B: SOFT DELETE (archive) if payments exist or not DRAFT ---
+    # --- Path B: SOFT DELETE (not DRAFT or has payments) ---
     try:
         penjualan.is_deleted = True
         penjualan.deleted_at = datetime.utcnow()
+
+        # Mirror soft-delete to kode_lambung so the 1-1 stays consistent
+        if kode_lambung:
+            kode_lambung.is_deleted = True
+            kode_lambung.deleted_at = datetime.utcnow()
+
         db.commit()
         return SuccessResponse(
-            message="Penjualan archived (soft deleted). Items and payments preserved."
+            message="Penjualan archived (soft deleted). Items, payments, and kode_lambung preserved (soft deleted)."
         )
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error archiving penjualan: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Error archiving penjualan: {str(e)}")
 
 @router.get("/{penjualan_id}/invoice/html", response_class=HTMLResponse)
 async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: Session = Depends(get_db)):
@@ -903,9 +975,10 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
         db.query(Penjualan)
         .options(
             joinedload(Penjualan.customer_rel),
+            joinedload(Penjualan.kode_lambung_rel),  # <-- load the kode_lambung relation
             joinedload(Penjualan.penjualan_items)
-            .joinedload(PenjualanItem.item_rel)
-            .joinedload(Item.attachments)
+                .joinedload(PenjualanItem.item_rel)
+                .joinedload(Item.attachments),
         )
         .filter(Penjualan.id == penjualan_id)
         .first()
@@ -939,6 +1012,9 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
         taxable_base = max(row_sub_total - item_discount, Decimal('0'))
         item_tax = (taxable_base * tax_pct) / Decimal('100')
         item_total_price = taxable_base + item_tax
+        kode_lambung_name = (
+        penjualan.kode_lambung_rel.name if penjualan.kode_lambung_rel else None
+        )
         
         item_name = it.item_rel.name if it.item_rel else "Unknown Item"
         satuan_name = it.item_rel.satuan_rel.name if it.item_rel.satuan_rel else "Unknown Satuan"
@@ -984,6 +1060,7 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
             "penjualan": penjualan,
             "enhanced_items": enhanced_items,
             "totals": totals,
+            "kode_lambung_name": kode_lambung_name, 
             "company": {
                 "name": "PT. Jayagiri Indo Asia",
                 "logo_url": get_public_image_url("logo.png", BASE_URL),

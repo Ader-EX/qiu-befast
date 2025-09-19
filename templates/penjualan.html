@@ -53,10 +53,10 @@
             </div>
           </div>
           <div class="info-row">
-            <div class="label">Kode Lambung</div>
+            <div class="label">Kode Lambung Penjualan</div>
             <div class="value">
-              {{ penjualan.customer_rel.kode_lambung if
-              penjualan.customer_rel.kode_lambung else '-' }}
+              {{ penjualan.kode_lambung_rel.name if penjualan.kode_lambung_rel
+              else '-' }}
             </div>
           </div>
         </div>
@@ -79,6 +79,13 @@
             <div class="value">
               {{ penjualan.status_pembayaran.value if
               penjualan.status_pembayaran else '-' }}
+            </div>
+          </div>
+          <div class="info-row">
+            <div class="label">Kode Lambung Customer</div>
+            <div class="value">
+              {{ penjualan.customer_rel.kode_lambung if
+              penjualan.customer_rel.kode_lambung else '-' }}
             </div>
           </div>
         </div>

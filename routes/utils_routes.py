@@ -8,12 +8,13 @@ from fastapi import FastAPI,  APIRouter
 
 from fastapi.params import Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import extract, func
+from sqlalchemy import extract, func, or_
 from sqlalchemy.orm import Session
 from starlette import status
 
 from starlette.exceptions import HTTPException
 
+from models.KodeLambung import KodeLambung
 from models.Customer import Customer
 from models.Item import Item
 from models.Pembelian import Pembelian, PembelianItem, StatusPembelianEnum
@@ -171,138 +172,126 @@ async def get_laba_rugi(
     response_model=PaginatedResponse[SalesReportRow],
     summary="Laporan Penjualan (consolidated per sale)",
 )
+# Make sure you have the correct imports at the top of your file:
+# from models.KodeLambung import KodeLambung  # Import the class, not the module
+# from models.Customer import Customer
+# from sqlalchemy import or_
 async def get_penjualan_laporan(
-        from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-        to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
-        skip: int = Query(0, ge=0, description="Number of records to skip"),
-        limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-        db: Session = Depends(get_db),
+    from_date: datetime = Query(..., description="Start datetime (inclusive)"),
+    to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
+    customer_id: Optional[int] = Query(None, description="Customer ID"),
+    kode_lambung_id: Optional[int] = Query(None, description="Kode Lambung ID"),
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    db: Session = Depends(get_db),
 ):
     """
     Returns one row per sale with concatenated item details and aggregated totals.
+    Shows both customer's kode_lambung and penjualan's kode_lambung.
     """
 
     if to_date is None:
         to_date = datetime.now()
 
-    # Base query to get sales
     sales_query = (
         db.query(
             Penjualan.id,
             Penjualan.sales_date.label("date"),
             Penjualan.customer_name,
             Customer.name.label("customer_name_rel"),
-            Customer.kode_lambung.label("customer_kode_lambung_rel"),
+            Customer.kode_lambung.label("customer_kode_lambung"),   # string kode on Customer
+            Penjualan.kode_lambung_id,
+            KodeLambung.name.label("penjualan_kode_lambung"),       # kode on Penjualan via FK
             Penjualan.no_penjualan,
             Penjualan.status_pembayaran,
         )
         .join(Customer, Customer.id == Penjualan.customer_id, isouter=True)
+        .join(KodeLambung, KodeLambung.id == Penjualan.kode_lambung_id, isouter=True)
         .filter(
-            Penjualan.is_deleted == False,  # Use == False like working endpoint
+            Penjualan.is_deleted == False,
             Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
-            Penjualan.sales_date >= from_date,  # Don't convert to .date()
-            Penjualan.sales_date <= to_date,    # Don't convert to .date()
+            Penjualan.sales_date >= from_date,
+            Penjualan.sales_date <= to_date,
         )
-        .order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc())
     )
 
-    # Get total count
+    if customer_id is not None:
+        sales_query = sales_query.filter(Penjualan.customer_id == customer_id)
+
+    if kode_lambung_id is not None:
+        # Keep BOTH if your Customer has a kode_lambung_id FK; otherwise remove the second clause.
+        sales_query = sales_query.filter(
+            or_(
+                Penjualan.kode_lambung_id == kode_lambung_id,
+                
+            )
+        )
+
+    sales_query = sales_query.order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc())
+
     total_count = sales_query.count()
-    print(f"DEBUG: Total count: {total_count}")
-    print(f"DEBUG: Date range: {from_date} to {to_date}")
-
-    # Get paginated sales
     sales = sales_query.offset(skip).limit(limit).all()
-    print(f"DEBUG: Sales found: {len(sales)}")
-    
-    if sales:
-        print(f"DEBUG: First sale: {sales[0].no_penjualan}, date: {sales[0].date}")
-    else:
-        # Let's check what sales exist
-        all_sales = db.query(Penjualan).filter(Penjualan.is_deleted == False).all()
-        print(f"DEBUG: All sales in DB: {[(s.no_penjualan, s.sales_date, s.status_penjualan) for s in all_sales[:3]]}")
-
 
     def _dec(x) -> Decimal:
         return Decimal(str(x or 0))
 
     report_rows: List[SalesReportRow] = []
-    
+
     for sale in sales:
-        # Get all items for this sale
-        items_query = (
+        items = (
             db.query(
                 PenjualanItem.qty,
                 PenjualanItem.unit_price,
                 PenjualanItem.discount,
                 PenjualanItem.tax_percentage,
                 Item.code.label("item_code"),
-                Item.name.label("item_name")
+                Item.name.label("item_name"),
             )
             .join(Item, Item.id == PenjualanItem.item_id, isouter=True)
             .filter(PenjualanItem.penjualan_id == sale.id)
             .all()
         )
 
-        # Concatenate item details and calculate totals
-        item_codes = []
-        item_names = []
-        total_subtotal = Decimal("0")
-        total_discount = Decimal("0")
-        total_tax = Decimal("0")
+        item_codes, item_names = [], []
+        total_subtotal = total_discount = total_tax = Decimal("0")
         total_qty = 0
 
-        for item in items_query:
-            # Get item details
-            item_code = item.item_code or "N/A"
-            item_name = item.item_name or "N/A"
-            qty = int(item.qty or 0)
-            
-            item_codes.append(item_code)
-            item_names.append(item_name)
-            
-            # Calculate totals
-            price = _dec(item.unit_price)
-            item_subtotal = price * qty
-            item_discount = _dec(item.discount)
-            item_total = item_subtotal - item_discount
-            if item_total < 0:
-                item_total = Decimal("0")
-            
-            tax_pct = Decimal(str(item.tax_percentage or 0))
-            item_tax = (item_total * tax_pct / Decimal(100))
-            
-            total_subtotal += item_subtotal
-            total_discount += item_discount
-            total_tax += item_tax
+        for it in items:
+            qty = int(it.qty or 0)
+            price = _dec(it.unit_price)
+            discount = _dec(it.discount)
+            tax_pct = Decimal(str(it.tax_percentage or 0))
+
+            subtotal = price * qty
+            total_after_discount = max(subtotal - discount, Decimal("0"))
+            tax = total_after_discount * tax_pct / Decimal(100)
+
+            item_codes.append(it.item_code or "N/A")
+            item_names.append(it.item_name or "N/A")
+
+            total_subtotal += subtotal
+            total_discount += discount
+            total_tax += tax
             total_qty += qty
 
-        # Join items with comma
-        item_codes_str = ", ".join(item_codes) if item_codes else "No items"
-        item_names_str = ", ".join(item_names) if item_names else "No items"
-        
-        # Calculate final totals
-        final_total = total_subtotal - total_discount
-        if final_total < 0:
-            final_total = Decimal("0")
+        final_total = max(total_subtotal - total_discount, Decimal("0"))
         grand_total = final_total + total_tax
-
-        # Get customer info
-        customer_name = sale.customer_name or sale.customer_name_rel or "—"
-        kode_lambung = sale.customer_kode_lambung_rel or ""
 
         report_rows.append(
             SalesReportRow(
                 date=sale.date,
-                customer=customer_name,
-                kode_lambung=kode_lambung,
+                customer=sale.customer_name or sale.customer_name_rel or "—",
+                kode_lambung=sale.customer_kode_lambung,
+                
+                kode_lambung_penjualan=sale.penjualan_kode_lambung,
                 no_penjualan=sale.no_penjualan,
-                status=(sale.status_pembayaran.name.capitalize() if hasattr(sale.status_pembayaran, "name")
+                status=(sale.status_pembayaran.name.capitalize()
+                        if hasattr(sale.status_pembayaran, "name")
                         else str(sale.status_pembayaran)),
-                item_code=item_codes_str,
-                item_name=item_names_str,
+                item_code=", ".join(item_codes) or "No items",
+                item_name=", ".join(item_names) or "No items",
                 qty=total_qty,
-                price=total_subtotal / total_qty if total_qty > 0 else Decimal("0"),
+                price=(total_subtotal / total_qty) if total_qty > 0 else Decimal("0"),
                 sub_total=total_subtotal,
                 total=final_total,
                 tax=total_tax,

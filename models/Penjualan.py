@@ -48,6 +48,8 @@ class Penjualan(Base, SoftDeleteMixin):
     warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
     customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
     top_id = Column(Integer, ForeignKey("term_of_payments.id", ondelete="SET NULL"), nullable=True)
+    kode_lambung_id = Column(Integer, ForeignKey("kode_lambungs.id", ondelete="SET NULL"), nullable=True)
+
 
     # ---- Finalized snapshot fields (you already had these; kept intact) ----
     warehouse_name = Column(String(255), nullable=True)
@@ -55,6 +57,7 @@ class Penjualan(Base, SoftDeleteMixin):
     customer_address = Column(Text, nullable=True)
     top_name = Column(String(255), nullable=True)
     currency_name = Column(String(255), nullable=True)
+    
 
     created_at = Column(DateTime, default=datetime.now, nullable=False)
 
@@ -62,6 +65,7 @@ class Penjualan(Base, SoftDeleteMixin):
     customer_rel = relationship("Customer", back_populates="penjualans")
     warehouse_rel = relationship("Warehouse", back_populates="penjualans")
     top_rel = relationship("TermOfPayment", back_populates="penjualans")
+    kode_lambung_rel = relationship("KodeLambung", back_populates="penjualans")
 
     penjualan_items = relationship(
         "PenjualanItem",
@@ -100,6 +104,14 @@ class Penjualan(Base, SoftDeleteMixin):
             return self.customer_address
         if self.customer_rel:
             return self.customer_rel.address
+        return "—"
+
+    @hybrid_property
+    def kode_lambung_display(self) -> str:
+        if self.kode_lambung_name:
+            return self.kode_lambung_name
+        if self.kode_lambung_rel:
+            return self.kode_lambung_rel.name
         return "—"
 
     @hybrid_property
