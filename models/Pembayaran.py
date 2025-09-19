@@ -27,6 +27,7 @@ class Pembayaran(Base):
 
     # Relationships
     customer_rel = relationship("Customer", back_populates="pembayarans")
+    vend_rel = relationship("Vendor", back_populates="pembayarans")
     warehouse_rel = relationship("Warehouse", back_populates="pembayarans")
     curr_rel = relationship("Currency", back_populates="pembayarans")
     

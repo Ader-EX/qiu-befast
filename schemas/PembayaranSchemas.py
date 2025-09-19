@@ -142,6 +142,7 @@ class PembayaranResponse(BaseModel):
 
 
     customer_rel: Optional[CustomerResponse] = None
+    vend_rel: Optional[VendorResponse] = None
     warehouse_rel: Optional[WarehouseResponse] = None
     curr_rel: Optional[CurrencyResponse] = None
     pembayaran_details: List[PembayaranDetailResponse] = []

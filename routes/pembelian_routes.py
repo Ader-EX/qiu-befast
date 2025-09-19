@@ -341,6 +341,7 @@ async def get_all_pembelian(
             "no_pembelian": pembelian.no_pembelian,
             "status_pembayaran": pembelian.status_pembayaran,
             "status_pembelian": pembelian.status_pembelian,
+            "vendor_name"  : pembelian.vend_rel.name,
             "sales_date": pembelian.sales_date,
             "total_paid": pembelian.total_paid.quantize(Decimal('0.0001')),
             "total_return": pembelian.total_return.quantize(Decimal('0.0001')),
@@ -391,7 +392,8 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         sales_due_date=request.sales_due_date,
         additional_discount=request.additional_discount or Decimal('0'),
         expense=request.expense or Decimal('0'),
-        status_pembelian=StatusPembelianEnum.DRAFT
+        status_pembelian=StatusPembelianEnum.DRAFT,
+        currency_amount = request.currency_amount or Decimal('0')
     )
 
     db.add(pembelian)
@@ -407,12 +409,18 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
             if item_request.unit_price is not None
             else Decimal(str(item.price))
         )
+        unit_price_rmb = (
+            Decimal(str(item_request.unit_price_rmb) )
+            if item_request.unit_price_rmb is not None
+            else Decimal(str(item.price))
+        )
 
         pembelian_item = PembelianItem(
             pembelian_id=pembelian.id,
             item_id=item_request.item_id,
             qty=item_request.qty,
             unit_price=unit_price,
+            unit_price_rmb=unit_price_rmb,
             tax_percentage=item_request.tax_percentage or 0,
             discount=item_request.discount or Decimal('0')
         )

@@ -443,7 +443,7 @@ async def get_all_penjualan(
                 no_penjualan=p.no_penjualan,
                 status_pembayaran=p.status_pembayaran,
                 status_penjualan=p.status_penjualan,
-                sales_date=p.sales_date,
+
                 total_paid=p.total_paid.quantize(Decimal("0.0001")),
                 total_return=p.total_return.quantize(Decimal("0.0001")),
                 total_price=p.total_price.quantize(Decimal("0.0001")),
@@ -498,6 +498,7 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
         additional_discount=request.additional_discount or Decimal("0"),
         expense=request.expense or Decimal("0"),
         status_penjualan=StatusPembelianEnum.DRAFT,
+        currency_amount = request.currency_amount or Decimal('0')
     )
     db.add(p)
     db.flush()
@@ -505,11 +506,18 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
     for it in request.items:
         item = validate_item_exists(db, it.item_id)
         unit_price = Decimal(str(it.unit_price)) if it.unit_price is not None else Decimal(str(item.price))
+        unit_price_rmb = (
+            Decimal(str(it.unit_price_rmb) )
+            if it.unit_price_rmb is not None
+            else Decimal(str(item.price))
+        )
+
         line = PenjualanItem(
             penjualan_id=p.id,
             item_id=item.id,
             qty=it.qty,
             unit_price=unit_price,
+            unit_price_rmb=unit_price_rmb,
             tax_percentage=it.tax_percentage or 0,
             discount=it.discount or Decimal("0"),
         )

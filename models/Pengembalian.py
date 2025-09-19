@@ -27,6 +27,7 @@ class Pengembalian(Base):
 
     # Relationships
     customer_rel = relationship("Customer", back_populates="pengembalians")
+    vend_rel = relationship("Vendor", back_populates="pengembalians")
     warehouse_rel = relationship("Warehouse", back_populates="pengembalians")
     curr_rel = relationship("Currency", back_populates="pengembalians")
     

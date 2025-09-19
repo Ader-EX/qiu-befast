@@ -175,8 +175,7 @@ def get_pembayarans(
         joinedload(Pembayaran.pembayaran_details).joinedload(PembayaranDetails.pembelian_rel),
         joinedload(Pembayaran.pembayaran_details).joinedload(PembayaranDetails.penjualan_rel),
         joinedload(Pembayaran.customer_rel),
-       
-        joinedload(Pembayaran.warehouse_rel),
+        joinedload(Pembayaran.vend_rel),
         joinedload(Pembayaran.curr_rel)
     ).order_by(Pembayaran.created_at.desc()).offset(skip).limit(limit).all()
 
@@ -195,6 +194,7 @@ def get_pembayaran(pembayaran_id: int, db: Session = Depends(get_db)):
         joinedload(Pembayaran.pembayaran_details).joinedload(PembayaranDetails.pembelian_rel),
         joinedload(Pembayaran.pembayaran_details).joinedload(PembayaranDetails.penjualan_rel),
         joinedload(Pembayaran.customer_rel),
+        joinedload(Pembayaran.vend_rel),
         joinedload(Pembayaran.attachments),
         joinedload(Pembayaran.warehouse_rel),
         joinedload(Pembayaran.curr_rel)

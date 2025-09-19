@@ -26,6 +26,7 @@ class PenjualanItemBase(BaseModel):
     discount: NonNegDec = Field(default=Decimal("0.00"), ge=0)
     qty: int = Field(gt=0)                                   # must be > 0
     unit_price: NonNegDec = Field(ge=0)                      # cannot be negative
+    unit_price_rmb: NonNegDec = Field(ge=0)            # cannot be negative
     tax_percentage: int = Field(default=0, ge=0, le=100)     # 0..100
 
 class PenjualanItemCreate(PenjualanItemBase):
@@ -47,6 +48,7 @@ class PenjualanItemResponse(BaseModel):
     # Quantities & pricing inputs
     qty: int
     unit_price: NonNegDec
+    unit_price_rmb: NonNegDec
     tax_percentage: int = 0
     discount: NonNegDec = Decimal("0.00")
 
@@ -101,6 +103,7 @@ class PenjualanCreate(BaseModel):
     additional_discount: Optional[NonNegDec] = Decimal("0.00")
     expense: Optional[NonNegDec] = Decimal("0.00")
     items: List[PenjualanItemCreate] = Field(default_factory=list)
+    currency_amount : float = Decimal("0.00")
 
     @model_validator(mode="after")
     def _require_items(self):
@@ -142,6 +145,7 @@ class PenjualanResponse(BaseModel):
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
     created_at: datetime
+    currency_amount : Optional[NonNegDec] = None
 
     # Financial fields (mirror Pembelian header; match Penjualan model)
     total_subtotal: NonNegDec = Decimal("0.00")
@@ -200,6 +204,7 @@ class PenjualanListResponse(BaseModel):
     total_paid: NonNegDec
     total_return: NonNegDec
     remaining: NonNegDec
+    customer_name : str
 
     # Optional counts & names
     items_count: int = 0

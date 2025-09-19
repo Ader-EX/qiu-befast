@@ -21,4 +21,6 @@ class Vendor(Base, SoftDeleteMixin):
     curr_rel = relationship("Currency",cascade="all, delete", back_populates="vend_rel")
     top_rel = relationship("TermOfPayment",cascade="all, delete", back_populates="vend_rel")
     pembelians = relationship("Pembelian",cascade="all, delete", back_populates="vend_rel")
+    pembayarans = relationship("Pembayaran",cascade="all, delete", back_populates="vend_rel")
+    pengembalians = relationship("Pengembalian",cascade="all, delete", back_populates="vend_rel")
 

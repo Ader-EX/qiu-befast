@@ -27,8 +27,10 @@ class Penjualan(Base, SoftDeleteMixin):
     # Dates aligned with Pembelian
     sales_date = Column(DateTime, nullable=True, default=datetime.now)
     sales_due_date = Column(DateTime, nullable=True, default=lambda: datetime.now() + timedelta(weeks=1))
+    currency_amount = Column(Numeric(15,7), default=0.00)
 
-    # ---- Totals (match Pembelian header fields) ----
+
+# ---- Totals (match Pembelian header fields) ----
     total_subtotal = Column(Numeric(15, 7), default=0.00)
 
     total_discount = Column(Numeric(15, 7), default=0.00)
@@ -115,6 +117,7 @@ class PenjualanItem(Base):
     # ---- Item pricing fields aligned with PembelianItem ----
     qty = Column(Integer, nullable=False, default=0)
     unit_price = Column(Numeric(15, 7), nullable=False, default=0.00)        # harga per unit
+    unit_price_rmb = Column(Numeric(15, 7), nullable=False, default=0.00) # harga item per barang in RMB
     tax_percentage = Column(Integer, nullable=True, default=0)               # %
     discount = Column(Numeric(15, 7), default=0.00)                          # nominal discount (not %)
     price_after_tax = Column(Numeric(15, 7), default=0.00)                   # unit price after tax (if you use it)

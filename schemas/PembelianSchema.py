@@ -27,6 +27,7 @@ class PembelianItemBase(BaseModel):
     discount: Optional[NonNegDec] = Field(default=Decimal("0.00"), ge=0)
     qty: int = Field(gt=0)                         # must be > 0
     unit_price: NonNegDec = Field(ge=0)            # cannot be negative
+    unit_price_rmb: NonNegDec = Field(ge=0)            # cannot be negative
     tax_percentage: int = Field(default=0, ge=0, le=100)   # 0-100%
 
 class PembelianItemCreate(PembelianItemBase):
@@ -49,15 +50,14 @@ class PembelianItemResponse(BaseModel):
     # Quantity and pricing
     qty: int
     unit_price: NonNegDec
+    unit_price_rmb: NonNegDec
     tax_percentage: int = 0
     discount: NonNegDec = Decimal("0.00")
-    
-    # Calculated fields (from your model)
+
     price_after_tax: NonNegDec = Decimal("0.00")
     sub_total: NonNegDec = Decimal("0.00")
     total_price: NonNegDec = Decimal("0.00")
 
-    # Related item (only available in draft mode)
     item: Optional[ItemResponse] = Field(
         default=None,
         validation_alias=AliasChoices("item_rel", "item"),
@@ -105,6 +105,7 @@ class PembelianCreate(BaseModel):
     additional_discount: Optional[NonNegDec] = Decimal("0.00")
     expense: Optional[NonNegDec] = Decimal("0.00")
     items: List[PembelianItemCreate] = Field(default_factory=list)
+    currency_amount : float = Decimal("0.00")
 
     @model_validator(mode="after")
     def _require_items(self):
@@ -123,6 +124,7 @@ class PembelianUpdate(BaseModel):
     sales_due_date: Optional[datetime] = None
     additional_discount: Optional[NonNegDec] = None
     expense: Optional[NonNegDec] = None
+    currency_amount : Optional[NonNegDec] = None
     items: Optional[List[PembelianItemUpdate]] = None
 
     @field_validator("no_pembelian")
@@ -145,6 +147,7 @@ class PembelianResponse(BaseModel):
 
     sales_date: Optional[datetime] = None
     sales_due_date: Optional[datetime] = None
+    currency_amount : NonNegDec = Decimal("0.00")
     created_at: datetime
 
     # Financial fields - matching your model structure
@@ -157,6 +160,7 @@ class PembelianResponse(BaseModel):
     total_price: NonNegDec = Decimal("0.00")
     total_paid: NonNegDec = Decimal("0.00")
     total_return: NonNegDec = Decimal("0.00")
+
 
     # Draft mode fields (ForeignKey references)
     warehouse_id: Optional[int] = None
@@ -184,6 +188,8 @@ class PembelianStatusUpdate(BaseModel):
     status_pembayaran: Optional[StatusPembayaranEnum] = None
 
 
+
+
 class PembelianListResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -198,6 +204,7 @@ class PembelianListResponse(BaseModel):
     total_paid: NonNegDec
     total_return: NonNegDec
     remaining: NonNegDec  # From hybrid property
+    vendor_name : str
 
     # Counts
     items_count: int = 0
