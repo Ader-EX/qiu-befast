@@ -418,13 +418,13 @@ def _process_row(
         cat1_name = str(row['kategori_1']).lower().strip()
         category_one_id = categories_lookup.get(cat1_name)
         if not category_one_id:
-            raise ValueError(f"Kategori 1 '{row['kategori_1']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
+            raise ValueError(f"Brand '{row['kategori_1']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
 
     if not pd.isna(row.get('kategori_2')) and str(row.get('kategori_2')).strip():
         cat2_name = str(row['kategori_2']).lower().strip()
         category_two_id = categories_lookup.get(cat2_name)
         if not category_two_id:
-            raise ValueError(f"Kategori 2 '{row['kategori_2']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
+            raise ValueError(f"Jenis Barang '{row['kategori_2']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
 
     try:
         if pd.isna(row.get('harga_jual')) or str(row.get('harga_jual')).strip() == '':

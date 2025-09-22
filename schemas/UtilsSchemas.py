@@ -94,3 +94,31 @@ class PurchaseReportResponse(BaseModel):
 
     class Config:
         json_encoders = {Decimal: lambda v: str(v)}
+
+class SalesTrendDataPoint(BaseModel):
+    date: datetime
+    order_count: int
+    revenue: Decimal
+
+    class Config:
+        json_encoders = {
+            Decimal: lambda v: float(v)
+        }
+
+class SalesTrendResponse(BaseModel):
+    title: str
+    period: str
+    data: List[SalesTrendDataPoint]
+    total_orders: int
+    total_revenue: Decimal
+
+    class Config:
+        json_encoders = {
+            Decimal: lambda v: float(v)
+        }
+
+class LowStockAlertResponse(BaseModel):
+    sku : str
+    item_name : str
+    qty: int
+    reorder_qty : int

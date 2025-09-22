@@ -23,7 +23,8 @@ from models.Vendor import Vendor
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.UserSchemas import UserCreate, TokenSchema, RequestDetails, UserOut, UserUpdate, UserType
 from database import  get_db
-from schemas.UtilsSchemas import DashboardStatistics, LabaRugiResponse, PurchaseReportResponse, PurchaseReportRow, SalesReportRow, SalesReportResponse
+from schemas.UtilsSchemas import DashboardStatistics, LabaRugiResponse, PurchaseReportResponse, PurchaseReportRow, \
+    SalesReportRow, SalesReportResponse, SalesTrendResponse, SalesTrendDataPoint
 from utils import get_hashed_password, verify_password, create_access_token, create_refresh_token
 from models.User import User
 
@@ -57,7 +58,7 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
         return ((current - previous) / previous * 100)
 
     # Products
-    total_products = db.query(Item).count()
+    total_products = db.query(Item).filter(Item.is_active == True).count()
     this_month_products = db.query(Item).filter(
         extract('month', Item.created_at) == this_month,
         extract('year', Item.created_at) == this_year
@@ -70,7 +71,7 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
     status_month_products = get_status(this_month_products, last_month_products)
 
     # Customers
-    total_customer = db.query(Customer).count()
+    total_customer = db.query(Customer).filter(Customer.is_active == True).count()
     this_month_customer = db.query(Customer).filter(
         extract('month', Customer.created_at) == this_month,
         extract('year', Customer.created_at) == this_year
@@ -762,4 +763,117 @@ async def download_pembelian_laporan(
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Content-Type": "text/csv; charset=utf-8"
         }
+    )
+
+
+@router.get("/tren-penjualan", response_model=SalesTrendResponse)
+async def get_sales_trend(
+        period: str = Query(
+            "mtd",
+            regex="^(daily|mtd|custom)$",
+            description="Period: 'daily' (last 30 days), 'mtd' (month to date), 'custom' (requires from_date and to_date)"
+        ),
+        from_date: Optional[datetime] = Query(None, description="Start date for custom period"),
+        to_date: Optional[datetime] = Query(None, description="End date for custom period"),
+        db: Session = Depends(get_db)
+):
+    """
+    Get sales trend data showing daily order count and revenue.
+
+    - **daily**: Last 30 days from today
+    - **mtd**: Month to date (from 1st of current month to today)
+    - **custom**: Custom date range (requires from_date and to_date)
+    """
+
+    now = datetime.now()
+
+    # Determine date range based on period
+    if period == "daily":
+        start_date = (now - timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        title = "Tren Penjualan - 30 Hari Terakhir"
+
+    elif period == "mtd":
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end_date = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        title = f"Tren Penjualan - Month to Date ({start_date.strftime('%B %Y')})"
+
+    elif period == "custom":
+        if not from_date or not to_date:
+            raise HTTPException(
+                status_code=400,
+                detail="from_date and to_date are required for custom period"
+            )
+        start_date = from_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = to_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        title = f"Tren Penjualan - {start_date.strftime('%d/%m/%Y')} s/d {end_date.strftime('%d/%m/%Y')}"
+
+    # Query to get daily sales data
+    daily_sales = (
+        db.query(
+            func.date(Penjualan.sales_date).label('sale_date'),
+            func.count(Penjualan.id).label('order_count'),
+            func.coalesce(func.sum(Penjualan.total_price), 0).label('revenue')
+        )
+        .filter(
+            Penjualan.is_deleted == False,
+            Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
+            Penjualan.sales_date >= start_date,
+            Penjualan.sales_date <= end_date,
+            Penjualan.sales_date.isnot(None)  # Exclude null dates
+        )
+        .group_by(func.date(Penjualan.sales_date))
+        .order_by(func.date(Penjualan.sales_date))
+        .all()
+    )
+
+    # Convert to response format
+    trend_data = []
+    total_orders = 0
+    total_revenue = Decimal('0')
+
+    for sale_data in daily_sales:
+        # Convert date to datetime for consistent response
+        sale_datetime = datetime.combine(sale_data.sale_date, datetime.min.time())
+        revenue = Decimal(str(sale_data.revenue or 0))
+
+        trend_data.append(SalesTrendDataPoint(
+            date=sale_datetime,
+            order_count=sale_data.order_count,
+            revenue=revenue
+        ))
+
+        total_orders += sale_data.order_count
+        total_revenue += revenue
+
+    # Fill missing dates with zero values (optional - for complete timeline)
+    if period in ["daily", "mtd"]:
+        # Create a complete date range
+        current_date = start_date.date()
+        end_date_only = end_date.date()
+        existing_dates = {dp.date.date() for dp in trend_data}
+
+        complete_data = []
+        while current_date <= end_date_only:
+            if current_date in existing_dates:
+                # Find existing data point
+                existing_point = next(dp for dp in trend_data if dp.date.date() == current_date)
+                complete_data.append(existing_point)
+            else:
+                # Add zero data point for missing dates
+                complete_data.append(SalesTrendDataPoint(
+                    date=datetime.combine(current_date, datetime.min.time()),
+                    order_count=0,
+                    revenue=Decimal('0')
+                ))
+            current_date += timedelta(days=1)
+
+        trend_data = complete_data
+
+    return SalesTrendResponse(
+        title=title,
+        period=period,
+        data=trend_data,
+        total_orders=total_orders,
+        total_revenue=total_revenue
     )
