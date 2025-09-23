@@ -11,7 +11,7 @@ import shutil
 import os
 import uuid
 
-
+from models.AuditTrail import AuditEntityEnum
 from models.Item import Item
 from database import get_db
 from models.AllAttachment import AllAttachment, ParentType
@@ -26,8 +26,8 @@ import io
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from decimal import Decimal
-
-from utils import generate_unique_record_code, soft_delete_record
+from services.audit_services import AuditService
+from utils import generate_unique_record_code, soft_delete_record,get_current_user_name
 
 router = APIRouter()
 
@@ -60,11 +60,17 @@ class ImportOptions(BaseModel):
     update_existing: bool = False
     default_item_type: ItemTypeEnum = ItemTypeEnum.FINISH_GOOD
 
-def _create_new_item(db: Session, item_data: Dict[str, Any]):
+def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: AuditService, user_name: str):
     """Create a new item."""
     new_item = Item(**item_data)
     db.add(new_item)
     db.flush()
+    audit_service.default_log(
+        entity_id=new_item.id,
+        entity_type=AuditEntityEnum.ITEM,
+        description=f"Created item {db_item.name} via import",
+        user_name=user_name,
+    )
 
 def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_id: int):
     """Update an existing item."""
@@ -104,13 +110,15 @@ async def create_item(
         category_one: Optional[int] = Form(None),
         category_two: Optional[int] = Form(None),
         satuan_id: int = Form(...),
-
         db: Session = Depends(get_db),
+        user_name: str = Depends(get_current_user_name),
 ):
     if len(images) > 3:
         raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
 
     pattern = get_item_prefix(type)
+
+    audit_service = AuditService(db)
 
     # SKU validation
     existing_item = db.query(Item).filter(Item.sku == sku).first()
@@ -177,11 +185,19 @@ async def create_item(
         db.commit()
         db.refresh(db_item)
 
+        audit_service.default_log(
+            entity_id=db_item.id,
+            entity_type=AuditEntityEnum.ITEM,
+            description=f"Created item {db_item.name}",
+            user_name=user_name,
+        )
+
         return db_item
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"{str(e)}")
+
 
 @router.get("", response_model=PaginatedResponse[ItemResponse])
 def get_items(
@@ -254,7 +270,8 @@ async def import_items_from_excel(
         skip_on_error: bool = Query(True, description="Skip rows with errors instead of failing completely"),
         update_existing: bool = Query(False, description="Update existing items if SKU already exists"),
         default_item_type: ItemTypeEnum = Query(ItemTypeEnum.FINISH_GOOD, description="Default item type if not specified"),
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        user_name: str = Depends(get_current_user_name)
 ):
     """
     Import items from Excel/CSV file using the template format.
@@ -278,6 +295,8 @@ async def import_items_from_excel(
     try:
         # Read file content
         content = await file.read()
+
+        audit_service = AuditService(db)
 
         # Parse based on file type
         if file.filename.endswith('.csv'):
@@ -342,10 +361,13 @@ async def import_items_from_excel(
                         'row': index + 2,
                         'message': f"Updated existing item with SKU: {item_data['sku']}"
                     })
+                    
                 else:
-                    _create_new_item(db, item_data)
+                    _create_new_item(db, item_data, audit_service,user_name)
+
 
                 result.successful_imports += 1
+
 
             except Exception as e:
                 error_msg = str(e)
@@ -482,10 +504,14 @@ async def update_item(
         satuan_id: int = Form(...),
         images: List[UploadFile] = File(default=[]),
         db: Session = Depends(get_db),
+        user_name: str = Depends(get_current_user_name),
 ):
     # Validate file sizes before processing
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB per file
     MAX_TOTAL_SIZE = 30 * 1024 * 1024  # 30MB total
+
+
+    audit_service = AuditService(db)
 
     total_size = 0
     for image in images:
@@ -571,6 +597,13 @@ async def update_item(
         db.commit()
         db.refresh(db_item)
 
+        audit_service.default_log(
+            entity_id=db_item.id,
+            entity_type=AuditEntityEnum.ITEM,
+            description=f"Updated Item {db_item.name}",
+            user_name=user_name,
+        )
+
         return construct_item_response(db_item, request)
 
     except HTTPException:
@@ -579,6 +612,7 @@ async def update_item(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating item: {str(e)}")
+
 
 @router.delete("/{item_id}")
 def delete_item(item_id: int, db: Session = Depends(get_db)):

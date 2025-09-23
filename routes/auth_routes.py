@@ -64,8 +64,8 @@ def login(request: RequestDetails, db: Session = Depends(get_db)):
             detail="Password atau username salah"
         )
 
-    access=create_access_token(user.id)
-    refresh = create_refresh_token(user.id)
+    access=create_access_token(user.id, user.username)
+    refresh = create_refresh_token(user.id, user.username)
     db.commit()
     db.refresh(user)
 

@@ -2,25 +2,46 @@ import os
 import random
 import time
 
+from fastapi import HTTPException, Depends
+from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
-from typing import Union, Any
+from typing import Union, Any, Optional
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 import jwt
 
-
+from models.AuditTrail import AuditTrail
 
 password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
+
 
 def get_hashed_password(password: str) -> str:
     return password_context.hash(password)
 
+def get_current_user_name(token: Optional[str] = Depends(oauth2_scheme)) -> str:
+    # If no token is provided, return "KOSONGAN" for testing
+    if token is None:
+        return "KOSONGAN"
+
+    try:
+        # Decode JWT token
+        payload = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=[os.getenv("ALGORITHM")])
+        username: str = payload.get("un")  # or "sub", depending on how your JWT is structured
+        if username is None:
+            return "KOSONGAN"
+            # raise HTTPException(status_code=401, detail="Invalid token")
+        return username
+    except jwt.exceptions.PyJWTError:
+        return "KOSONGAN"
 
 def verify_password(password: str, hashed_pass: str) -> bool:
     return password_context.verify(password, hashed_pass)
 
-def create_access_token(subject: Union[str, Any], expires_delta: int = None) -> str:
+def create_access_token(subject: Union[str, Any],name : str, expires_delta: int = None ) -> str:
     if expires_delta is not None:
         expires_delta = datetime.now() + expires_delta
 
@@ -28,18 +49,18 @@ def create_access_token(subject: Union[str, Any], expires_delta: int = None) -> 
         expires_delta = datetime.now() + timedelta(minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES",600)))
 
 
-    to_encode = {"exp": expires_delta, "sub": str(subject)}
+    to_encode = {"exp": expires_delta, "sub": str(subject), "un": name}
     encoded_jwt = jwt.encode(to_encode, os.getenv("JWT_SECRET_KEY"), os.getenv("ALGORITHM"))
 
     return encoded_jwt
 
-def create_refresh_token(subject: Union[str, Any], expires_delta: int = None) -> str:
+def create_refresh_token(subject: Union[str, Any],name : str, expires_delta: int = None) -> str:
     if expires_delta is not None:
         expires_delta = datetime.now() + expires_delta
     else:
         expires_delta = datetime.now() + timedelta(minutes=600)
 
-    to_encode = {"exp": expires_delta, "sub": str(subject)}
+    to_encode = {"exp": expires_delta, "sub": str(subject), "un": name}
     encoded_jwt = jwt.encode(to_encode, os.getenv("JWT_REFRESH_SECRET_KEY"), os.getenv("ALGORITHM"))
     return encoded_jwt
 
@@ -296,3 +317,30 @@ def generate_unique_record_code(
 
     nomor_urut = counter + 1
     return f"{prefix}-{nomor_urut:05d}"
+
+
+class AuditQueryHelper:
+    """Helper class for querying audit trails"""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_entity_history(self, entity_type: str, entity_id: str, limit: int = 50):
+        """Get complete history for a specific entity"""
+        return self.db.query(AuditTrail).filter(
+            AuditTrail.entity_type == entity_type.upper(),
+            AuditTrail.entity_id == str(entity_id)
+        ).order_by(AuditTrail.timestamp.desc()).limit(limit).all()
+
+    def get_user_activity(self, user_name: str, limit: int = 50):
+        """Get recent activity for a specific user"""
+        return self.db.query(AuditTrail).filter(
+            AuditTrail.user_name == user_name
+        ).order_by(AuditTrail.timestamp.desc()).limit(limit).all()
+
+    def get_recent_activity(self, entity_type: Optional[str] = None, limit: int = 50):
+        """Get recent activity, optionally filtered by entity type"""
+        query = self.db.query(AuditTrail)
+        if entity_type:
+            query = query.filter(AuditTrail.entity_type == entity_type.upper())
+        return query.order_by(AuditTrail.timestamp.desc()).limit(limit).all()
