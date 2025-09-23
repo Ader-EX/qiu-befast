@@ -129,6 +129,7 @@ def get_pengembalians(
         reference_type: Optional[PembayaranPengembalianType] = None,
         status: Optional[StatusPembelianEnum] = None,
         db: Session = Depends(get_db),
+        search_key: Optional[str] = Query(None, description="Search by return number"),
         to_date : Optional[date] = Query(None, description="Filter by date"),
         from_date : Optional[date] = Query(None, description="Filter by date"),
 ):
@@ -158,6 +159,8 @@ def get_pengembalians(
 
     if status and status != "ALL":
         query = query.filter(Pengembalian.status == status)
+    if search_key:
+        query = query.filter(Pengembalian.no_pengembalian.ilike(f"%{search_key}%"))
 
     total = query.count()
 

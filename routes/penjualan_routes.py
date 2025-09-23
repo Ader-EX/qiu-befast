@@ -420,17 +420,15 @@ async def get_all_penjualan(
 
     if from_date and to_date:
             query = query.filter(
-                Penjualan.created_at.between(
+                Penjualan.sales_date.between(
                     datetime.combine(from_date, time.min),
                     datetime.combine(to_date, time.max),
                 )
             )
     elif from_date:
-        query = query.filter(Penjualan.created_at >= datetime.combine(from_date, time.min))
+        query = query.filter(Penjualan.sales_date >= datetime.combine(from_date, time.min))
     elif to_date:
-        query = query.filter(Penjualan.created_at <= datetime.combine(to_date, time.max))
-
-
+        query = query.filter(Penjualan.sales_date <= datetime.combine(to_date, time.max))
 
     total = query.count()
     offset = (page - 1) * size

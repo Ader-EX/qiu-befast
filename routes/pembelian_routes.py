@@ -316,15 +316,15 @@ async def get_all_pembelian(
 
     if from_date and to_date:
         query = query.filter(
-            Pembelian.created_at.between(
+            Pembelian.sales_date.between(
                 datetime.combine(from_date, time.min),
                 datetime.combine(to_date, time.max),
             )
         )
     elif from_date:
-        query = query.filter(Pembelian.created_at >= datetime.combine(from_date, time.min))
+        query = query.filter(Pembelian.sales_date >= datetime.combine(from_date, time.min))
     elif to_date:
-        query = query.filter(Pembelian.created_at <= datetime.combine(to_date, time.max))
+        query = query.filter(Pembelian.sales_date <= datetime.combine(to_date, time.max))
 
     # Get total count before pagination
     total = query.count()

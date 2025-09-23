@@ -133,7 +133,7 @@ def get_pembayarans(
         reference_type: Optional[PembayaranPengembalianType] = None,
         status: Optional[StatusPembelianEnum] = None,
         db: Session = Depends(get_db),
-
+        search : Optional[str] = Query(None, description="Search by payment number or notes"),
         to_date : Optional[date] = Query(None, description="Filter by date"),
         from_date : Optional[date] = Query(None, description="Filter by date"),
 ):
@@ -167,6 +167,11 @@ def get_pembayarans(
 
     if status and status != "ALL":
         query = query.filter(Pembayaran.status == status)
+
+    if search:
+        query = query.filter(or_(
+            Pembayaran.no_pembayaran.ilike(f"%{search}%"),
+        ))
 
     total = query.count()
 
