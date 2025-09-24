@@ -17,6 +17,8 @@ from starlette.responses import HTMLResponse
 
 from database import get_db
 from starlette.requests import Request
+
+from models.AuditTrail import AuditEntityEnum
 from models.Vendor import Vendor  
 from models.Item import Item
 from models.Pembelian import Pembelian, StatusPembelianEnum,PembelianItem, StatusPembayaranEnum
@@ -25,7 +27,9 @@ from routes.upload_routes import get_public_image_url, to_public_image_url, temp
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PembelianSchema import TotalsResponse, PembelianListResponse, PembelianResponse, PembelianCreate, \
     PembelianUpdate, PembelianStatusUpdate, UploadResponse, SuccessResponse
-from utils import generate_unique_record_number
+from services.audit_services import AuditService
+from utils import generate_unique_record_number, get_current_user_name
+
 router = APIRouter()
 
 # Configuration
@@ -86,7 +90,9 @@ def update_item_stock(db: Session, item_id: int, qty_change: int) -> None:
     # Apply the quantity change (for purchases, this should be positive to add stock)
     item.total_item = item.total_item + qty_change
 
-def calculate_pembelian_totals(db: Session, pembelian_id: int):
+def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name :str, msg : str ):
+
+    audit_service = AuditService(db)
     items = db.query(PembelianItem).filter(PembelianItem.pembelian_id == pembelian_id).all()
 
     total_subtotal = Decimal('0')
@@ -94,7 +100,6 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int):
     total_tax = Decimal('0')
 
     for line in items:
-        # Ensure per-line values follow the same rules
         calculate_item_totals(line)
 
         qty = Decimal(str(line.qty or 0))
@@ -133,6 +138,13 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int):
     pembelian.expense = expense
     pembelian.total_price = total_price
 
+    audit_service.default_log(
+        entity_id=pembelian.id,
+        entity_type=AuditEntityEnum.PEMBELIAN,
+        description=f"Pembelian {pembelian.no_pembelian} {msg} : Total {pembelian.total_price} ",
+        user_name=user_name
+    )
+
     db.commit()
 
     return {
@@ -145,7 +157,8 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int):
         "total_price": total_price,
     }
 
-def finalize_pembelian(db: Session, pembelian_id: int):
+def finalize_pembelian(db: Session, pembelian_id: int, user_name : str):
+    audit_service  = AuditService(db)
     """Finalize pembelian and update stock"""
     pembelian = db.query(Pembelian).options(
         selectinload(Pembelian.warehouse_rel),
@@ -168,20 +181,23 @@ def finalize_pembelian(db: Session, pembelian_id: int):
     if not pembelian.pembelian_items:
         raise HTTPException(status_code=400, detail="At least one item is required for finalization")
 
-
-    
-    # Copy item data and update stock (ADD quantities for purchases)
     for pembelian_item in pembelian.pembelian_items:
         if pembelian_item.item_rel:
             item = pembelian_item.item_rel
             if hasattr(item, 'satuan_rel') and item.satuan_rel:
                 pembelian_item.satuan_name = item.satuan_rel.name
 
-        # Add the purchased quantity to stock
         update_item_stock(db, pembelian_item.item_id, pembelian_item.qty)
 
     # Update status
     pembelian.status_pembelian = StatusPembelianEnum.ACTIVE
+
+    audit_service.default_log(
+        entity_id=pembelian.id,
+        entity_type=AuditEntityEnum.PEMBELIAN,
+        description=f"Pembelian {pembelian.no_pembelian} status transaksi diubah: Draft → Aktif",
+        user_name=user_name
+    )
     db.commit()
 
 def validate_draft_status(pembelian: Pembelian):
@@ -378,8 +394,9 @@ async def get_pembelian(pembelian_id: int, db: Session = Depends(get_db)):
     return pembelian
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_db)):
+async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_db), user_name: str = Depends(get_current_user_name)):
     """Create new pembelian in DRAFT status - DOES NOT UPDATE STOCK YET"""
+
     
     # Create pembelian
     pembelian = Pembelian(
@@ -424,7 +441,6 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
             tax_percentage=item_request.tax_percentage or 0,
             discount=item_request.discount or Decimal('0')
         )
-        
         # Calculate totals for this item
         calculate_item_totals(pembelian_item)
         
@@ -432,8 +448,8 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
 
     db.commit()
 
-    # Calculate pembelian totals
-    calculate_pembelian_totals(db, pembelian.id)
+
+    calculate_pembelian_totals(db, pembelian.id,user_name,"telah dibuat")
 
     return {
         "detail": "Pembelian created successfully",
@@ -445,6 +461,7 @@ async def update_pembelian(
     pembelian_id: int,
     request: PembelianUpdate,
     db: Session = Depends(get_db),
+    user_name: str = Depends(get_current_user_name)
 ):
     """Update pembelian - only updates stock if quantities change and pembelian is ACTIVE/PROCESSED"""
     
@@ -562,7 +579,7 @@ async def update_pembelian(
     # Commit and recalc totals if anything changed
     if fields_changed or items_changed:
         db.commit()
-        calculate_pembelian_totals(db, pembelian_id)
+        calculate_pembelian_totals(db, pembelian_id,user_name, "telah diubah")
         db.commit()
     else:
         db.rollback()
@@ -570,12 +587,13 @@ async def update_pembelian(
     return await get_pembelian(pembelian_id, db)
 
 @router.patch("/{pembelian_id}", status_code=status.HTTP_200_OK)
-async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get_db)):
+async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get_db), user_name : str  = Depends(get_current_user_name)):
     """
     Rolls back the status of a purchase ('Pembelian') to 'DRAFT'
     if its current status is 'ACTIVE' or 'COMPLETED'.
     Also reverses stock changes by subtracting the quantities.
     """
+    audit_service  = AuditService(db)
 
     pembelian = (
         db.query(Pembelian)
@@ -588,14 +606,11 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pembelian not found")
 
     if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
-        # Reverse stock changes - subtract the quantities that were added
         for pembelian_item in pembelian.pembelian_items:
             update_item_stock(db, pembelian_item.item_id, -pembelian_item.qty)
         
-        # Change status back to DRAFT
         pembelian.status_pembelian = StatusPembelianEnum.DRAFT
-        
-        # Clear finalized data (optional)
+
         pembelian.warehouse_name = None
         pembelian.vendor_name = None
         pembelian.vendor_address = None
@@ -603,14 +618,21 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
         pembelian.currency_name = None
     
     db.commit()
+
+    audit_service.default_log(
+        entity_id=pembelian.id,
+        entity_type=AuditEntityEnum.PEMBELIAN,
+        description=f"Pembelian {pembelian.no_pembelian} status transaksi diubah: Aktif → Draft",
+        user_name=user_name
+    )
     return {
         "msg": "Pembelian status changed successfully"
     }
 
 @router.post("/{pembelian_id}/finalize", response_model=PembelianResponse)
-async def finalize_pembelian_endpoint(pembelian_id: int, db: Session = Depends(get_db)):
+async def finalize_pembelian_endpoint(pembelian_id: int, db: Session = Depends(get_db), user_name : str  = Depends(get_current_user_name)):
     """Finalize pembelian - convert from DRAFT to ACTIVE and update stock"""
-    finalize_pembelian(db, pembelian_id)
+    finalize_pembelian(db, pembelian_id, user_name)
     return await get_pembelian(pembelian_id, db)
 
 @router.put("/{pembelian_id}/status", response_model=PembelianResponse)
@@ -875,80 +897,6 @@ def calculate_pembelian_item_totals(item: PembelianItem) -> None:
     
     # For compatibility - price_after_tax as unit equivalent
     item.price_after_tax = (row_total / qty) if qty > 0 else Decimal('0')
-
-
-def calculate_pembelian_totals(db: Session, pembelian_id: int):
-    """
-    Calculate pembelian totals following the exact frontend logic
-    """
-    items = db.query(PembelianItem).filter(PembelianItem.pembelian_id == pembelian_id).all()
-
-    # Recalculate each item first
-    for item in items:
-        calculate_pembelian_item_totals(item)
-
-    # Frontend variables
-    sub_total = Decimal('0')  # sum of all rowSubTotal
-    total_item_discounts = Decimal('0')  # sum of all item discounts
-    total_tax = Decimal('0')  # sum of all rowTax
-    grand_total_items = Decimal('0')  # sum of all rowTotal
-
-    # Calculate row-level totals
-    for item in items:
-        qty = Decimal(str(item.qty or 0))
-        unit_price = Decimal(str(item.unit_price or 0))
-        tax_percentage = Decimal(str(item.tax_percentage or 0))
-        discount = Decimal(str(item.discount or 0))
-
-        # Replicate frontend row calculations exactly
-        row_sub_total = unit_price * qty
-        taxable_base = max(row_sub_total - discount, Decimal('0'))
-        row_tax = (taxable_base * tax_percentage) / Decimal('100')
-        row_total = taxable_base + row_tax
-
-        # Accumulate totals
-        sub_total += row_sub_total
-        total_item_discounts += discount
-        total_tax += row_tax
-        grand_total_items += row_total
-
-    # Get pembelian for additional fields
-    pembelian = db.query(Pembelian).filter(Pembelian.id == pembelian_id).first()
-    if not pembelian:
-        raise HTTPException(status_code=404, detail="Pembelian not found")
-
-    additional_discount = Decimal(str(pembelian.additional_discount or 0))
-    expense = Decimal(str(pembelian.expense or 0))
-
-    # Frontend calculation logic
-    subtotal_after_item_discounts = max(sub_total - total_item_discounts, Decimal('0'))
-    final_total_before_tax = max(subtotal_after_item_discounts - additional_discount, Decimal('0'))
-    grand_total = final_total_before_tax + total_tax + expense
-
-    # Update pembelian with calculated values
-    pembelian.total_subtotal = sub_total
-    pembelian.total_discount = total_item_discounts
-    pembelian.additional_discount = additional_discount
-    pembelian.total_before_discount = final_total_before_tax
-    pembelian.total_tax = total_tax
-    pembelian.expense = expense
-    pembelian.total_price = grand_total
-    pembelian.total_qty = sum(int(it.qty or 0) for it in items)
-
-    db.commit()
-
-    return {
-        "total_subtotal": sub_total,
-        "total_discount": total_item_discounts,
-        "additional_discount": additional_discount,
-        "total_before_discount": final_total_before_tax,
-        "total_tax": total_tax,
-        "expense": expense,
-        "total_price": grand_total,
-        "total_qty": pembelian.total_qty,
-        "total_grand_total_items": grand_total_items,
-        "subtotal_after_item_discounts": subtotal_after_item_discounts,
-    }
 
 
 # Updated Pembelian Invoice Endpoint

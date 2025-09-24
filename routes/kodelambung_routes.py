@@ -7,31 +7,45 @@ from database import get_db
 from models.KodeLambung import KodeLambung
 from schemas.KodeLambungSchema import KodeLambungCreate, KodeLambungUpdate, KodeLambungResponse
 from schemas.PaginatedResponseSchemas import PaginatedResponse
-
+from models.Customer import Customer
 router = APIRouter()
 
 
 @router.get("", response_model=PaginatedResponse[KodeLambungResponse])
 async def get_all_kode_lambung(
-    search: Optional[str] = Query(None, description="Search by name"),
-    page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db),
+        search: Optional[str] = Query(None, description="Search by name"),
+        page: int = Query(1, ge=1),
+        size: int = Query(50, ge=1, le=100),
+        contains_deleted: Optional[bool] = False,
+        db: Session = Depends(get_db),
+        customer_id: Optional[int] = None
 ):
     """Get all kode lambung with pagination and search"""
-    query = db.query(KodeLambung).filter(KodeLambung.is_deleted == False)
-    
+    query = db.query(KodeLambung)
+
     if search:
         query = query.filter(KodeLambung.name.ilike(f"%{search}%"))
-    
+
+    if not contains_deleted:
+        query = query.filter(KodeLambung.is_deleted == False)
+
+    if customer_id:
+        query = query.join(Customer).filter(
+            Customer.id == customer_id,
+            Customer.is_deleted == False
+        )
     query = query.order_by(KodeLambung.name)
-    
+
     total = query.count()
     offset = (page - 1) * size
     items = query.offset(offset).limit(size).all()
-    
-    return {"data": items, "total": total}
 
+    return {
+        "data": items,
+        "total": total,
+        "page": page,
+        "size": size,
+    }
 
 @router.get("/all", response_model=List[KodeLambungResponse])
 async def get_all_kode_lambung_no_pagination(db: Session = Depends(get_db)):

@@ -68,7 +68,7 @@ def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: Audi
     audit_service.default_log(
         entity_id=new_item.id,
         entity_type=AuditEntityEnum.ITEM,
-        description=f"Created item {db_item.name} via import",
+        description=f"Data item {new_item.name} telah dibuat via import",
         user_name=user_name,
     )
 
@@ -188,7 +188,7 @@ async def create_item(
         audit_service.default_log(
             entity_id=db_item.id,
             entity_type=AuditEntityEnum.ITEM,
-            description=f"Created item {db_item.name}",
+            description=f"Item {db_item.name} telah dibuat",
             user_name=user_name,
         )
 

@@ -7,7 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from typing import Union, Any, Optional
-from sqlalchemy import and_
+from sqlalchemy import and_, desc
 from sqlalchemy.orm import Session
 import jwt
 
@@ -93,6 +93,50 @@ import random
 from datetime import datetime
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
+
+
+def generate_incremental_id(
+        db: Session,
+        model,
+        id_field: str = "id",
+        prefix: str = "VEN-",
+        created_at_field: str = "created_at",
+        padding: int = 5
+) -> str:
+    """
+    Generates the next incremental ID for a given model.
+
+    Args:
+        db (Session): SQLAlchemy session
+        model: SQLAlchemy model class (e.g., Vendor)
+        id_field (str): Name of the ID field in the model
+        prefix (str): Prefix for the ID (e.g., 'VEN-')
+        created_at_field (str): Name of the created_at field in the model
+        padding (int): Number of digits to pad the numeric part
+
+    Returns:
+        str: New incremental ID (e.g., 'VEN-00005')
+    """
+    # Get the latest record based on created_at
+    latest_record = db.query(model).order_by(desc(getattr(model, created_at_field))).first()
+
+    if latest_record:
+        current_id = getattr(latest_record, id_field, "")
+        if current_id and current_id.startswith(prefix):
+            try:
+                last_number = int(current_id[len(prefix):])
+            except ValueError:
+                last_number = 0
+        else:
+            last_number = 0
+    else:
+        last_number = 0
+
+    # Increment the numeric part
+    next_number = last_number + 1
+
+    # Return formatted ID with prefix
+    return f"{prefix}{next_number:0{padding}d}"
 
 def generate_unique_record_number(
         db: Session,
