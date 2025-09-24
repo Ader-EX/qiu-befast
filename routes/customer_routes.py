@@ -76,10 +76,10 @@ async def get_customer(customer_id: str, db: Session = Depends(get_db)):
     return customer
 
 @router.post("", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
-async def create_customer(customer_data: CustomerCreate, db: Session = Depends(get_db),    user_name: str = Depends(get_current_user_name)):
+async def create_customer(customer_data: CustomerCreate, db: Session = Depends(get_db), user_name: str = Depends(get_current_user_name)):
 
     if not hasattr(customer_data, 'code') or not customer_data.code:
-        customer_code = generate_incremental_id(db,Customer, prefix="CUS-")
+        customer_code = generate_incremental_id(db, Customer, prefix="CUS-")
     else:
         customer_code = customer_data.code
 
@@ -117,6 +117,7 @@ async def create_customer(customer_data: CustomerCreate, db: Session = Depends(g
                 detail=f"Customer dengan code '{customer_code}' sudah ada."
             )
 
+    # Validate currency exists
     currency = db.query(Currency).filter(
         Currency.id == customer_data.currency_id,
         Currency.is_active == True
@@ -127,18 +128,23 @@ async def create_customer(customer_data: CustomerCreate, db: Session = Depends(g
             detail=f"Currency with ID '{customer_data.currency_id}' not found."
         )
 
+    # Create new customer
     customer_dict = customer_data.dict(exclude={'kode_lambungs'})
     customer_dict['code'] = customer_code
     customer = Customer(**customer_dict)
+
+    db.add(customer)
+    db.flush()  # This assigns the ID to the customer object
+
+    # Now log the audit trail after the customer has an ID
     audit_service.default_log(
-        entity_id=customer.id,
+        entity_id=customer.id,  # Now customer.id has a value
         entity_type=AuditEntityEnum.CUSTOMER,
-        description=f"Customer {customer.id} telah dibuat",
+        description=f"Customer {customer.name} telah dibuat",  # Use customer.name instead of customer.id
         user_name=user_name
     )
-    db.add(customer)
-    db.flush()
 
+    # Add kode_lambungs if provided
     if customer_data.kode_lambungs:
         for kl_name in customer_data.kode_lambungs:
             kode_lambung = KodeLambung(name=kl_name, customer_id=customer.id)

@@ -1,13 +1,11 @@
 import os
-import random
-import time
-
+import re
 from fastapi import HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from typing import Union, Any, Optional
-from sqlalchemy import and_, desc
+from sqlalchemy import and_, desc, func, Integer
 from sqlalchemy.orm import Session
 import jwt
 
@@ -99,29 +97,49 @@ def generate_incremental_id(
         model,
         id_field: str = "id",
         prefix: str = "VEN-",
-        padding: int = 5
+        padding: int = 5,
+        max_retries: int = 3
 ) -> str:
     """
-    Generates the next incremental ID by finding the maximum numeric ID.
-    Uses a single optimized query.
+    Generates next incremental ID using database-level MAX query.
+    More efficient and handles basic race conditions with retries.
     """
-    query = db.query(getattr(model, id_field)).filter(
-        getattr(model, id_field).like(f"{prefix}%")
-    )
+    for attempt in range(max_retries):
+        try:
+            # Use SQL SUBSTRING and CAST for database-level processing
+            max_query = db.query(
+                func.max(
+                    func.cast(
+                        func.substring(getattr(model, id_field), len(prefix) + 1),
+                        Integer
+                    )
+                )
+            ).filter(
+                getattr(model, id_field).like(f"{prefix}%"),
+                # Ensure we only get properly formatted IDs
+                func.length(getattr(model, id_field)) == len(prefix) + padding,
+                getattr(model, id_field).regexp_match(f"^{re.escape(prefix)}\\d+$")
+            )
 
-    existing_ids = query.all()
+            max_number = max_query.scalar() or 0
+            next_number = max_number + 1
+            new_id = f"{prefix}{next_number:0{padding}d}"
 
-    max_number = 0
-    for (id_value,) in existing_ids:
-        if id_value and id_value.startswith(prefix):
-            try:
-                number = int(id_value[len(prefix):])
-                max_number = max(max_number, number)
-            except ValueError:
-                continue
+            # Try to verify uniqueness (basic race condition check)
+            existing = db.query(model).filter(
+                getattr(model, id_field) == new_id
+            ).first()
 
-    next_number = max_number + 1
-    return f"{prefix}{next_number:0{padding}d}"
+            if not existing:
+                return new_id
+
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            db.rollback()
+            time.sleep(0.1 * (attempt + 1))  # Brief backoff
+
+    raise Exception("Failed to generate unique ID after retries")
 
 def generate_unique_record_number(
         db: Session,
