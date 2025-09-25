@@ -30,7 +30,7 @@ class Penjualan(Base, SoftDeleteMixin):
     currency_amount = Column(Numeric(15,7), default=0.00)
 
 
-# ---- Totals (match Pembelian header fields) ----
+    # ---- Totals (match Pembelian header fields) ----
     total_subtotal = Column(Numeric(15, 7), default=0.00)
 
     total_discount = Column(Numeric(15, 7), default=0.00)
@@ -57,7 +57,7 @@ class Penjualan(Base, SoftDeleteMixin):
     customer_address = Column(Text, nullable=True)
     top_name = Column(String(255), nullable=True)
     currency_name = Column(String(255), nullable=True)
-    
+
 
     created_at = Column(DateTime, default=datetime.now, nullable=False)
 

@@ -18,6 +18,10 @@ class PembayaranPengembalianType(str, Enum):
     PEMBELIAN = "PEMBELIAN"
     PENJUALAN = "PENJUALAN"
 
+class PaymentTargetType(str, Enum):
+    PENGEMBALIAN = "Pengembalian"
+    PEMBAYARAN = "Pembayaran"
+
 
 
 # Payment Detail schemas

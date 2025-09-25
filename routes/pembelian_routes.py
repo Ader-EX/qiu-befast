@@ -138,14 +138,17 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name :str, m
     pembelian.expense = expense
     pembelian.total_price = total_price
 
+
     audit_service.default_log(
         entity_id=pembelian.id,
         entity_type=AuditEntityEnum.PEMBELIAN,
-        description=f"Pembelian {pembelian.no_pembelian} {msg} : Total {pembelian.total_price} ",
+        description=f"Pembelian {pembelian.no_pembelian} {msg} : Total Rp{total_price} ",
         user_name=user_name
     )
 
+
     db.commit()
+
 
     return {
         "total_subtotal": total_subtotal,
@@ -397,7 +400,8 @@ async def get_pembelian(pembelian_id: int, db: Session = Depends(get_db)):
 async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_db), user_name: str = Depends(get_current_user_name)):
     """Create new pembelian in DRAFT status - DOES NOT UPDATE STOCK YET"""
 
-    
+
+
     # Create pembelian
     pembelian = Pembelian(
         no_pembelian=generate_unique_record_number(db, Pembelian, prefix="QP/PRC"),
@@ -446,10 +450,11 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         
         db.add(pembelian_item)
 
+    calculate_pembelian_totals(db, pembelian.id,user_name,"telah dibuat")
     db.commit()
 
 
-    calculate_pembelian_totals(db, pembelian.id,user_name,"telah dibuat")
+
 
     return {
         "detail": "Pembelian created successfully",

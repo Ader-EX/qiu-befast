@@ -94,7 +94,7 @@ def create_vendor(data: VendorCreate, db: Session = Depends(get_db),    user_nam
         raise HTTPException(400, f"Term of Payment with ID '{data.top_id}' not found.")
 
     if not hasattr(data, 'id') or not data.id:
-        vendor_id = generate_incremental_id(db, Vendor, prefix="VEN-")
+        vendor_id = generate_incremental_id(db, Vendor,id_field="id", prefix="VEN-")
     else:
         vendor_id = data.id
 
