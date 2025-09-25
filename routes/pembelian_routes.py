@@ -142,7 +142,7 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name :str, m
     audit_service.default_log(
         entity_id=pembelian.id,
         entity_type=AuditEntityEnum.PEMBELIAN,
-        description=f"Pembelian {pembelian.no_pembelian} {msg} : Total Rp{total_price} ",
+        description=f"Pembelian {pembelian.no_pembelian} {msg} : Total Rp{total_price:.4f} ",
         user_name=user_name
     )
 
@@ -622,14 +622,15 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
         pembelian.top_name = None
         pembelian.currency_name = None
     
-    db.commit()
-
     audit_service.default_log(
         entity_id=pembelian.id,
         entity_type=AuditEntityEnum.PEMBELIAN,
         description=f"Pembelian {pembelian.no_pembelian} status transaksi diubah: Aktif → Draft",
         user_name=user_name
     )
+
+    db.commit()
+
     return {
         "msg": "Pembelian status changed successfully"
     }

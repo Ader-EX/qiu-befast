@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
 from database import get_db
+from models.AuditTrail import AuditEntityEnum
 from models.Customer import Customer
 from models.KodeLambung import KodeLambung
 from models.Pembayaran import  Pembayaran
@@ -28,7 +29,8 @@ from models.AllAttachment import ParentType, AllAttachment
 from routes.upload_routes import get_public_image_url, to_public_image_url, templates
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PenjualanSchema import PenjualanCreate, PenjualanListResponse, PenjualanResponse, PenjualanStatusUpdate, PenjualanUpdate, SuccessResponse, TotalsResponse, UploadResponse
-from utils import generate_unique_record_number
+from services.audit_services import AuditService
+from utils import generate_unique_record_number, get_current_user_name
 from decimal import Decimal, InvalidOperation  # add InvalidOperation
 
 router = APIRouter()
@@ -71,10 +73,11 @@ def calculate_item_totals(item: PenjualanItem) -> None:
     item.price_after_tax = (row_total / qty) if qty > 0 else Decimal('0')
 
 
-def calculate_penjualan_totals(db: Session, penjualan_id: int):
+def calculate_penjualan_totals(db: Session, penjualan_id: int, msg : str, user_name : str = "" ):
     """
     Calculate penjualan totals following the exact frontend logic
     """
+    audit_service = AuditService(db)
     items = db.query(PenjualanItem).filter(PenjualanItem.penjualan_id == penjualan_id).all()
 
     # Recalculate each item first
@@ -129,6 +132,14 @@ def calculate_penjualan_totals(db: Session, penjualan_id: int):
     penjualan.expense = expense
     penjualan.total_price = grand_total  # This is grandTotal in frontend
     penjualan.total_qty = sum(int(it.qty or 0) for it in items)
+
+    if (msg is not "" or msg is not None) :
+        audit_service.default_log(
+            entity_id=penjualan.id,
+            entity_type=AuditEntityEnum.PENJUALAN,
+            description=f"Penjualan {penjualan.no_penjualan} {msg} : Total Rp{grand_total:.4f} ",
+            user_name=user_name
+        )
 
     db.commit()
 
@@ -224,7 +235,7 @@ def update_item_stock(db: Session, item_id: int, qty_change: int) -> None:
     item.total_item = new_total
 
 
-def finalize_penjualan(db: Session, penjualan_id: int):
+def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None:
     """
     Finalize SALES:
       - Validate required fields
@@ -233,6 +244,7 @@ def finalize_penjualan(db: Session, penjualan_id: int):
       - Snapshot friendly names
       - Set status ACTIVE
     """
+    audit_service = AuditService(db)
     penjualan = (
         db.query(Penjualan)
         .options(
@@ -286,6 +298,14 @@ def finalize_penjualan(db: Session, penjualan_id: int):
 
     # 4) Activate
     penjualan.status_penjualan = StatusPembelianEnum.ACTIVE
+
+    audit_service.default_log(
+        entity_id=penjualan.id,
+        entity_type=AuditEntityEnum.PENJUALAN,
+        description=f"Penjualan {penjualan.no_penjualan} status transaksi diubah: Draft → Aktif",
+        user_name=user_name
+    )
+
     db.commit()
 
 
@@ -415,7 +435,7 @@ async def get_all_penjualan(
         query = query.filter(Penjualan.customer_id == customer_id)
     if warehouse_id:
         query = query.filter(Penjualan.warehouse_id == warehouse_id)
-    if kode_lambung_id:  # NEW: Add kode_lambung filter
+    if kode_lambung_id:
         query = query.filter(Penjualan.kode_lambung_id == kode_lambung_id)
 
     if from_date and to_date:
@@ -481,7 +501,7 @@ async def get_penjualan(penjualan_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Penjualan not found")
     return penjualan
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_db)):
+async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_db),user_name : str = Depends(get_current_user_name)):
     """
     Create new penjualan in DRAFT (no stock manipulation yet).
     We still validate stock availability per line so you don't draft impossible orders.
@@ -490,19 +510,14 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
     for it in request.items:
         validate_item_stock(db, it.item_id, it.qty)
 
-    kode_lambung_id = None
-    if request.kode_lambung:
-            kode_lambung = KodeLambung(name=request.kode_lambung)
-            db.add(kode_lambung)
-            db.flush()  
-            kode_lambung_id = kode_lambung.id
+
 
     p = Penjualan(
         no_penjualan=generate_unique_record_number(db, Penjualan, prefix="QP/SI"),
         warehouse_id=request.warehouse_id,
         customer_id=request.customer_id,
         top_id=request.top_id,
-        kode_lambung_id=kode_lambung_id,
+        kode_lambung_id=request.kode_lambung_id,
         sales_date=request.sales_date,
         sales_due_date=request.sales_due_date,
         additional_discount=request.additional_discount or Decimal("0"),
@@ -533,12 +548,12 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
         db.add(line)
 
     db.commit()
-    calculate_penjualan_totals(db, p.id)
+    calculate_penjualan_totals(db, p.id, "telah dibuat", user_name)
 
     return {"detail": "Penjualan created successfully", "id": p.id}
 
 @router.put("/{penjualan_id}", response_model=PenjualanResponse)
-async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Session = Depends(get_db)):
+async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):
     """
     Update penjualan.
     - If DRAFT: never touch stock.
@@ -717,7 +732,7 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
 
     if fields_changed or items_changed:
         db.commit()
-        calculate_penjualan_totals(db, penjualan_id)
+        calculate_penjualan_totals(db, penjualan_id, "telah diubah", user_name=user_name)
         db.commit()
     else:
         db.rollback()
@@ -727,10 +742,11 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
 
 
 @router.patch("/{penjualan_id}", status_code=status.HTTP_200_OK)
-async def rollback_penjualan_status(penjualan_id: int, db: Session = Depends(get_db)):
+async def rollback_penjualan_status(penjualan_id: int, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):
     """
     Roll back Penjualan to DRAFT from ACTIVE/COMPLETED and reverse stock subtraction.
     """
+    audit_service = AuditService(db)
     penjualan = (
         db.query(Penjualan)
         .options(selectinload(Penjualan.penjualan_items))
@@ -751,6 +767,13 @@ async def rollback_penjualan_status(penjualan_id: int, db: Session = Depends(get
         penjualan.customer_address = None
         penjualan.top_name = None
         penjualan.currency_name = None
+
+    audit_service.default_log(
+        entity_id=penjualan.id,
+        entity_type=AuditEntityEnum.PENJUALAN,
+        description=f"Penjualan {penjualan.no_penjualan} status transaksi diubah: Aktif → Draft",
+        user_name=user_name
+    )
 
     db.commit()
     return {"msg": "Penjualan status changed successfully"}

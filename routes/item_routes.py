@@ -600,7 +600,7 @@ async def update_item(
         audit_service.default_log(
             entity_id=db_item.id,
             entity_type=AuditEntityEnum.ITEM,
-            description=f"Updated Item {db_item.name}",
+            description=f"Item {db_item.name} telah diubah",
             user_name=user_name,
         )
 

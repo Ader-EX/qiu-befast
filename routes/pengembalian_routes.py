@@ -6,6 +6,7 @@ from datetime import datetime, time, date
 from decimal import Decimal
 
 from database import get_db
+from models.AuditTrail import AuditEntityEnum
 from models.Pengembalian import Pengembalian, PengembalianDetails
 from models.Pembelian import Pembelian, StatusPembayaranEnum, StatusPembelianEnum
 from models.Penjualan import Penjualan
@@ -15,6 +16,7 @@ from schemas.PengembalianSchema import (
     PengembalianCreate, PengembalianUpdate, PengembalianResponse,
     PengembalianListResponse, PengembalianDetailResponse
 )
+from services.audit_services import AuditService
 from utils import generate_unique_record_number, get_current_user_name
 
 router = APIRouter()
@@ -56,9 +58,10 @@ def recalc_return_and_update_payment_status(db: Session, reference_id: int, refe
 
 
 @router.post("", response_model=PengembalianResponse)
-def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Depends(get_db)):
+def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Depends(get_db), user_name: str = Depends(get_current_user_name)):
     """Create a new return record (DRAFT)"""
 
+    audit_service  = AuditService(db)
     # Validate return details exist
     if not pengembalian_data.pengembalian_details or len(pengembalian_data.pengembalian_details) == 0:
         raise HTTPException(status_code=400, detail="Return details are required")
@@ -107,6 +110,7 @@ def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Dep
     db.add(pengembalian)
     db.flush()
 
+    total_paid = sum(detail_data.total_paid for detail_data in pengembalian_data.pengembalian_details)
     # Create return details
     for detail_data in pengembalian_data.pengembalian_details:
         detail = PengembalianDetails(
@@ -115,7 +119,13 @@ def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Dep
         )
         db.add(detail)
 
-    # NOTE: do NOT update statuses yet — this pengembalian is still DRAFT.
+    audit_service.default_log(
+        entity_id=pengembalian.id,
+        entity_type=AuditEntityEnum.PENGEMBALIAN,
+        description=f"Pengembalian {pengembalian.no_pengembalian} dibuat, total : Rp{total_paid}",
+        user_name=user_name
+    )
+
     db.commit()
     db.refresh(pengembalian)
 

@@ -106,7 +106,7 @@ class PenjualanCreate(BaseModel):
     expense: Optional[NonNegDec] = Decimal("0.00")
     items: List[PenjualanItemCreate] = Field(default_factory=list)
     currency_amount : float = Decimal("0.00")
-    kode_lambung: str 
+    kode_lambung_id: int
 
     @model_validator(mode="after")
     def _require_items(self):

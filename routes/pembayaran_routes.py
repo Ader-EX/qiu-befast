@@ -29,10 +29,12 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
         record = db.query(Penjualan).filter(Penjualan.id == reference_id).first()
 
     if not record:
+        print(f"Record not found for reference_id: {reference_id}")  # Debug log
         return
 
     # Store the current status before updating
     current_payment_status = record.status_pembayaran
+    print(f"Current payment status: {current_payment_status}")  # Debug log
 
     filters = [Pembayaran.status == StatusPembelianEnum.ACTIVE]
     if reference_type == PembayaranPengembalianType.PEMBELIAN:
@@ -45,10 +47,14 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
                          .filter(*filters) \
                          .scalar() or Decimal("0.00")
 
+    print(f"Total payments calculated: {total_payments}")  # Debug log
+
     record.total_paid = total_payments
 
     total_return = record.total_return or Decimal("0.00")
     total_outstanding = record.total_price - (record.total_paid + total_return)
+
+    print(f"Total outstanding: {total_outstanding}")  # Debug log
 
     # Determine the new payment status
     new_payment_status = None
@@ -59,6 +65,8 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
     else:
         new_payment_status = StatusPembayaranEnum.UNPAID
 
+    print(f"New payment status: {new_payment_status}")  # Debug log
+
     # Helper function to get status display name
     def get_status_display(status):
         status_mapping = {
@@ -68,74 +76,76 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
         }
         return status_mapping.get(status, str(status))
 
-    # Update status and log only if there's a change
-    if current_payment_status != new_payment_status:
+    # Update payment status if it changed
+    status_changed = current_payment_status != new_payment_status
+    if status_changed:
+        print(f"Status change detected: {current_payment_status} -> {new_payment_status}")  # Debug log
         record.status_pembayaran = new_payment_status
+    else:
+        print(f"No status change: {current_payment_status} remains the same")  # Debug log
 
-        # Create status transition message
-        old_status_text = get_status_display(current_payment_status)
-        new_status_text = get_status_display(new_payment_status)
-        status_transition = f"{old_status_text} → {new_status_text}"
+    # Always log payment activity, regardless of status change
+    try:
+        # Create appropriate message based on whether status changed
+        if status_changed:
+            old_status_text = get_status_display(current_payment_status)
+            new_status_text = get_status_display(new_payment_status)
+            status_message = f"status {pembayaran_pengembalian_name} diubah: {old_status_text} → {new_status_text}"
+        else:
+            current_status_text = get_status_display(current_payment_status)
+            status_message = f"{pembayaran_pengembalian_name} ditambahkan (Status: {current_status_text})"
 
-        if new_payment_status == StatusPembayaranEnum.PAID:
-            if reference_type == PembayaranPengembalianType.PEMBELIAN:
-                record.status_pembelian = StatusPembelianEnum.COMPLETED
-                audit_service.default_log(
-                    entity_id=reference_id,
-                    entity_type=AuditEntityEnum.PEMBELIAN,
-                    description=f"Pembelian {record.no_pembelian} status {pembayaran_pengembalian_name} diubah: {status_transition} (No. {pembayaran_pengembalian_name}: {no_pembayaran})",
-                    user_name=user_name
-                )
-            else:
-                record.status_penjualan = StatusPembelianEnum.COMPLETED
-                audit_service.default_log(
-                    entity_id=reference_id,
-                    entity_type=AuditEntityEnum.PENJUALAN,
-                    description=f"Penjualan {record.no_penjualan} status {pembayaran_pengembalian_name} diubah: {status_transition} (No. {pembayaran_pengembalian_name}: {no_pembayaran})",
-                    user_name=user_name
-                )
+        print(f"Audit message: {status_message}")  # Debug log
 
-        elif new_payment_status == StatusPembayaranEnum.HALF_PAID:
-            if reference_type == PembayaranPengembalianType.PEMBELIAN:
-                record.status_pembelian = StatusPembelianEnum.PROCESSED
-                audit_service.default_log(
-                    entity_id=reference_id,
-                    entity_type=AuditEntityEnum.PEMBELIAN,
-                    description=f"Pembelian {record.no_pembelian} status {pembayaran_pengembalian_name} diubah: {status_transition} (No. {pembayaran_pengembalian_name}: {no_pembayaran})",
-                    user_name=user_name
-                )
-            else:
-                record.status_penjualan = StatusPembelianEnum.PROCESSED
-                audit_service.default_log(
-                    entity_id=reference_id,
-                    entity_type=AuditEntityEnum.PENJUALAN,
-                    description=f"Penjualan {record.no_penjualan} status {pembayaran_pengembalian_name} diubah: {status_transition} (No. {pembayaran_pengembalian_name}: {no_pembayaran})",
-                    user_name=user_name
-                )
+        if reference_type == PembayaranPengembalianType.PEMBELIAN:
+            # Update business status based on payment status (only if status changed)
+            if status_changed:
+                if new_payment_status == StatusPembayaranEnum.PAID:
+                    record.status_pembelian = StatusPembelianEnum.COMPLETED
+                elif new_payment_status == StatusPembayaranEnum.HALF_PAID:
+                    record.status_pembelian = StatusPembelianEnum.PROCESSED
+                elif new_payment_status == StatusPembayaranEnum.UNPAID:
+                    record.status_pembelian = StatusPembelianEnum.PROCESSED
 
-        elif new_payment_status == StatusPembayaranEnum.UNPAID:
-            # This case might happen if payments are reversed/cancelled
-            if reference_type == PembayaranPengembalianType.PEMBELIAN:
-                # You might want to set a different status here, depending on your business logic
-                record.status_pembelian = StatusPembelianEnum.PROCESSED  # or keep current status
-                audit_service.default_log(
-                    entity_id=reference_id,
-                    entity_type=AuditEntityEnum.PEMBELIAN,
-                    description=f"Pembelian {record.no_pembelian} status {pembayaran_pengembalian_name} diubah: {status_transition} (No. {pembayaran_pengembalian_name}: {no_pembayaran})",
-                    user_name=user_name
-                )
-            else:
-                record.status_penjualan = StatusPembelianEnum.PROCESSED  # or keep current status
-                audit_service.default_log(
-                    entity_id=reference_id,
-                    entity_type=AuditEntityEnum.PENJUALAN,
-                    description=f"Penjualan {record.no_penjualan} status {pembayaran_pengembalian_name} diubah: {status_transition} (No. {pembayaran_pengembalian_name}: {no_pembayaran})",
-                    user_name=user_name
-                )
+            # Always log the audit
+            audit_service.default_log(
+                entity_id=reference_id,
+                entity_type=AuditEntityEnum.PEMBELIAN,
+                description=f"Pembelian {record.no_pembelian} {status_message} (No. {pembayaran_pengembalian_name}: {no_pembayaran})",
+                user_name=user_name
+            )
+            print(f"Audit logged for Pembelian {record.no_pembelian}")  # Debug log
+
+        else:  # PENJUALAN
+            # Update business status based on payment status (only if status changed)
+            if status_changed:
+                if new_payment_status == StatusPembayaranEnum.PAID:
+                    record.status_penjualan = StatusPembelianEnum.COMPLETED
+                elif new_payment_status == StatusPembayaranEnum.HALF_PAID:
+                    record.status_penjualan = StatusPembelianEnum.PROCESSED
+                elif new_payment_status == StatusPembayaranEnum.UNPAID:
+                    record.status_penjualan = StatusPembelianEnum.PROCESSED
+
+            # Always log the audit
+            audit_service.default_log(
+                entity_id=reference_id,
+                entity_type=AuditEntityEnum.PENJUALAN,
+                description=f"Penjualan {record.no_penjualan} {status_message} (No. {pembayaran_pengembalian_name}: {no_pembayaran})",
+                user_name=user_name
+            )
+            print(f"Audit logged for Penjualan {record.no_penjualan}")  # Debug log
+
+    except Exception as e:
+        print(f"Error logging audit: {str(e)}")  # Debug log
+        # Don't raise the exception to avoid breaking the payment flow
+
+    # Make sure changes are flushed to the database
+    db.flush()
 @router.post("", response_model=PembayaranResponse)
-def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(get_db)):
+def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):
     """Create a new payment record"""
 
+    audit_service = AuditService(db)
     # Validate payment details exist
     if not pembayaran_data.pembayaran_details or len(pembayaran_data.pembayaran_details) == 0:
         raise HTTPException(status_code=400, detail="Payment details are required")
@@ -166,14 +176,11 @@ def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(g
             if not penjualan:
                 raise HTTPException(status_code=404, detail=f"Active Penjualan with ID {detail.penjualan_id} not found")
 
-    # Create payment record - EXCLUDE total_paid from pembayaran_dict
     pembayaran_dict = pembayaran_data.model_dump(exclude={'pembayaran_details'})
-    # Remove total_paid if it exists since it doesn't belong in Pembayaran model
     pembayaran_dict.pop('total_paid', None)
 
     pembayaran = Pembayaran(**pembayaran_dict)
 
-    # Generate unique payment number based on type
     if pembayaran_data.reference_type == PembayaranPengembalianType.PEMBELIAN:
         pembayaran.no_pembayaran = generate_unique_record_number(db, Pembayaran, "QP/AR")
     else:
@@ -182,10 +189,14 @@ def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(g
     pembayaran.created_at = datetime.now()
     pembayaran.status = StatusPembelianEnum.DRAFT
 
+
     db.add(pembayaran)
+
     db.flush()
 
-    # Create payment details
+    total_paid = sum(detail_data.total_paid for detail_data in pembayaran_data.pembayaran_details)
+
+
     for detail_data in pembayaran_data.pembayaran_details:
         detail = PembayaranDetails(
             pembayaran_id=pembayaran.id,
@@ -193,6 +204,12 @@ def create_pembayaran(pembayaran_data: PembayaranCreate, db: Session = Depends(g
         )
         db.add(detail)
 
+    audit_service.default_log(
+        entity_id=pembayaran.id,
+        entity_type=AuditEntityEnum.PEMBAYARAN,
+        description=f"Pembayaran {pembayaran.no_pembayaran} dibuat, total : Rp{total_paid}",
+        user_name=user_name
+    )
     db.commit()
     db.refresh(pembayaran)
 
@@ -479,7 +496,6 @@ def delete_pembayaran(pembayaran_id: int, db: Session = Depends(get_db), user_na
         db.delete(pembayaran)
         db.commit()
 
-        # Update payment status for all affected records after deletion
         for pembelian_id in processed_pembelian_ids:
             update_payment_status(db, pembelian_id, PembayaranPengembalianType.PEMBELIAN,user_name,pembayaran.no_pembayaran)
 
@@ -509,36 +525,3 @@ def get_pembayaran_details(pembayaran_id: int, db: Session = Depends(get_db)):
     ).filter(PembayaranDetails.pembayaran_id == pembayaran_id).all()
 
     return details
-
-@router.put("/{pembayaran_id}/draft")
-def revert_to_draft(pembayaran_id: int, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):
-    """Revert an active payment back to draft status"""
-
-    pembayaran = db.query(Pembayaran).filter(
-        Pembayaran.id == pembayaran_id,
-        ).first()
-
-    if not pembayaran:
-        raise HTTPException(status_code=404, detail="Pembayaran not found")
-
-    if pembayaran.status != StatusPembelianEnum.ACTIVE:
-        raise HTTPException(status_code=400, detail="Only active payments can be reverted to draft")
-
-    reference_ids = []
-    for detail in pembayaran.pembayaran_details:
-        if detail.pembelian_id:
-            reference_ids.append((detail.pembelian_id, PembayaranPengembalianType.PEMBELIAN))
-        elif detail.penjualan_id:
-            reference_ids.append((detail.penjualan_id, PembayaranPengembalianType.PENJUALAN))
-
-    # Revert to draft
-    pembayaran.status = StatusPembelianEnum.DRAFT
-
-    # Update payment status for all related records (recalculate without this payment)
-    for reference_id, reference_type in reference_ids:
-        update_payment_status(db, reference_id, reference_type, user_name, pembayaran.no_pembayaran)
-
-    db.commit()
-    db.refresh(pembayaran)
-
-    return {"message": "Pembayaran reverted to draft successfully", "pembayaran": pembayaran}

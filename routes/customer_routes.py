@@ -89,7 +89,6 @@ async def create_customer(customer_data: CustomerCreate, db: Session = Depends(g
 
     if existing_customer:
         if existing_customer.is_deleted:
-            # Fix: use kode_lambungs (plural)
             for field, value in customer_data.dict(exclude={'code', 'kode_lambungs'}).items():
                 setattr(existing_customer, field, value)
             existing_customer.is_deleted = False
