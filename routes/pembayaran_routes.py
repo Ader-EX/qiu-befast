@@ -34,7 +34,7 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
 
     # Store the current status before updating
     current_payment_status = record.status_pembayaran
-    print(f"Current payment status: {current_payment_status}")  # Debug log
+    print(f"Current payment status: {current_payment_status}")
 
     filters = [Pembayaran.status == StatusPembelianEnum.ACTIVE]
     if reference_type == PembayaranPengembalianType.PEMBELIAN:

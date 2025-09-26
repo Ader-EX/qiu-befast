@@ -780,8 +780,8 @@ async def rollback_penjualan_status(penjualan_id: int, db: Session = Depends(get
 
 
 @router.post("/{penjualan_id}/finalize", response_model=PenjualanResponse)
-async def finalize_penjualan_endpoint(penjualan_id: int, db: Session = Depends(get_db)):
-    finalize_penjualan(db, penjualan_id)
+async def finalize_penjualan_endpoint(penjualan_id: int, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):
+    finalize_penjualan(db, penjualan_id, user_name)
     return await get_penjualan(penjualan_id, db)
 
 

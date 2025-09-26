@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from schemas.CurrencySchemas import CurrencyOut
-from schemas.KodeLambungSchema import KodeLambungBase
+from schemas.KodeLambungSchema import KodeLambungBase, KodeLambungUpdate
 
 
 class CustomerBase(BaseModel):
@@ -19,10 +19,9 @@ class CustomerCreate(CustomerBase):
 
     pass
 class CustomerUpdate(CustomerBase):
-
     name: str
     address: str
-    kode_lambungs : Optional[List[str]] = []
+    kode_lambungs : Optional[List[KodeLambungUpdate]] = []
     is_active: Optional[bool] = True
     currency_id: int
     pass

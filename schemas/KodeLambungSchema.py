@@ -14,7 +14,8 @@ class KodeLambungCreate(KodeLambungBase):
 
 
 class KodeLambungUpdate(KodeLambungBase):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    id : Optional[int]
+    name: str = Field(None, min_length=1, max_length=255)
 
 
 class KodeLambungResponse(BaseModel):

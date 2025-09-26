@@ -133,17 +133,15 @@ async def create_customer(customer_data: CustomerCreate, db: Session = Depends(g
     customer = Customer(**customer_dict)
 
     db.add(customer)
-    db.flush()  # This assigns the ID to the customer object
+    db.flush()
 
-    # Now log the audit trail after the customer has an ID
     audit_service.default_log(
-        entity_id=customer.id,  # Now customer.id has a value
+        entity_id=customer.id,
         entity_type=AuditEntityEnum.CUSTOMER,
-        description=f"Customer {customer.name} telah dibuat",  # Use customer.name instead of customer.id
+        description=f"Customer {customer.name} telah dibuat",
         user_name=user_name
     )
 
-    # Add kode_lambungs if provided
     if customer_data.kode_lambungs:
         for kl_name in customer_data.kode_lambungs:
             kode_lambung = KodeLambung(name=kl_name, customer_id=customer.id)
@@ -161,18 +159,67 @@ async def update_customer(customer_id: str, customer_data: CustomerUpdate, db: S
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
+    # Update customer fields (excluding kode_lambungs)
     for field, value in customer_data.dict(exclude={'kode_lambungs'}).items():
         setattr(customer, field, value)
 
     # Handle kode_lambungs update
     if customer_data.kode_lambungs is not None:
-        existing_kode_lambungs = db.query(KodeLambung).filter(KodeLambung.customer_id == customer.id).all()
+        # APPROACH 1: Update existing KodeLambung by ID and name
+        if hasattr(customer_data.kode_lambungs, 'id') and customer_data.kode_lambungs.id:
+            # Find and update existing KodeLambung by ID
+            existing_kode_lambung = db.query(KodeLambung).filter(
+                KodeLambung.id == customer_data.kode_lambungs.id
+            ).first()
+
+            if existing_kode_lambung:
+                # Update the name of existing KodeLambung
+                existing_kode_lambung.name = customer_data.kode_lambungs.name
+            else:
+                # If ID provided but not found, create new one
+                kode_lambung = KodeLambung(
+                    name=customer_data.kode_lambungs.name,
+                    customer_id=customer.id
+                )
+                db.add(kode_lambung)
+        else:
+            # Create new KodeLambung if no ID provided
+            kode_lambung = KodeLambung(
+                name=customer_data.kode_lambungs.name,
+                customer_id=customer.id
+            )
+            db.add(kode_lambung)
+
+        # APPROACH 2: Replace all KodeLambungs for this customer
+        # Uncomment this section if you want to replace all kode_lambungs
+        """
+        # Soft delete all existing KodeLambungs for this customer
+        existing_kode_lambungs = db.query(KodeLambung).filter(
+            KodeLambung.customer_id == customer.id
+        ).all()
+        
         for kl in existing_kode_lambungs:
             soft_delete_record(db, KodeLambung, kl.id)
 
-        for kl_name in customer_data.kode_lambungs:
-            kode_lambung = KodeLambung(name=kl_name, customer_id=customer.id)
+        # Handle different data structures for kode_lambungs
+        if isinstance(customer_data.kode_lambungs, list):
+            # If kode_lambungs is a list of objects/names
+            for kl_data in customer_data.kode_lambungs:
+                if isinstance(kl_data, str):
+                    # If it's a list of strings
+                    name = kl_data
+                else:
+                    # If it's a list of objects with name attribute
+                    name = kl_data.name
+                
+                kode_lambung = KodeLambung(name=name, customer_id=customer.id)
+                db.add(kode_lambung)
+        else:
+            # If kode_lambungs is a single object
+            name = customer_data.kode_lambungs.name
+            kode_lambung = KodeLambung(name=name, customer_id=customer.id)
             db.add(kode_lambung)
+        """
 
     audit_service.default_log(
         entity_id=customer.id,
