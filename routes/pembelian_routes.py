@@ -354,13 +354,12 @@ async def get_all_pembelian(
 
     result = []
     for pembelian in pembelians:
-
         pembelian_dict = {
             "id": pembelian.id,
             "no_pembelian": pembelian.no_pembelian,
             "status_pembayaran": pembelian.status_pembayaran,
             "status_pembelian": pembelian.status_pembelian,
-            "vendor_name"  : pembelian.vend_rel.name,
+            "vendor_name"  : pembelian.vendor_display,
             "sales_date": pembelian.sales_date,
             "total_paid": pembelian.total_paid.quantize(Decimal('0.0001')),
             "total_return": pembelian.total_return.quantize(Decimal('0.0001')),
@@ -400,9 +399,6 @@ async def get_pembelian(pembelian_id: int, db: Session = Depends(get_db)):
 async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_db), user_name: str = Depends(get_current_user_name)):
     """Create new pembelian in DRAFT status - DOES NOT UPDATE STOCK YET"""
 
-
-
-    # Create pembelian
     pembelian = Pembelian(
         no_pembelian=generate_unique_record_number(db, Pembelian, prefix="QP/PRC"),
         warehouse_id=request.warehouse_id,
@@ -443,7 +439,8 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
             unit_price=unit_price,
             unit_price_rmb=unit_price_rmb,
             tax_percentage=item_request.tax_percentage or 0,
-            discount=item_request.discount or Decimal('0')
+            discount=item_request.discount or Decimal('0'),
+            ongkir=item_request.ongkir or Decimal('0')
         )
         # Calculate totals for this item
         calculate_item_totals(pembelian_item)

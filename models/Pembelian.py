@@ -83,9 +83,9 @@ class Pembelian(Base,SoftDeleteMixin):
     @hybrid_property
     def vendor_display(self) -> str:
         """
-        Return vendor name - prioritize snapshot name, fallback to relationship
+        Return vendor name - prioritize snapshot column, fallback to relationship
         """
-        if self.vendor_name:
+        if hasattr(self, "vendor_name") and self.vendor_name:  
             return self.vendor_name
         if self.vend_rel:
             return self.vend_rel.name
@@ -129,6 +129,7 @@ class PembelianItem(Base):
     price_after_tax =  Column(Numeric(15,7), default=0.00)
     sub_total  = Column(Numeric(15,7), default=0.00)
     total_price = Column(Numeric(15, 7), nullable=False, default=0.00)  # qty * unit_price
+    ongkir =Column(Numeric(15, 7), nullable=False, default=0.00)
 
     # Relationships
     pembelian = relationship("Pembelian", back_populates="pembelian_items")

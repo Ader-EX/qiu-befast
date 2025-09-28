@@ -25,6 +25,7 @@ NonNegDec = Decimal
 class PembelianItemBase(BaseModel):
     item_id: Optional[int] = None
     discount: Optional[NonNegDec] = Field(default=Decimal("0.00"), ge=0)
+    ongkir: Optional[NonNegDec] = Field(default=Decimal("0.00"), ge=0)
     qty: int = Field(gt=0)                         # must be > 0
     unit_price: NonNegDec = Field(ge=0)            # cannot be negative
     unit_price_rmb: NonNegDec = Field(ge=0)            # cannot be negative
@@ -53,6 +54,7 @@ class PembelianItemResponse(BaseModel):
     unit_price_rmb: NonNegDec
     tax_percentage: int = 0
     discount: NonNegDec = Decimal("0.00")
+    ongkir: NonNegDec = Decimal("0.00")
 
     price_after_tax: NonNegDec = Decimal("0.00")
     sub_total: NonNegDec = Decimal("0.00")
