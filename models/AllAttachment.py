@@ -22,12 +22,15 @@ class AllAttachment(Base):
     penjualan_id = Column(Integer, ForeignKey("penjualans.id"), nullable=True)
     pembayaran_id = Column(Integer, ForeignKey("pembayarans.id"), nullable=True)
     pengembalian_id = Column(Integer, ForeignKey("pengembalians.id"), nullable=True)
+    stock_adjustment_id = Column(Integer, ForeignKey("stock_adjustments.id"), nullable=True)
 
     item_rel = relationship("Item", back_populates="attachments")
     pembelians = relationship("Pembelian", back_populates="attachments")
     penjualans = relationship("Penjualan", back_populates="attachments")
     pembayarans = relationship("Pembayaran", back_populates="attachments")
     pengembalians = relationship("Pengembalian", back_populates="attachments")
+    stock_adjustments = relationship("StockAdjustment", back_populates="attachments")
+
 
 
     filename = Column(String(255), nullable=False)

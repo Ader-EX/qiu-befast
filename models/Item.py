@@ -41,7 +41,7 @@ class Item(Base, SoftDeleteMixin):
     attachments = relationship("AllAttachment", back_populates="item_rel", cascade="all, delete-orphan",   primaryjoin="and_(Item.id==foreign(AllAttachment.item_id), AllAttachment.parent_type=='ITEMS')")
     pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
     penjualan_items  = relationship("PenjualanItem", back_populates="item_rel")
-
+    stock_adjustment_items = relationship("StockAdjustmentItem", back_populates="item_rel")
 
     @property
     def primary_image_url(self) -> Optional[str]:

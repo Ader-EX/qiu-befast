@@ -133,7 +133,7 @@ def calculate_penjualan_totals(db: Session, penjualan_id: int, msg : str, user_n
     penjualan.total_price = grand_total  # This is grandTotal in frontend
     penjualan.total_qty = sum(int(it.qty or 0) for it in items)
 
-    if (msg is not "" or msg is not None) :
+    if (msg !=  "" or msg != None) :
         audit_service.default_log(
             entity_id=penjualan.id,
             entity_type=AuditEntityEnum.PENJUALAN,
@@ -389,8 +389,9 @@ async def get_all_penjualan(
     status_pembayaran: Optional[StatusPembayaranEnum] = Query(None),
     customer_id: Optional[str] = Query(None),
     warehouse_id: Optional[int] = Query(None),
-    kode_lambung_id: Optional[int] = Query(None),  # NEW: Add kode_lambung filter
+    kode_lambung_id: Optional[int] = Query(None),
     search_key: Optional[str] = Query(None),
+    is_picker_view: Optional[bool] = Query(None),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -416,6 +417,8 @@ async def get_all_penjualan(
             cast(func.substr(Penjualan.no_penjualan, 7, 4), Integer).desc()
         )
     )
+    if is_picker_view is True:
+        query = query.filter(Penjualan.status_pembayaran != StatusPembayaranEnum.PAID, Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,  Penjualan.status_penjualan != StatusPembelianEnum.COMPLETED)
 
     if status_penjualan is not None and status_penjualan != StatusPembelianEnum.ALL:
         if status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):

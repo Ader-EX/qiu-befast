@@ -9,7 +9,7 @@ from fastapi import FastAPI,  APIRouter
 from fastapi.params import Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import extract, func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from starlette import status
 
 from starlette.exceptions import HTTPException
@@ -166,29 +166,26 @@ async def get_laba_rugi(
         total_penjualan=total_penjualan,
         profit_or_loss=profit_or_loss
     )
-    
+
 @router.get(
     "/penjualan",
     status_code=status.HTTP_200_OK,
     response_model=PaginatedResponse[SalesReportRow],
     summary="Laporan Penjualan (consolidated per sale)",
 )
-# Make sure you have the correct imports at the top of your file:
-# from models.KodeLambung import KodeLambung  # Import the class, not the module
-# from models.Customer import Customer
-# from sqlalchemy import or_
+
 async def get_penjualan_laporan(
-    from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-    to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
-    customer_id: Optional[int] = Query(None, description="Customer ID"),
-    kode_lambung_id: Optional[int] = Query(None, description="Kode Lambung ID"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    db: Session = Depends(get_db),
+        from_date: datetime = Query(..., description="Start datetime (inclusive)"),
+        to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
+        customer_id: Optional[int] = Query(None, description="Customer ID"),
+        kode_lambung_id: Optional[int] = Query(None, description="Kode Lambung ID"),
+        skip: int = Query(0, ge=0, description="Number of records to skip"),
+        limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+        db: Session = Depends(get_db),
 ):
     """
     Returns one row per sale with concatenated item details and aggregated totals.
-    Shows both customer's kode_lambung and penjualan's kode_lambung.
+    Shows penjualan's kode_lambung only (Customer doesn't have a kode_lambung FK).
     """
 
     if to_date is None:
@@ -200,9 +197,8 @@ async def get_penjualan_laporan(
             Penjualan.sales_date.label("date"),
             Penjualan.customer_name,
             Customer.name.label("customer_name_rel"),
-            Customer.kode_lambung.label("customer_kode_lambung"),   # string kode on Customer
             Penjualan.kode_lambung_id,
-            KodeLambung.name.label("penjualan_kode_lambung"),       # kode on Penjualan via FK
+            KodeLambung.name.label("penjualan_kode_lambung"),
             Penjualan.no_penjualan,
             Penjualan.status_pembayaran,
         )
@@ -213,20 +209,14 @@ async def get_penjualan_laporan(
             Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
             Penjualan.sales_date >= from_date,
             Penjualan.sales_date <= to_date,
-        )
+            )
     )
 
     if customer_id is not None:
         sales_query = sales_query.filter(Penjualan.customer_id == customer_id)
 
     if kode_lambung_id is not None:
-        # Keep BOTH if your Customer has a kode_lambung_id FK; otherwise remove the second clause.
-        sales_query = sales_query.filter(
-            or_(
-                Penjualan.kode_lambung_id == kode_lambung_id,
-                
-            )
-        )
+        sales_query = sales_query.filter(Penjualan.kode_lambung_id == kode_lambung_id)
 
     sales_query = sales_query.order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc())
 
@@ -282,8 +272,7 @@ async def get_penjualan_laporan(
             SalesReportRow(
                 date=sale.date,
                 customer=sale.customer_name or sale.customer_name_rel or "—",
-                kode_lambung=sale.customer_kode_lambung,
-                
+                kode_lambung_rel=sale.penjualan_kode_lambung,
                 kode_lambung_penjualan=sale.penjualan_kode_lambung,
                 no_penjualan=sale.no_penjualan,
                 status=(sale.status_pembayaran.name.capitalize()
@@ -308,8 +297,6 @@ async def get_penjualan_laporan(
         data=report_rows,
         total=total_count,
     )
-
-
 @router.get(
     "/penjualan/download",
     status_code=status.HTTP_200_OK,
@@ -318,13 +305,15 @@ async def get_penjualan_laporan(
 async def download_penjualan_laporan(
         from_date: datetime = Query(..., description="Start datetime (inclusive)"),
         to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
+        customer_id: Optional[int] = Query(None, description="Customer ID"),
+        kode_lambung_id: Optional[int] = Query(None, description="Kode Lambung ID"),
         db: Session = Depends(get_db),
 ):
     """
     Download complete sales report as CSV without pagination.
     Returns all records matching the date filter - one row per sale with concatenated items.
     """
-    
+
     if to_date is None:
         to_date = datetime.now()
 
@@ -335,19 +324,29 @@ async def download_penjualan_laporan(
             Penjualan.sales_date.label("date"),
             Penjualan.customer_name,
             Customer.name.label("customer_name_rel"),
-            Customer.kode_lambung.label("customer_kode_lambung_rel"),
+            Penjualan.kode_lambung_id,
+            KodeLambung.name.label("penjualan_kode_lambung"),
             Penjualan.no_penjualan,
             Penjualan.status_pembayaran,
         )
         .join(Customer, Customer.id == Penjualan.customer_id, isouter=True)
+        .join(KodeLambung, KodeLambung.id == Penjualan.kode_lambung_id, isouter=True)
         .filter(
             Penjualan.is_deleted == False,
             Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
             Penjualan.sales_date >= from_date,
             Penjualan.sales_date <= to_date,
-        )
-        .order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc())
+            )
     )
+
+    # Apply optional filters
+    if customer_id is not None:
+        sales_query = sales_query.filter(Penjualan.customer_id == customer_id)
+
+    if kode_lambung_id is not None:
+        sales_query = sales_query.filter(Penjualan.kode_lambung_id == kode_lambung_id)
+
+    sales_query = sales_query.order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc())
 
     # Get all sales without pagination
     sales = sales_query.all()
@@ -358,7 +357,7 @@ async def download_penjualan_laporan(
     # Create CSV content with proper encoding
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    
+
     # Write header
     writer.writerow([
         'Date',
@@ -406,10 +405,10 @@ async def download_penjualan_laporan(
             item_code = item.item_code or "N/A"
             item_name = item.item_name or "N/A"
             qty = int(item.qty or 0)
-            
+
             item_codes.append(item_code)
             item_names.append(item_name)
-            
+
             # Calculate totals
             price = _dec(item.unit_price)
             item_subtotal = price * qty
@@ -417,10 +416,10 @@ async def download_penjualan_laporan(
             item_total = item_subtotal - item_discount
             if item_total < 0:
                 item_total = Decimal("0")
-            
+
             tax_pct = Decimal(str(item.tax_percentage or 0))
             item_tax = (item_total * tax_pct / Decimal(100))
-            
+
             total_subtotal += item_subtotal
             total_discount += item_discount
             total_tax += item_tax
@@ -429,16 +428,15 @@ async def download_penjualan_laporan(
         # Join items with comma
         item_codes_str = ", ".join(item_codes) if item_codes else "No items"
         item_names_str = ", ".join(item_names) if item_names else "No items"
-        
+
         # Calculate final totals
         final_total = total_subtotal - total_discount
         if final_total < 0:
             final_total = Decimal("0")
         grand_total = final_total + total_tax
 
-        # Get customer info
         customer_name = sale.customer_name or sale.customer_name_rel or "—"
-        kode_lambung = sale.customer_kode_lambung_rel or ""
+        kode_lambung = sale.penjualan_kode_lambung or ""
 
         # Write CSV row
         writer.writerow([
@@ -461,10 +459,10 @@ async def download_penjualan_laporan(
     # Get the CSV content
     csv_content = output.getvalue()
     output.close()
-    
+
     # Generate filename
     filename = f"laporan_penjualan_{from_date:%Y%m%d}_{to_date:%Y%m%d}.csv"
-    
+
     # Return as streaming response with proper headers
     return StreamingResponse(
         io.BytesIO(csv_content.encode('utf-8-sig')),
@@ -474,7 +472,6 @@ async def download_penjualan_laporan(
             "Content-Type": "text/csv; charset=utf-8"
         }
     )
-    
 @router.get("/pembelian")
 async def get_pembelian_laporan(
     from_date: datetime = Query(...),

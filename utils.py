@@ -298,6 +298,8 @@ def generate_unique_record_number(
         record_number_field = model_class.no_pengembalian
     elif hasattr(model_class, 'record_number'):
         record_number_field = model_class.record_number
+    elif hasattr(model_class, 'no_adjustment'):
+        record_number_field = model_class.no_adjustment
     
     if record_number_field is None:
         raise Exception(f"Model {model_class.__name__} does not have a recognized record number field")

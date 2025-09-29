@@ -1,7 +1,7 @@
 from datetime import datetime, date, time
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import or_
+from sqlalchemy import or_, exists
 from sqlalchemy.orm import Session, joinedload
 from starlette import status
 from starlette.exceptions import HTTPException
@@ -67,13 +67,49 @@ def get_all_Customer(
         "data": paginated_data,
         "total": total_count,
     }
-# Get one
+
 @router.get("/{customer_id}", response_model=CustomerOut)
-async def get_customer(customer_id: str, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    return customer
+async def get_customer(
+        customer_id: str,
+        db: Session = Depends(get_db),
+        contains_deleted: Optional[bool] = False
+):
+    query = db.query(Customer).filter(Customer.id == customer_id)
+
+    if not contains_deleted:
+        query = query.filter(Customer.is_deleted == False)
+
+    customer = query.one_or_none()
+
+    if customer is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Customer with ID '{customer_id}' not found"
+        )
+
+    if contains_deleted:
+        kode_lambung_records = db.query(KodeLambung).filter(
+            KodeLambung.customer_id == customer.id
+        ).all()
+    else:
+        kode_lambung_records = db.query(KodeLambung).filter(
+            KodeLambung.customer_id == customer.id,
+            KodeLambung.is_deleted.is_(False)
+        ).all()
+
+    response_data = {
+        "id": customer.id,
+        "code": customer.code,
+        "name": customer.name,
+        "address": customer.address,
+        "is_active": customer.is_active,
+        "currency_id": customer.currency_id,
+        "created_at": customer.created_at,
+        "curr_rel": customer.curr_rel,
+        "kode_lambung_rel": kode_lambung_records
+    }
+
+    return response_data
 
 @router.post("", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
 async def create_customer(customer_data: CustomerCreate, db: Session = Depends(get_db), user_name: str = Depends(get_current_user_name)):
@@ -165,61 +201,45 @@ async def update_customer(customer_id: str, customer_data: CustomerUpdate, db: S
 
     # Handle kode_lambungs update
     if customer_data.kode_lambungs is not None:
-        # APPROACH 1: Update existing KodeLambung by ID and name
-        if hasattr(customer_data.kode_lambungs, 'id') and customer_data.kode_lambungs.id:
-            # Find and update existing KodeLambung by ID
-            existing_kode_lambung = db.query(KodeLambung).filter(
-                KodeLambung.id == customer_data.kode_lambungs.id
-            ).first()
-
-            if existing_kode_lambung:
-                # Update the name of existing KodeLambung
-                existing_kode_lambung.name = customer_data.kode_lambungs.name
-            else:
-                # If ID provided but not found, create new one
-                kode_lambung = KodeLambung(
-                    name=customer_data.kode_lambungs.name,
-                    customer_id=customer.id
-                )
-                db.add(kode_lambung)
-        else:
-            # Create new KodeLambung if no ID provided
-            kode_lambung = KodeLambung(
-                name=customer_data.kode_lambungs.name,
-                customer_id=customer.id
-            )
-            db.add(kode_lambung)
-
-        # APPROACH 2: Replace all KodeLambungs for this customer
-        # Uncomment this section if you want to replace all kode_lambungs
-        """
-        # Soft delete all existing KodeLambungs for this customer
+        # Get all existing KodeLambung IDs for this customer
         existing_kode_lambungs = db.query(KodeLambung).filter(
             KodeLambung.customer_id == customer.id
         ).all()
-        
-        for kl in existing_kode_lambungs:
-            soft_delete_record(db, KodeLambung, kl.id)
 
-        # Handle different data structures for kode_lambungs
-        if isinstance(customer_data.kode_lambungs, list):
-            # If kode_lambungs is a list of objects/names
-            for kl_data in customer_data.kode_lambungs:
-                if isinstance(kl_data, str):
-                    # If it's a list of strings
-                    name = kl_data
+        # Create a set of IDs that are being updated/kept
+        provided_ids = set()
+
+        # Process each KodeLambungUpdate object
+        for kl_data in customer_data.kode_lambungs:
+            if hasattr(kl_data, 'id') and kl_data.id:
+                provided_ids.add(kl_data.id)
+                existing_kode_lambung = db.query(KodeLambung).filter(
+                    KodeLambung.id == kl_data.id,
+                    KodeLambung.customer_id == customer.id  # Ensure it belongs to this customer
+                ).first()
+
+                if existing_kode_lambung:
+                    # Update the name if provided
+                    if hasattr(kl_data, 'name') and kl_data.name:
+                        existing_kode_lambung.name = kl_data.name
                 else:
-                    # If it's a list of objects with name attribute
-                    name = kl_data.name
-                
-                kode_lambung = KodeLambung(name=name, customer_id=customer.id)
+                    # ID provided but not found, create new one
+                    kode_lambung = KodeLambung(
+                        name=kl_data.name,
+                        customer_id=customer.id
+                    )
+                    db.add(kode_lambung)
+            else:
+                # No ID provided, create new KodeLambung
+                kode_lambung = KodeLambung(
+                    name=kl_data.name,
+                    customer_id=customer.id
+                )
                 db.add(kode_lambung)
-        else:
-            # If kode_lambungs is a single object
-            name = customer_data.kode_lambungs.name
-            kode_lambung = KodeLambung(name=name, customer_id=customer.id)
-            db.add(kode_lambung)
-        """
+
+        for existing_kl in existing_kode_lambungs:
+            if existing_kl.id not in provided_ids:
+                soft_delete_record(db, KodeLambung, existing_kl.id)
 
     audit_service.default_log(
         entity_id=customer.id,
@@ -231,7 +251,6 @@ async def update_customer(customer_id: str, customer_data: CustomerUpdate, db: S
     db.commit()
     db.refresh(customer)
     return customer
-
 @router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_customer(customer_id: str, db: Session = Depends(get_db)):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()

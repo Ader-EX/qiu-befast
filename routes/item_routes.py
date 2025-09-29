@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Form, Request, UploadFile, File, Query
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session, joinedload
 from starlette.exceptions import HTTPException
 import shutil
@@ -221,7 +221,7 @@ def get_items(
         joinedload(Item.category_two_rel),
         joinedload(Item.satuan_rel),
         joinedload(Item.attachments),
-    )
+    ).order_by(Item.created_at.desc())
     
     if contains_deleted is False:
         query = query.filter(Item.is_deleted == False)

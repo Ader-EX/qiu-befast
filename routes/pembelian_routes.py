@@ -292,6 +292,7 @@ async def get_all_pembelian(
         warehouse_id: Optional[int] = Query(None),
         page: int = Query(1, ge=1),
         size: int = Query(50, ge=1, le=100),
+        is_picker_view: Optional[bool] = Query(None),
         db: Session = Depends(get_db),
         to_date : Optional[date] = Query(None, description="Filter by date"),
         from_date : Optional[date] = Query(None, description="Filter by date"),
@@ -313,6 +314,9 @@ async def get_all_pembelian(
     )
 
     # Apply filters
+    if is_picker_view is True:
+        query = query.filter(Pembelian.status_pembayaran != StatusPembayaranEnum.PAID, Pembelian.status_pembelian != StatusPembelianEnum.DRAFT,  Pembelian.status_pembelian != StatusPembelianEnum.COMPLETED)
+
     if status_pembelian is not None and status_pembelian != StatusPembelianEnum.ALL:
         if status_pembelian == StatusPembelianEnum.ACTIVE or status_pembelian == StatusPembelianEnum.PROCESSED:
             query = query.filter(

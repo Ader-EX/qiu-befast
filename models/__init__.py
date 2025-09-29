@@ -14,4 +14,5 @@ from models import Pengembalian
 from models import SumberDana
 from models.mixin import  SoftDeleteMixin
 from models import KodeLambung
+from models import StockAdjustment
 from models.mixin import AuditMixin

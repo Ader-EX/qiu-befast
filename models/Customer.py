@@ -19,7 +19,7 @@ class Customer(Base,SoftDeleteMixin):
 
    
     curr_rel = relationship("Currency", back_populates="cust_rel")
-    kode_lambung_rel = relationship("KodeLambung", back_populates="customer_rel")
+    kode_lambung_rel = relationship("KodeLambung", back_populates="customer_rel" )
     # pembelians = relationship("Pembelian",cascade="all, delete", back_populates="customer_rel")
     penjualans = relationship("Penjualan",cascade="all, delete", back_populates="customer_rel")
     pembayarans = relationship("Pembayaran",cascade="all, delete", back_populates="customer_rel")

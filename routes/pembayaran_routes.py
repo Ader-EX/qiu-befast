@@ -378,7 +378,6 @@ def update_pembayaran(
                     status_code=400,
                     detail="vendor_id is required when reference_type is PEMBELIAN"
                 )
-          
 
         # Validate payment details consistency with new reference type
         if pembayaran_data.pembayaran_details:

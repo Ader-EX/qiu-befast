@@ -2,11 +2,8 @@ from datetime import datetime
 
 from sqlalchemy import Column, Integer, String, Enum
 
-from database import Base
-
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
-from sqlalchemy.orm import relationship
 from database import Base
 import enum
 
@@ -40,8 +37,7 @@ class AuditEntityEnum(enum.Enum):
     CUSTOMER = "CUSTOMER"
     VENDOR = "VENDOR"
     ITEM = "ITEM"
-
-
+    STOCK_ADJUSTMENT = "STOCK_ADJUSTMENT"
 
 
 class AuditTrail(Base):
