@@ -51,8 +51,7 @@ def adjust_item_stock(db: Session, item_id: int, qty: int, adjustment_type: Adju
     audit_service.default_log(
         entity_id=item.id,
         entity_type=AuditEntityEnum.ITEM,
-        description=f"Stok item {item.name} {action} sebanyak {qty} (dari {old_stock} menjadi {new_stock}) - Adjustment: {no_adj
-        }",
+        description=f"Stok item {item.name} {action} sebanyak {qty} (dari {old_stock} menjadi {new_stock}) - Adjustment: {no_adj}",
         user_name=user_name
     )
 
