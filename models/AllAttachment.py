@@ -10,6 +10,7 @@ class ParentType(enum.Enum):
     PEMBAYARANS="PEMBAYARANS"
     PENJUALANS="PENJUALANS"
     ITEMS = "ITEMS"
+    STOCK_ADJUSTMENTS = "STOCK_ADJUSTMENTS"
 
 class AllAttachment(Base):
     __tablename__ = "all_attachments"

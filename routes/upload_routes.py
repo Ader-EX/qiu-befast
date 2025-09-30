@@ -36,6 +36,7 @@ class ParentType(enum.Enum):
     PEMBAYARANS="PEMBAYARANS"
     PENJUALANS="PENJUALANS"
     ITEMS = "ITEMS"
+    STOCK_ADJUSTMENTS = "STOCK_ADJUSTMENTS"
 
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR" ,default="uploads/items")
@@ -212,6 +213,8 @@ def upload_image(
         attachment.pembayaran_id= parent_id
     elif parent_type == ParentType.PENGEMBALIANS:
         attachment.pengembalian_id= parent_id
+    elif parent_type == ParentType.STOCK_ADJUSTMENTS:
+        attachment.stock_adjustment_id= parent_id
 
 
     db.add(attachment)

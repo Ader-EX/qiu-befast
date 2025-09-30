@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, func, cast, Integer
+import os
+from fastapi import APIRouter, Depends, HTTPException, Query,status
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session, joinedload,selectinload
+from sqlalchemy import and_, or_, func, cast, Integer
 from typing import List, Optional
 from datetime import datetime, date, time
 
 from database import get_db
+from models.AllAttachment import AllAttachment
 from models.AuditTrail import AuditEntityEnum
 from models.StockAdjustment import StockAdjustment, StockAdjustmentItem, AdjustmentTypeEnum, StatusStockAdjustmentEnum
 from models.Item import Item
@@ -107,12 +110,13 @@ def create_stock_adjustment(
         )
         db.add(adj_item)
         total_qty += item_data.qty
+        total_price += item_data.adj_price
 
     # Log audit
     audit_service.default_log(
         entity_id=adjustment.id,
         entity_type=AuditEntityEnum.STOCK_ADJUSTMENT,
-        description=f"Stock Adjustment {adjustment.no_adjustment} dibuat (Draft), tipe: {adjustment_data.adjustment_type}, total items: {total_qty}",
+        description=f"Penyesuaian {adjustment.no_adjustment} dibuat (Draft), tipe: {adjustment_data.adjustment_type}, total items: {total_qty}, total harga : {total_price} ",
         user_name=user_name
     )
 
@@ -191,6 +195,8 @@ def get_stock_adjustments(
         data=adjustments,
         total=total,
     )
+    
+    
 @router.get("/{adjustment_id}", response_model=StockAdjustmentResponse)
 def get_stock_adjustment(adjustment_id: int, db: Session = Depends(get_db)):
     """Get stock adjustment by ID"""
@@ -198,16 +204,104 @@ def get_stock_adjustment(adjustment_id: int, db: Session = Depends(get_db)):
     adjustment = db.query(StockAdjustment).options(
         joinedload(StockAdjustment.stock_adjustment_items).joinedload(StockAdjustmentItem.item_rel),
         joinedload(StockAdjustment.warehouse_rel),
+        joinedload(StockAdjustment.attachments),  
     ).filter(
         StockAdjustment.id == adjustment_id,
         StockAdjustment.is_deleted == False
     ).first()
+
 
     if not adjustment:
         raise HTTPException(status_code=404, detail="Stock adjustment not found")
 
     return adjustment
 
+
+@router.get("/{pembelian_id}/download/{attachment_id}")
+async def download_attachment(
+        stock_adjustment_id: str,
+        attachment_id: int,
+        db: Session = Depends(get_db)
+):
+    """Download attachment file"""
+
+    attachment = db.query(AllAttachment).filter(
+        and_(
+            AllAttachment.id == attachment_id,
+            AllAttachment.stock_adjustment_id == stock_adjustment_id
+        )
+    ).first()
+
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    if not os.path.exists(attachment.file_path):
+        raise HTTPException(status_code=404, detail="File not found on server")
+
+    return FileResponse(
+        path=attachment.file_path,
+        filename=attachment.filename,
+        media_type=attachment.mime_type
+    )
+
+
+
+@router.patch("/{adjustment_id}/rollback", status_code=status.HTTP_200_OK)
+async def rollback_stock_adjustment(
+    adjustment_id: int,
+    db: Session = Depends(get_db),
+    user_name: str = Depends(get_current_user_name)
+):
+    """
+    Rolls back a Stock Adjustment from ACTIVE → DRAFT.
+    Reverses the stock changes that were applied during finalization.
+    """
+    audit_service = AuditService(db)
+
+    adjustment = (
+        db.query(StockAdjustment)
+        .options(selectinload(StockAdjustment.stock_adjustment_items))
+        .filter(
+            StockAdjustment.id == adjustment_id,
+            StockAdjustment.is_deleted == False
+        )
+        .first()
+    )
+
+    if not adjustment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stock adjustment not found"
+        )
+
+    if adjustment.status_adjustment != StatusStockAdjustmentEnum.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only ACTIVE stock adjustments can be rolled back"
+        )
+
+    # Update status back to DRAFT
+    adjustment.status_adjustment = StatusStockAdjustmentEnum.DRAFT
+
+    # Audit log
+    total_qty = sum(item.qty for item in adjustment.stock_adjustment_items)
+    audit_service.default_log(
+        entity_id=adjustment.id,
+        entity_type=AuditEntityEnum.STOCK_ADJUSTMENT,
+        description=(
+            f"Penyesuaian {adjustment.no_adjustment} status diubah "
+            f"dari ACTIVE → DRAFT, tipe: {adjustment.adjustment_type.value}, "
+        ),
+        user_name=user_name
+    )
+
+    db.commit()
+    db.refresh(adjustment)
+
+    return {
+        "message": "Stock adjustment rolled back successfully",
+        "adjustment": adjustment
+    }
 
 @router.put("/{adjustment_id}/finalize")
 def finalize_stock_adjustment(
@@ -254,7 +348,7 @@ def finalize_stock_adjustment(
     audit_service.default_log(
         entity_id=adjustment.id,
         entity_type=AuditEntityEnum.STOCK_ADJUSTMENT,
-        description=f"Stock Adjustment {adjustment.no_adjustment} difinalisasi, tipe: {adjustment.adjustment_type.value}, total items: {total_qty}",
+        description=f"Penyesuaian {adjustment.no_adjustment} status diubah: Draft → Aktif",
         user_name=user_name
     )
 
@@ -323,7 +417,7 @@ def update_stock_adjustment(
     audit_service.default_log(
         entity_id=adjustment.id,
         entity_type=AuditEntityEnum.STOCK_ADJUSTMENT,
-        description=f"Stock Adjustment {adjustment.no_adjustment} diupdate",
+        description=f"Penyesuaian {adjustment.no_adjustment} telah diedit",
         user_name=user_name
     )
 

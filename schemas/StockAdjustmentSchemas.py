@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
-from schemas.ItemSchema import ItemBase
+from schemas.ItemSchema import AttachmentResponse, ItemBase
 from schemas.PembayaranSchemas import WarehouseResponse
 
 
@@ -52,6 +52,7 @@ class StockAdjustmentResponse(BaseModel):
     is_deleted: Optional[bool] = None
     stock_adjustment_items: List[StockAdjustmentItemResponse] = []
     warehouse_rel: Optional[WarehouseResponse] = None
+    attachments: List[AttachmentResponse] = Field(default_factory=list)
 
 
 

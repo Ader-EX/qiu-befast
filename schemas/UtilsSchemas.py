@@ -122,3 +122,36 @@ class LowStockAlertResponse(BaseModel):
     item_name : str
     qty: int
     reorder_qty : int
+    
+    
+
+class StockAdjustmentReportRow(BaseModel):
+    """Single row in stock adjustment report"""
+    date: datetime
+    no_transaksi: str
+    item_code: str
+    item_name: str
+    qty_masuk: int
+    qty_keluar: int
+    qty_balance: int
+    harga_masuk: Decimal
+    harga_keluar: Decimal
+    hpp: Decimal
+
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            Decimal: lambda v: float(v)
+        }
+
+
+class StockAdjustmentReportResponse(BaseModel):
+    """Response for stock adjustment report"""
+    title: str
+    date_from: datetime
+    date_to: datetime
+    data: List[StockAdjustmentReportRow]
+    total: int
+
+    class Config:
+        from_attributes = True
