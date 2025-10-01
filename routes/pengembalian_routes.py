@@ -23,7 +23,7 @@ router = APIRouter()
 
 
 # NEW: Recalculate total_return from ACTIVE pengembalians, then reuse update_payment_status
-def recalc_return_and_update_payment_status(db: Session, reference_id: int, reference_type: PembayaranPengembalianType, no_pengembalian : str, user_name  : str = Depends(get_current_user_name)) -> None:
+def recalc_return_and_update_payment_status(db: Session, reference_id: int, reference_type: PembayaranPengembalianType, no_pengembalian : str, user_name  : str) -> None:
     """
     1) Recalculate and persist total_return on the referenced record (Pembelian/Penjualan)
        from ACTIVE pengembalian rows.
@@ -94,7 +94,7 @@ def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Dep
 
     # Create return record - EXCLUDE total_paid from pengembalian_dict
     pengembalian_dict = pengembalian_data.model_dump(exclude={'pengembalian_details'})
-    pengembalian_dict.pop('total_paid', None)  # ensure not on header
+    pengembalian_dict.pop('total_return', None)  # ensure not on header
 
     pengembalian = Pengembalian(**pengembalian_dict)
 
@@ -110,7 +110,7 @@ def create_pengembalian(pengembalian_data: PengembalianCreate, db: Session = Dep
     db.add(pengembalian)
     db.flush()
 
-    total_paid = sum(detail_data.total_paid for detail_data in pengembalian_data.pengembalian_details)
+    total_paid = sum(detail_data.total_return for detail_data in pengembalian_data.pengembalian_details)
     # Create return details
     for detail_data in pengembalian_data.pengembalian_details:
         detail = PengembalianDetails(
@@ -211,7 +211,7 @@ def get_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{pengembalian_id}/finalize")
-def finalize_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
+def finalize_pengembalian(pengembalian_id: int, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):
     """Finalize return record by ID"""
 
     pengembalian = db.query(Pengembalian).filter(
@@ -233,9 +233,9 @@ def finalize_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
     # Recalc returns and update payment status for each affected reference
     for detail in pengembalian.pengembalian_details:
         if detail.pembelian_id:
-            recalc_return_and_update_payment_status(db, detail.pembelian_id, PembayaranPengembalianType.PEMBELIAN,pengembalian.no_pengembalian)
+            recalc_return_and_update_payment_status(db, detail.pembelian_id, PembayaranPengembalianType.PEMBELIAN,pengembalian.no_pengembalian,user_name=user_name)
         elif detail.penjualan_id:
-            recalc_return_and_update_payment_status(db, detail.penjualan_id, PembayaranPengembalianType.PENJUALAN,pengembalian.no_pengembalian)
+            recalc_return_and_update_payment_status(db, detail.penjualan_id, PembayaranPengembalianType.PENJUALAN,pengembalian.no_pengembalian, user_name=user_name)
 
     db.commit()
     db.refresh(pengembalian)
@@ -247,7 +247,8 @@ def finalize_pengembalian(pengembalian_id: int, db: Session = Depends(get_db)):
 def update_pengembalian(
         pengembalian_id: int,
         pengembalian_data: PengembalianUpdate,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        user_name : str = Depends(get_current_user_name)
 ):
     """Update return record"""
 
@@ -390,9 +391,9 @@ def update_pengembalian(
     # Recalc & update statuses for old references (in case details/reference mapping changed)
     for old_pembelian_id, old_penjualan_id in old_details:
         if old_pembelian_id:
-            recalc_return_and_update_payment_status(db, old_pembelian_id, PembayaranPengembalianType.PEMBELIAN,pengembalian.no_pengembalian)
+            recalc_return_and_update_payment_status(db, old_pembelian_id, PembayaranPengembalianType.PEMBELIAN,pengembalian.no_pengembalian,user_name=user_name)
         elif old_penjualan_id:
-            recalc_return_and_update_payment_status(db, old_penjualan_id, PembayaranPengembalianType.PENJUALAN,pengembalian.no_pengembalian)
+            recalc_return_and_update_payment_status(db, old_penjualan_id, PembayaranPengembalianType.PENJUALAN,pengembalian.no_pengembalian, user_name=user_name)
 
     db.commit()  # persist the recalculated statuses
     return pengembalian
