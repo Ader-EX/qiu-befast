@@ -415,29 +415,24 @@ async def import_items_from_excel(
 
                 # Create or update item
                 if update_existing and item_data['sku'] in existing_skus:
-    # Jangan generate code baru, pakai code dari existing item
                     existing_item = existing_skus[item_data['sku']]
                     item_data['code'] = existing_item.code  
                     
                     _update_existing_item(
-                        db, item_data, existing_item, audit_service, user_name
+                        db, item_data, existing_item.id, audit_service, user_name
                     )
                     result.warnings.append({
                         'row': index + 2,
                         'message': f"Updated existing item with SKU: {item_data['sku']}"
                     })
                 else:
-                    # Create baru → generate code
+                    # Only generate code for new items
                     prefix = get_item_prefix(item_data['type'])
                     item_code = generate_unique_record_code(db, Item, prefix)
                     item_data['code'] = item_code
-
                     _create_new_item(db, item_data, audit_service, user_name)
 
-
                 result.successful_imports += 1
-
-
             except Exception as e:
                 error_msg = str(e)
                 result.errors.append({
