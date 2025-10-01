@@ -122,7 +122,7 @@ class PenjualanUpdate(BaseModel):
     top_id: Optional[int] = None
     sales_date: Optional[datetime] = None
     kode_lambung: Optional[str] = None
-    kode_lambung_id: Optional[str] = None
+    kode_lambung_id: Optional[int] = None
     sales_due_date: Optional[datetime] = None
     additional_discount: Optional[NonNegDec] = None
     expense: Optional[NonNegDec] = None
