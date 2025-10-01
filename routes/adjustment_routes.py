@@ -64,7 +64,7 @@ def adjust_item_stock(
         inventory_service.post_inventory_out(
             item_id=item_id,
             source_type=source_type,
-            source_id=f"ADJUSTMENT:{no_adj}",
+            source_id=f"{no_adj}",
             qty=qty,
             trx_date=trx_date,
             reason_code=f"Stock Adjustment OUT: {no_adj}"
@@ -80,7 +80,7 @@ def adjust_item_stock(
         inventory_service.post_inventory_in(
             item_id=item_id,
             source_type=source_type,
-            source_id=f"ADJUSTMENT:{no_adj}",
+            source_id=f"{no_adj}",
             qty=qty,
             unit_price=adjustment_price,
             trx_date=trx_date,
@@ -131,7 +131,7 @@ def reverse_item_stock_adjustment(
         inventory_service.post_inventory_in(
             item_id=item_id,
             source_type=SourceTypeEnum.IN,
-            source_id=f"REVERSAL_ADJUSTMENT:{no_adj}",
+            source_id=f"{no_adj}",
             qty=qty,
             unit_price=adjustment_price,
             trx_date=trx_date,
@@ -152,7 +152,7 @@ def reverse_item_stock_adjustment(
         inventory_service.post_inventory_out(
             item_id=item_id,
             source_type=SourceTypeEnum.OUT,
-            source_id=f"REVERSAL_ADJUSTMENT:{no_adj}",
+            source_id=f"{no_adj}",
             qty=qty,
             trx_date=trx_date,
             reason_code=f"Reversal of Stock Adjustment IN: {no_adj}"
