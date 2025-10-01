@@ -1,3 +1,5 @@
+import base64
+import mimetypes
 import os
 import re
 from fastapi import HTTPException, Depends
@@ -127,6 +129,14 @@ from sqlalchemy.orm import Session
 #             return new_code
 #         next_num += 1
 #
+
+
+def file_to_data_url(path: str) -> str:
+    mime, _ = mimetypes.guess_type(path)
+    mime = mime or "application/octet-stream"
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    return f"data:{mime};base64,{b64}"
 
 
 def generate_incremental_id(

@@ -939,9 +939,8 @@ async def get_stock_adjustment_report(
 
     # Order by date, item, and order_key for proper chronological sequence
     query = query.order_by(
-        InventoryLedger.trx_date.asc(),
-        InventoryLedger.item_id.asc(),
-        InventoryLedger.order_key.asc()
+        Item.name.asc(),
+        InventoryLedger.trx_date.desc()
     )
 
     # Get total count
@@ -1034,9 +1033,8 @@ async def download_stock_adjustment_report(
 
     # Order by date, item, and order_key
     query = query.order_by(
-        InventoryLedger.trx_date.asc(),
-        InventoryLedger.item_id.asc(),
-        InventoryLedger.order_key.asc()
+        Item.name.asc(),
+        InventoryLedger.trx_date.desc()
     )
 
     ledger_entries = query.all()

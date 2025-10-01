@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Form, Request, UploadFile, File, Query
-from sqlalchemy import or_, text
+from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import Session, joinedload
 from starlette.exceptions import HTTPException
 import shutil
@@ -92,40 +92,51 @@ def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: Audi
     )
     return new_item
 
-
 def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_id: int, audit_service: AuditService, user_name: str):
+    """Update an existing item without changing its code."""
     inventory_service = InventoryService(db)
+    
+    # Query the existing item - it's automatically tracked by the session
     item = db.query(Item).filter(Item.id == existing_item_id).first()
     if not item:
         raise ValueError(f"Item with ID {existing_item_id} not found")
+    
+    print(f"Item ID: {item.id}, Code: {item.code}")
+    print(f"Object state: {inspect(item).persistent}")  # Should be True
+    print(f"Item in session: {item in db}")  # Should be True
 
     old_total_item = item.total_item
 
-    for key, value in item_data.items():
-        if key == "code":
-            continue
-        if hasattr(item, key):
-            setattr(item, key, value)
-    db.flush()
-
+    # Update ONLY the allowed fields - NEVER touch 'code', 'id', 'created_at'
+    updateable_fields = ['name', 'sku', 'type', 'total_item', 'price', 
+                        'category_one', 'category_two', 'satuan_id', 'is_active']
+    
+    for field in updateable_fields:
+        if field in item_data:
+            setattr(item, field, item_data[field])
+    
+    # DON'T call db.add(item) - it's already tracked!
+    # DON'T call db.flush() yet - wait until after inventory operations
+    
+    # Handle inventory changes
     new_total_item = item_data.get('total_item', 0)
     if new_total_item != old_total_item:
         difference = new_total_item - old_total_item
         if difference > 0:
-            inventory_service.post_inventory_in(  # MUST use await
+            inventory_service.post_inventory_in(
                 item_id=item.id,
                 source_type=SourceTypeEnum.IN,
-                source_id=f"{item.id}",
+                source_id=f"import-{item.id}",
                 qty=difference,
                 unit_price=item_data.get('price', Decimal('0')),
                 trx_date=date.today(),
                 reason_code="Import update - stock increase"
             )
         elif difference < 0:
-            inventory_service.post_inventory_out(  # MUST use await
+            inventory_service.post_inventory_out(
                 item_id=item.id,
                 source_type=SourceTypeEnum.OUT,
-                source_id=f"{item.id}",
+                source_id=f"import-{item.id}",
                 qty=abs(difference),
                 trx_date=date.today(),
                 reason_code="Import update - stock decrease"
@@ -137,6 +148,10 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
         description=f"Data item {item.name} telah diupdate via import",
         user_name=user_name,
     )
+    
+    # Flush changes to the database
+    db.flush()
+    
     return item
 
 @router.get("/{item_id}", response_model=ItemResponse)
@@ -407,32 +422,30 @@ async def import_items_from_excel(
                 )
 
                 if item_data is None:
-                    continue  # Skip this row
+                    continue
 
-                prefix = get_item_prefix(item_data['type'])
-                item_code = generate_unique_record_code(db, Item, prefix)
-                item_data['code'] = item_code
 
                 # Create or update item
+               # In your main import loop:
                 if update_existing and item_data['sku'] in existing_skus:
-                    existing_item = existing_skus[item_data['sku']]
-                    item_data['code'] = existing_item.code  
-                    
+                    existing_item_id = existing_skus[item_data['sku']]  # This is already an int
                     _update_existing_item(
-                        db, item_data, existing_item.id, audit_service, user_name
+                        db, item_data, existing_item_id, audit_service, user_name  # Pass ID directly
                     )
                     result.warnings.append({
                         'row': index + 2,
                         'message': f"Updated existing item with SKU: {item_data['sku']}"
                     })
                 else:
-                    # Only generate code for new items
+                    # Only generate code for NEW items
                     prefix = get_item_prefix(item_data['type'])
                     item_code = generate_unique_record_code(db, Item, prefix)
                     item_data['code'] = item_code
                     _create_new_item(db, item_data, audit_service, user_name)
 
                 result.successful_imports += 1
+
+
             except Exception as e:
                 error_msg = str(e)
                 result.errors.append({

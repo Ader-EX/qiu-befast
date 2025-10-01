@@ -1,3 +1,4 @@
+import base64
 import random
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, status
@@ -1060,14 +1061,14 @@ async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error archiving penjualan: {str(e)}")
-
+        
 @router.get("/{penjualan_id}/invoice/html", response_class=HTMLResponse)
 async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: Session = Depends(get_db)):
     penjualan = (
         db.query(Penjualan)
         .options(
             joinedload(Penjualan.customer_rel),
-            joinedload(Penjualan.kode_lambung_rel),  # <-- load the kode_lambung relation
+            joinedload(Penjualan.kode_lambung_rel),
             joinedload(Penjualan.penjualan_items)
                 .joinedload(PenjualanItem.item_rel)
                 .joinedload(Item.attachments),
@@ -1079,41 +1080,75 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
         raise HTTPException(status_code=404, detail="Penjualan not found")
 
     BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+    totals_data = calculate_penjualan_totals(db, penjualan_id, "")
 
-    # Use the fixed calculation function to ensure consistency
-    totals_data = calculate_penjualan_totals(db, penjualan_id)
+    def get_image_as_base64(raw_image_path):
+        """Convert image to base64 so it embeds in downloaded HTML"""
+        if not raw_image_path:
+            return None
+        
+        try:
+            cleaned_path = str(raw_image_path).strip()
+            
+            # Remove unwanted prefixes
+            for prefix in ["root/backend/", "/root/backend/", "backend/", "/backend/", "static/items/", "/static/items/"]:
+                if cleaned_path.startswith(prefix):
+                    cleaned_path = cleaned_path[len(prefix):]
+                    break
+            
+            upload_dir = os.getenv("UPLOAD_DIR", "uploads/items")
+            
+            # Try different paths
+            possible_paths = [
+                cleaned_path,
+                f"static/items/{os.path.basename(cleaned_path)}",
+                f"uploads/items/{os.path.basename(cleaned_path)}",
+                os.path.join(upload_dir, os.path.basename(cleaned_path)),
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    with open(path, "rb") as f:
+                        img_data = base64.b64encode(f.read()).decode("ascii")
+                        mime_type = "image/jpeg"
+                        if path.lower().endswith('.png'):
+                            mime_type = "image/png"
+                        elif path.lower().endswith('.webp'):
+                            mime_type = "image/webp"
+                        return f"data:{mime_type};base64,{img_data}"
+            
+            print(f"⚠️ Image not found: {raw_image_path}, tried: {possible_paths}")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error loading image {raw_image_path}: {e}")
+            return None
 
     enhanced_items = []
     
     for it in penjualan.penjualan_items:
-        # FIXED: Use primary_image_url which returns raw path, not full URL
         raw_image_path = it.primary_image_url if it.item_rel else None
-        img_url = get_public_image_url(raw_image_path, BASE_URL) if raw_image_path else None
+        img_url = get_image_as_base64(raw_image_path)  # Use base64 instead of URL
         
-        # Use the calculate_item_totals function to ensure consistency
         calculate_item_totals(it)
         
-        # Extract calculated values from the item
         qty = Decimal(str(it.qty or 0))
         unit_price = Decimal(str(it.unit_price or 0))
         tax_pct = Decimal(str(it.tax_percentage or 0))
         item_discount = Decimal(str(it.discount or 0))
         
-        # Calculate using the same frontend logic as the fixed function
-        row_sub_total = qty * unit_price  # Before any discounts/tax
+        row_sub_total = qty * unit_price
         taxable_base = max(row_sub_total - item_discount, Decimal('0'))
         item_tax = (taxable_base * tax_pct) / Decimal('100')
         item_total_price = taxable_base + item_tax
-        kode_lambung_name = (
-        penjualan.kode_lambung_rel.name if penjualan.kode_lambung_rel else None
-        )
         
+        kode_lambung_name = penjualan.kode_lambung_rel.name if penjualan.kode_lambung_rel else None
         item_name = it.item_rel.name if it.item_rel else "Unknown Item"
         satuan_name = it.item_rel.satuan_rel.name if it.item_rel.satuan_rel else "Unknown Satuan"
         
         enhanced_items.append({
             "item": it,
-            "image_url": img_url,
+            "image_url": img_url,  # Base64 data URL
             "item_name": item_name,
             "qty": it.qty,
             "satuan_name": satuan_name,
@@ -1124,26 +1159,46 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
             "item_subtotal_after_discount": taxable_base,
             "item_tax": item_tax,
             "total_price": item_total_price,
-            "discount": item_discount,  # Keep for backward compatibility
+            "discount": item_discount,
         })
 
-    # Get additional values from penjualan
     additional_discount = Decimal(str(penjualan.additional_discount or 0))
     expense = Decimal(str(penjualan.expense or 0))
 
-    # Use the calculated totals from the function to ensure consistency
     totals = {
-        "subtotal": totals_data["total_subtotal"],                    # subTotal from frontend
-        "item_discounts": totals_data["total_discount"],              # totalItemDiscounts from frontend
-        "additional_discount": additional_discount,     
-        "subtotal_after_discounts": totals_data["subtotal_after_item_discounts"],  # subtotalAfterItemDiscounts from frontend
-        "final_total": totals_data["total_before_discount"],          # finalTotalBeforeTax from frontend
-        "tax_amount": totals_data["total_tax"],                       # totalTax from frontend
+        "subtotal": totals_data["total_subtotal"],
+        "item_discounts": totals_data["total_discount"],
+        "additional_discount": additional_discount,
+        "subtotal_after_discounts": totals_data["subtotal_after_item_discounts"],
+        "final_total": totals_data["total_before_discount"],
+        "tax_amount": totals_data["total_tax"],
         "expense": expense,
-        "grand_total": totals_data["total_price"],                    # grandTotal from frontend
-        # Keep backward compatibility
+        "grand_total": totals_data["total_price"],
         "total_item_discount": totals_data["total_discount"],
     }
+
+    # Load logo as base64
+    import pathlib
+    logo_data_url = None
+    
+    possible_logo_paths = [
+        pathlib.Path("static/items/logo.png"),
+        pathlib.Path("uploads/items/logo.png"),
+        pathlib.Path("logo.png"),
+    ]
+    
+    for logo_path in possible_logo_paths:
+        if logo_path.exists():
+            try:
+                with logo_path.open("rb") as f:
+                    logo_b64 = base64.b64encode(f.read()).decode("ascii")
+                    logo_data_url = f"data:image/png;base64,{logo_b64}"
+                break
+            except Exception as e:
+                print(f"Error reading logo from {logo_path}: {e}")
+    
+    if not logo_data_url:
+        logo_data_url = ""
 
     return templates.TemplateResponse(
         "penjualan.html",
@@ -1152,10 +1207,10 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
             "penjualan": penjualan,
             "enhanced_items": enhanced_items,
             "totals": totals,
-            "kode_lambung_name": kode_lambung_name, 
+            "kode_lambung_name": kode_lambung_name,
             "company": {
                 "name": "PT. Jayagiri Indo Asia",
-                "logo_url": get_public_image_url("logo.png", BASE_URL),
+                "logo_url": logo_data_url,  # Base64 data URL
                 "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
                 "website": "www.qiupart.com",
                 "bank_name": "Bank Mandiri",

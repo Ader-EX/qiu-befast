@@ -47,11 +47,24 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-
 @app.on_event("startup")
 async def startup_event():
     Base.metadata.create_all(bind=engine)
+    
+    STATIC_URL = os.getenv("STATIC_URL", "static")
+    items_dir = os.path.join(STATIC_URL, "items")
+    
     print("✅ Database tables created")
+    print(f"📁 Static directory: {os.path.abspath(STATIC_URL)}")
+    print(f"📁 Items directory: {os.path.abspath(items_dir)}")
+    print(f"📁 Static dir exists: {os.path.exists(STATIC_URL)}")
+    print(f"📁 Items dir exists: {os.path.exists(items_dir)}")
+    
+    # List files in items directory
+    if os.path.exists(items_dir):
+        files = os.listdir(items_dir)
+        print(f"📄 Files in items dir: {files[:5]}")  # Show first 5 files
+    
     print("🚀 Starting FastAPI project")
 
 origins = [
@@ -68,11 +81,11 @@ app.add_middleware(
 )
 # Public routes
 
+STATIC_URL = os.getenv("STATIC_URL", "static")
+os.makedirs(STATIC_URL, exist_ok=True)
+os.makedirs(os.path.join(STATIC_URL, "items"), exist_ok=True)
 
-print("STATIC_URL =", os.getenv("STATIC_URL"))  # You should see the full absolute path
-
-os.makedirs("uploads/items", exist_ok=True)  
-app.mount("/static", StaticFiles(directory=os.getenv("STATIC_URL")), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_URL), name="static")
 
 
 # app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])

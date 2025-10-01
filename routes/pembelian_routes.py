@@ -1,3 +1,4 @@
+import base64
 import mimetypes
 import random
 
@@ -92,8 +93,7 @@ def update_item_stock(db: Session, item_id: int, qty_change: int) -> None:
     # Apply the quantity change (for purchases, this should be positive to add stock)
     item.total_item = item.total_item + qty_change
 
-def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name :str, msg : str ):
-
+def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name: str, msg: str):
     audit_service = AuditService(db)
     items = db.query(PembelianItem).filter(PembelianItem.pembelian_id == pembelian_id).all()
 
@@ -127,11 +127,12 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name :str, m
     additional_discount = Decimal(str(pembelian.additional_discount or 0))
     expense = Decimal(str(pembelian.expense or 0))
 
+    # Calculate intermediate values
     subtotal_after_item_discounts = total_subtotal - total_discount
     final_total_before_tax = subtotal_after_item_discounts - additional_discount
     total_price = final_total_before_tax + total_tax + expense
 
-    # Persist
+    # Persist to database
     pembelian.total_subtotal = total_subtotal
     pembelian.total_discount = total_discount
     pembelian.additional_discount = additional_discount
@@ -140,22 +141,23 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name :str, m
     pembelian.expense = expense
     pembelian.total_price = total_price
 
-
-    audit_service.default_log(
-        entity_id=pembelian.id,
-        entity_type=AuditEntityEnum.PEMBELIAN,
-        description=f"Pembelian {pembelian.no_pembelian} {msg} : Total Rp{total_price:.4f} ",
-        user_name=user_name
-    )
-
+    # Fixed: Only log if msg is provided and not empty
+    if msg and msg.strip():
+        audit_service.default_log(
+            entity_id=pembelian.id,
+            entity_type=AuditEntityEnum.PEMBELIAN,
+            description=f"Pembelian {pembelian.no_pembelian} {msg} : Total Rp{total_price:.2f}",
+            user_name=user_name
+        )
 
     db.commit()
 
-
+    # FIXED: Added the missing key that your invoice expects
     return {
         "total_subtotal": total_subtotal,
         "total_discount": total_discount,
         "additional_discount": additional_discount,
+        "subtotal_after_item_discounts": subtotal_after_item_discounts,  # <-- ADDED THIS
         "total_before_discount": final_total_before_tax,
         "total_tax": total_tax,
         "expense": expense,
@@ -952,9 +954,6 @@ def calculate_pembelian_item_totals(item: PembelianItem) -> None:
     
     # For compatibility - price_after_tax as unit equivalent
     item.price_after_tax = (row_total / qty) if qty > 0 else Decimal('0')
-
-
-# Updated Pembelian Invoice Endpoint
 @router.get("/{pembelian_id}/invoice/html", response_class=HTMLResponse)
 async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: Session = Depends(get_db)):
     pembelian = (
@@ -973,38 +972,113 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
     BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
     # Use the fixed calculation function to ensure consistency
-    totals_data = calculate_pembelian_totals(db, pembelian_id)
+    totals_data = calculate_pembelian_totals(db, pembelian_id, msg="", user_name="")
+
+    # Helper function to safely get Decimal values from totals_data
+    def safe_decimal(key, fallback=0):
+        return Decimal(str(totals_data.get(key, fallback)))
+
+    # Normalize keys from calculate_pembelian_totals
+    total_subtotal = safe_decimal("total_subtotal")
+    total_discount = safe_decimal("total_discount")
+    total_before_discount = safe_decimal("total_before_discount")
+    total_tax = safe_decimal("total_tax")
+    total_price = safe_decimal("total_price")
+
+    # Calculate subtotal_after_item_discounts with multiple fallback strategies
+    subtotal_after_item_discounts = safe_decimal(
+        "subtotal_after_item_discounts",
+        totals_data.get("subtotal_after_discounts", 
+            total_subtotal - total_discount
+        )
+    )
+
+    def get_image_as_base64(raw_image_path):
+        """Convert image file to base64 data URL for reliable embedding"""
+        if not raw_image_path:
+            return None
+        
+        try:
+            # Handle different path formats
+            cleaned_path = str(raw_image_path).strip()
+            
+            # Remove unwanted prefixes
+            unwanted_prefixes = [
+                "root/backend/",
+                "/root/backend/",
+                "backend/",
+                "/backend/",
+                "static/items/",
+                "/static/items/",
+            ]
+            
+            for prefix in unwanted_prefixes:
+                if cleaned_path.startswith(prefix):
+                    cleaned_path = cleaned_path[len(prefix):]
+                    break
+            
+            # Get UPLOAD_DIR from env
+            upload_dir = os.getenv("UPLOAD_DIR", "uploads/items")
+            
+            # Try different path combinations
+            possible_paths = [
+                cleaned_path,
+                f"static/items/{os.path.basename(cleaned_path)}",
+                f"uploads/items/{os.path.basename(cleaned_path)}",
+                os.path.join(upload_dir, os.path.basename(cleaned_path)),
+                os.path.join("uploads/items", os.path.basename(cleaned_path))
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    with open(path, "rb") as f:
+                        img_data = base64.b64encode(f.read()).decode("ascii")
+                        # Detect mime type
+                        mime_type = "image/jpeg"
+                        if path.lower().endswith('.png'):
+                            mime_type = "image/png"
+                        elif path.lower().endswith('.webp'):
+                            mime_type = "image/webp"
+                        return f"data:{mime_type};base64,{img_data}"
+            
+            # If file not found, return None
+            return None
+            
+        except Exception as e:
+            print(f"Error loading image {raw_image_path}: {e}")
+            return None
 
     enhanced_items = []
-    
     for it in pembelian.pembelian_items:
-        # FIXED: Use primary_image_url which returns raw path, not full URL
         raw_image_path = it.primary_image_url if it.item_rel else None
-        img_url = get_public_image_url(raw_image_path, BASE_URL) if raw_image_path else None
         
-        # Use the calculate_pembelian_item_totals function to ensure consistency
+        # Convert image to base64 for reliable display in invoice
+        img_url = get_image_as_base64(raw_image_path)
+
+        # Keep your per-item calculation
         calculate_pembelian_item_totals(it)
-        
-        # Extract calculated values from the item
+
         qty = Decimal(str(it.qty or 0))
         unit_price = Decimal(str(it.unit_price or 0))
         tax_pct = Decimal(str(it.tax_percentage or 0))
         item_discount = Decimal(str(it.discount or 0))
-        
-        # Calculate using the same frontend logic as the fixed function
-        row_sub_total = qty * unit_price  # Before any discounts/tax
+
+        row_sub_total = qty * unit_price
         taxable_base = max(row_sub_total - item_discount, Decimal('0'))
         item_tax = (taxable_base * tax_pct) / Decimal('100')
         item_total_price = taxable_base + item_tax
-        
-        # FIXED: Use it.item_rel.name instead of it.item_name
+
         item_name = it.item_rel.name if it.item_rel else "Unknown Item"
-        satuan_name = it.item_rel.satuan_rel.name if it.item_rel.satuan_rel else "Unknown Satuan"
-        
+        satuan_name = (
+            it.item_rel.satuan_rel.name
+            if (it.item_rel and it.item_rel.satuan_rel)
+            else "Unknown Satuan"
+        )
+
         enhanced_items.append({
             "item": it,
-            "image_url": img_url,
-            "item_name": item_name,  
+            "image_url": img_url,  # Now base64 data URL
+            "item_name": item_name,
             "qty": it.qty,
             "satuan_name": satuan_name,
             "tax_percentage": it.tax_percentage,
@@ -1016,25 +1090,49 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
             "total_price": item_total_price,
         })
 
-    # Get additional values from pembelian
     additional_discount = Decimal(str(pembelian.additional_discount or 0))
     expense = Decimal(str(pembelian.expense or 0))
 
-    # Use the calculated totals from the function to ensure consistency
     totals = {
-        "subtotal": totals_data["total_subtotal"],
-        "item_discounts": totals_data["total_discount"],
+        "subtotal": total_subtotal,
+        "item_discounts": total_discount,
         "additional_discount": additional_discount,
-        "subtotal_after_discounts": totals_data["subtotal_after_item_discounts"],
-        "final_total": totals_data["total_before_discount"],
-        "tax_amount": totals_data["total_tax"],
+        "subtotal_after_discounts": subtotal_after_item_discounts,
+        "final_total": total_before_discount,
+        "tax_amount": total_tax,
         "expense": expense,
-        "grand_total": totals_data["total_price"],
-        # Keep backward compatibility
-        "subtotal_before_tax": totals_data["total_subtotal"],
-        "total_item_discounts": totals_data["total_discount"],
-        "total_before_tax": totals_data["total_before_discount"],
+        "grand_total": total_price,
+        # Back-compat aliases
+        "subtotal_before_tax": total_subtotal,
+        "total_item_discounts": total_discount,
+        "total_before_tax": total_before_discount,
     }
+    
+    # Load logo as base64 with fallback handling
+    import pathlib
+    logo_data_url = None
+    
+    # Try multiple possible logo locations
+    possible_logo_paths = [
+        pathlib.Path("static/items/logo.png"),
+        pathlib.Path("uploads/items/logo.png"),
+        pathlib.Path("logo.png"),
+    ]
+    
+    for logo_path in possible_logo_paths:
+        if logo_path.exists():
+            try:
+                with logo_path.open("rb") as f:
+                    logo_b64 = base64.b64encode(f.read()).decode("ascii")
+                    logo_data_url = f"data:image/png;base64,{logo_b64}"
+                break
+            except Exception as e:
+                print(f"Error reading logo from {logo_path}: {e}")
+                continue
+    
+    # Fallback: use empty string or placeholder
+    if not logo_data_url:
+        logo_data_url = ""  # Or use a placeholder image URL
 
     return templates.TemplateResponse(
         "pembelian.html",
@@ -1045,7 +1143,7 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
             "totals": totals,
             "company": {
                 "name": "PT. Jayagiri Indo Asia",
-                "logo_url": get_public_image_url("logo.png", BASE_URL),
+                "logo_url": logo_data_url,
                 "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
                 "website": "www.qiupart.com",
                 "bank_name": "Bank Mandiri",
