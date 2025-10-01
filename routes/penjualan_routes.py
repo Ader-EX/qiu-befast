@@ -18,6 +18,7 @@ from starlette.responses import HTMLResponse
 from database import get_db
 from models.AuditTrail import AuditEntityEnum
 from models.Customer import Customer
+from models.InventoryLedger import SourceTypeEnum
 from models.KodeLambung import KodeLambung
 from models.Pembayaran import  Pembayaran
 from models.Penjualan import StatusPembayaranEnum, StatusPembelianEnum
@@ -30,6 +31,7 @@ from routes.upload_routes import get_public_image_url, to_public_image_url, temp
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PenjualanSchema import PenjualanCreate, PenjualanListResponse, PenjualanResponse, PenjualanStatusUpdate, PenjualanUpdate, SuccessResponse, TotalsResponse, UploadResponse
 from services.audit_services import AuditService
+from services.inventoryledger_services import InventoryService
 from utils import generate_unique_record_number, get_current_user_name
 from decimal import Decimal, InvalidOperation  # add InvalidOperation
 
@@ -245,6 +247,7 @@ def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None
       - Set status ACTIVE
     """
     audit_service = AuditService(db)
+    inventory_service = InventoryService(db)
     penjualan = (
         db.query(Penjualan)
         .options(
@@ -295,6 +298,14 @@ def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None
             if getattr(item, "satuan_rel", None):
                 line.satuan_name = item.satuan_rel.name
         update_item_stock(db, line.item_id, -int(line.qty or 0))  # sales → subtract
+        inventory_service.post_inventory_out(
+            item_id=line.item_id,
+            source_type=SourceTypeEnum.PENJUALAN,
+            source_id=f"PENJUALAN_ITEM:{line.id}",
+            qty=int(line.qty or 0),
+            trx_date=penjualan.sales_date.date(),
+            reason_code=f"Penjualan {penjualan.no_penjualan}"
+        )
 
     # 4) Activate
     penjualan.status_penjualan = StatusPembelianEnum.ACTIVE
@@ -556,12 +567,20 @@ async def create_penjualan(request: PenjualanCreate, db: Session = Depends(get_d
     return {"detail": "Penjualan created successfully", "id": p.id}
 
 @router.put("/{penjualan_id}", response_model=PenjualanResponse)
-async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):
+async def update_penjualan(
+        penjualan_id: int,
+        request: PenjualanUpdate,
+        db: Session = Depends(get_db),
+        user_name: str = Depends(get_current_user_name)
+):
     """
-    Update penjualan.
-    - If DRAFT: never touch stock.
-    - If ACTIVE/PROCESSED: apply **delta** to stock (sales direction).
+    Update penjualan:
+    - If DRAFT: never touch inventory ledger
+    - If ACTIVE/PROCESSED: void old ledger entries and post new ones for changed items
     """
+    inventory_service = InventoryService(db)
+    fields_changed = None
+
     penjualan: Penjualan = (
         db.query(Penjualan)
         .options(selectinload(Penjualan.penjualan_items))
@@ -571,7 +590,7 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
     if not penjualan:
         raise HTTPException(status_code=404, detail="Penjualan not found")
 
-    # enforce unique number if changed
+    # Enforce unique number if changed
     if request.no_penjualan and request.no_penjualan != penjualan.no_penjualan:
         exists = (
             db.query(Penjualan)
@@ -581,46 +600,41 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
         if exists:
             raise HTTPException(status_code=400, detail="No penjualan already exists")
 
-    # --- Handle kode_lambung_id changes (explicit re-link) ---
+    # Handle kode_lambung_id changes (explicit re-link)
     if request.kode_lambung_id is not None and request.kode_lambung_id != penjualan.kode_lambung_id:
-        # NOTE: if your model uses int, set PenjualanUpdate.kode_lambung_id: Optional[int]
         target = db.query(KodeLambung).filter(KodeLambung.id == request.kode_lambung_id).first()
         if not target:
             raise HTTPException(status_code=404, detail="Kode Lambung not found")
         penjualan.kode_lambung_id = target.id
+        fields_changed = True
 
-    # --- Handle kode_lambung (string) with rename-semantics ---
-    # If a new string is provided, we want to "rename" safely.
+    # Handle kode_lambung (string) with rename-semantics
     if request.kode_lambung is not None:
         new_name = request.kode_lambung.strip() or None
 
-        # Current linkage (may be None)
         current_kl = None
         if penjualan.kode_lambung_id:
             current_kl = db.query(KodeLambung).filter(KodeLambung.id == penjualan.kode_lambung_id).first()
 
-        # If no current, behave like "link-or-create by name"
         if current_kl is None:
             if new_name:
                 existing = db.query(KodeLambung).filter(KodeLambung.name == new_name).first()
                 if existing:
                     penjualan.kode_lambung_id = existing.id
                 else:
-                    # create new since not found
                     created = KodeLambung(name=new_name)
                     db.add(created)
                     db.flush()
                     penjualan.kode_lambung_id = created.id
+                fields_changed = True
             else:
-                # empty string means unlink
                 penjualan.kode_lambung_id = None
+                fields_changed = True
         else:
-            # We have current_kl; decide rename vs reassign.
             if not new_name:
-                # empty string -> unlink from any kode_lambung
                 penjualan.kode_lambung_id = None
+                fields_changed = True
             elif current_kl.name != new_name:
-                # Count how many penjualan share this kode_lambung_id
                 usage_count = (
                     db.query(func.count(Penjualan.id))
                     .filter(Penjualan.kode_lambung_id == current_kl.id)
@@ -628,20 +642,16 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
                 )
 
                 if usage_count <= 1:
-                    # Safe to rename in-place (no side effects on others)
-                    # Also ensure we won't collide with an existing name constraint.
                     conflict = (
                         db.query(KodeLambung)
                         .filter(and_(KodeLambung.name == new_name, KodeLambung.id != current_kl.id))
                         .first()
                     )
                     if conflict:
-                        # If another row already has the new name, re-link to that instead of renaming.
                         penjualan.kode_lambung_id = conflict.id
                     else:
-                        current_kl.name = new_name  # rename in-place
+                        current_kl.name = new_name
                 else:
-                    # Shared by many; do NOT rename in place. Reuse existing by name or create + reassign.
                     existing = db.query(KodeLambung).filter(KodeLambung.name == new_name).first()
                     if existing:
                         penjualan.kode_lambung_id = existing.id
@@ -650,23 +660,22 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
                         db.add(created)
                         db.flush()
                         penjualan.kode_lambung_id = created.id
-            # else names match: no-op
+                fields_changed = True
 
-    # Prepare generic field updates, but exclude kode_lambung fields (handled above)
+    # Handle other field updates
     update_data = request.dict(exclude_unset=True)
     items_data = update_data.pop("items", None)
     update_data.pop("discount", None)
     update_data.pop("kode_lambung", None)
     update_data.pop("kode_lambung_id", None)
 
-    fields_changed = False
     for field, value in update_data.items():
         if getattr(penjualan, field, None) != value:
             setattr(penjualan, field, value)
             fields_changed = True
 
     items_changed = False
-    stock_adjustments: list[tuple[int, int]] = []
+    ledger_operations = []  # Track ledger changes: (operation, item_id, old_qty, new_qty, line_id)
 
     if items_data is not None:
         _validate_items_payload(items_data)
@@ -677,7 +686,6 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
             d = _normalize_item_payload(raw)
             item_id = int(d["item_id"])
             incoming_ids.add(item_id)
-
             item = validate_item_exists(db, item_id)
 
             if item_id in current:
@@ -685,18 +693,17 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
                 old_qty = int(pi.qty or 0)
                 new_qty = int(d["qty"])
 
+                # Track changes for ledger updates
                 if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
-                    delta = -(new_qty - old_qty)
-                    if delta != 0:
-                        if delta < 0:
-                            validate_item_stock(db, item_id, abs(delta))
-                        stock_adjustments.append((item_id, delta))
+                    if old_qty != new_qty:
+                        validate_item_stock(db, item_id, new_qty)
+                        ledger_operations.append(("update", item_id, old_qty, new_qty, pi.id))
 
                 if (
-                    old_qty != new_qty
-                    or Decimal(str(pi.unit_price or 0)) != d["unit_price"]
-                    or int(pi.tax_percentage or 0) != d["tax_percentage"]
-                    or Decimal(str(pi.discount or 0)) != d["discount"]
+                        old_qty != new_qty
+                        or Decimal(str(pi.unit_price or 0)) != d["unit_price"]
+                        or int(pi.tax_percentage or 0) != d["tax_percentage"]
+                        or Decimal(str(pi.discount or 0)) != d["discount"]
                 ):
                     pi.qty = new_qty
                     pi.unit_price = d["unit_price"]
@@ -705,9 +712,9 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
                     calculate_item_totals(pi)
                     items_changed = True
             else:
+                # New item
                 if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
                     validate_item_stock(db, item_id, d["qty"])
-                    stock_adjustments.append((item_id, -int(d["qty"])))
 
                 nl = PenjualanItem(
                     penjualan_id=penjualan_id,
@@ -719,19 +726,66 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
                 )
                 calculate_item_totals(nl)
                 db.add(nl)
+                db.flush()  # Get the ID for ledger posting
+
+                if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
+                    ledger_operations.append(("add", item_id, 0, nl.qty, nl.id))
+
                 items_changed = True
 
+        # Handle deleted items
         for item_id, pi in list(current.items()):
             if item_id not in incoming_ids:
                 if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
-                    stock_adjustments.append((item_id, int(pi.qty or 0)))
+                    ledger_operations.append(("delete", item_id, pi.qty, 0, pi.id))
                 db.delete(pi)
                 items_changed = True
 
+        # Apply ledger operations if not DRAFT
         if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
-            for item_id, qty_change in stock_adjustments:
-                if qty_change != 0:
-                    update_item_stock(db, item_id, qty_change)
+            for operation, item_id, old_qty, new_qty, line_id in ledger_operations:
+                source_id = f"PENJUALAN_ITEM:{line_id}"
+
+                if operation == "delete":
+                    # Void the old OUT entry
+                    try:
+                        inventory_service.void_ledger_entry_by_source(
+                            source_id=source_id,
+                            reason=f"Penjualan {penjualan.no_penjualan} item deleted"
+                        )
+                    except:
+                        pass  # Entry might not exist yet
+
+                elif operation == "update":
+                    # Void old entry and post new one
+                    try:
+                        inventory_service.void_ledger_entry_by_source(
+                            source_id=source_id,
+                            reason=f"Penjualan {penjualan.no_penjualan} item qty updated"
+                        )
+                    except:
+                        pass
+
+                    # Post new OUT movement
+                    inventory_service.post_inventory_out(
+                        item_id=item_id,
+                        source_type=SourceTypeEnum.PENJUALAN,
+                        source_id=source_id,
+                        qty=new_qty,
+                        trx_date=penjualan.sales_date.date(),
+                        reason_code=f"Penjualan {penjualan.no_penjualan} (updated)"
+                    )
+
+                elif operation == "add":
+                    # Post new OUT movement
+                    inventory_service.post_inventory_out(
+                        item_id=item_id,
+                        source_type=SourceTypeEnum.PENJUALAN,
+                        source_id=source_id,
+                        qty=new_qty,
+                        trx_date=penjualan.sales_date.date(),
+                        reason_code=f"Penjualan {penjualan.no_penjualan} (new item)"
+                    )
 
     if fields_changed or items_changed:
         db.commit()
@@ -741,15 +795,19 @@ async def update_penjualan(penjualan_id: int, request: PenjualanUpdate, db: Sess
         db.rollback()
 
     return await get_penjualan(penjualan_id, db)
-
-
-
 @router.patch("/{penjualan_id}", status_code=status.HTTP_200_OK)
-async def rollback_penjualan_status(penjualan_id: int, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):
+async def rollback_penjualan_status(
+        penjualan_id: int,
+        db: Session = Depends(get_db),
+        user_name: str = Depends(get_current_user_name)
+):
     """
-    Roll back Penjualan to DRAFT from ACTIVE/COMPLETED and reverse stock subtraction.
+    Roll back Penjualan to DRAFT from ACTIVE/COMPLETED.
+    Voids all inventory ledger entries associated with this penjualan.
     """
     audit_service = AuditService(db)
+    inventory_service = InventoryService(db)
+
     penjualan = (
         db.query(Penjualan)
         .options(selectinload(Penjualan.penjualan_items))
@@ -760,9 +818,17 @@ async def rollback_penjualan_status(penjualan_id: int, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="Penjualan not found")
 
     if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
-        # Reverse: add back each qty
+        # Void all ledger entries for this penjualan
         for line in penjualan.penjualan_items:
-            update_item_stock(db, line.item_id, int(line.qty or 0))
+            source_id = f"PENJUALAN_ITEM:{line.id}"
+            try:
+                inventory_service.void_ledger_entry_by_source(
+                    source_id=source_id,
+                    reason=f"Penjualan {penjualan.no_penjualan} rolled back to DRAFT"
+                )
+            except Exception as e:
+                # Log but don't fail if ledger entry doesn't exist
+                print(f"Warning: Could not void ledger for {source_id}: {e}")
 
         penjualan.status_penjualan = StatusPembelianEnum.DRAFT
         penjualan.warehouse_name = None
@@ -780,7 +846,6 @@ async def rollback_penjualan_status(penjualan_id: int, db: Session = Depends(get
 
     db.commit()
     return {"msg": "Penjualan status changed successfully"}
-
 
 @router.post("/{penjualan_id}/finalize", response_model=PenjualanResponse)
 async def finalize_penjualan_endpoint(penjualan_id: int, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):

@@ -19,6 +19,7 @@ from database import get_db
 from starlette.requests import Request
 
 from models.AuditTrail import AuditEntityEnum
+from models.InventoryLedger import SourceTypeEnum
 from models.Vendor import Vendor  
 from models.Item import Item
 from models.Pembelian import Pembelian, StatusPembelianEnum,PembelianItem, StatusPembayaranEnum
@@ -28,6 +29,7 @@ from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PembelianSchema import TotalsResponse, PembelianListResponse, PembelianResponse, PembelianCreate, \
     PembelianUpdate, PembelianStatusUpdate, UploadResponse, SuccessResponse
 from services.audit_services import AuditService
+from services.inventoryledger_services import InventoryService
 from utils import generate_unique_record_number, get_current_user_name
 
 router = APIRouter()
@@ -162,6 +164,7 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name :str, m
 
 def finalize_pembelian(db: Session, pembelian_id: int, user_name : str):
     audit_service  = AuditService(db)
+    inventory_service = InventoryService(db)
     """Finalize pembelian and update stock"""
     pembelian = db.query(Pembelian).options(
         selectinload(Pembelian.warehouse_rel),
@@ -191,6 +194,16 @@ def finalize_pembelian(db: Session, pembelian_id: int, user_name : str):
                 pembelian_item.satuan_name = item.satuan_rel.name
 
         update_item_stock(db, pembelian_item.item_id, pembelian_item.qty)
+
+        inventory_service.post_inventory_in(
+            item_id=pembelian_item.item_id,
+            source_type=SourceTypeEnum.PEMBELIAN,
+            source_id=f"{pembelian_id}",
+            qty=pembelian_item.qty,
+            unit_price=Decimal(str(pembelian_item.unit_price)),
+            trx_date=pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date,
+            reason_code=f"Pembelian {pembelian.no_pembelian}"
+        )
 
     # Update status
     pembelian.status_pembelian = StatusPembelianEnum.ACTIVE
@@ -451,10 +464,10 @@ async def create_pembelian(request: PembelianCreate, db: Session = Depends(get_d
         
         db.add(pembelian_item)
 
+    db.flush()
+
     calculate_pembelian_totals(db, pembelian.id,user_name,"telah dibuat")
     db.commit()
-
-
 
 
     return {
@@ -469,6 +482,7 @@ async def update_pembelian(
     db: Session = Depends(get_db),
     user_name: str = Depends(get_current_user_name)
 ):
+    inventory_service = InventoryService(db)
     """Update pembelian - only updates stock if quantities change and pembelian is ACTIVE/PROCESSED"""
     
     # Load pembelian with items
@@ -578,9 +592,32 @@ async def update_pembelian(
         # Apply stock adjustments if pembelian is finalized (ACTIVE/PROCESSED)
         # For DRAFT pembelians, we don't touch stock until finalization
         if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
-            for item_id, qty_change in stock_adjustments:
+            trx_date = pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date
+            for item_id, qty_change, pembelian_id in stock_adjustments:
                 if qty_change != 0:  # Only apply actual changes
                     update_item_stock(db, item_id, qty_change)
+                if qty_change > 0:
+                    # Addition
+                    pi = db.query(PembelianItem).get(pembelian_id)
+                    inventory_service.post_inventory_in(
+                        item_id=item_id,
+                        source_type=SourceTypeEnum.PEMBELIAN,
+                        source_id=f"{pembelian_id}",
+                        qty=qty_change,
+                        unit_price=Decimal(str(pi.unit_price)),
+                        trx_date=trx_date,
+                        reason_code=f"Pembelian {pembelian.no_pembelian} updated"
+                    )
+                else:
+                    # Reduction - use adjustment OUT
+                    inventory_service.post_inventory_out(
+                        item_id=item_id,
+                        source_type=SourceTypeEnum.OUT,
+                        source_id=f"{pembelian_id}",
+                        qty=abs(qty_change),
+                        trx_date=trx_date,
+                        reason_code=f"Pembelian {pembelian.no_pembelian} quantity reduced"
+                    )
 
     # Commit and recalc totals if anything changed
     if fields_changed or items_changed:
@@ -592,6 +629,7 @@ async def update_pembelian(
 
     return await get_pembelian(pembelian_id, db)
 
+
 @router.patch("/{pembelian_id}", status_code=status.HTTP_200_OK)
 async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get_db), user_name : str  = Depends(get_current_user_name)):
     """
@@ -600,6 +638,7 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
     Also reverses stock changes by subtracting the quantities.
     """
     audit_service  = AuditService(db)
+    inventory_service = InventoryService(db)
 
     pembelian = (
         db.query(Pembelian)
@@ -614,6 +653,15 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
     if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
         for pembelian_item in pembelian.pembelian_items:
             update_item_stock(db, pembelian_item.item_id, -pembelian_item.qty)
+
+            inventory_service.post_inventory_out(
+                item_id=pembelian_item.item_id,
+                source_type=SourceTypeEnum.OUT,
+                source_id=f"ROLLBACK_PEMBELIAN_ITEM:{pembelian_item.id}",
+                qty=pembelian_item.qty,
+                trx_date=date.today(),
+                reason_code=f"Rollback Pembelian {pembelian.no_pembelian} to DRAFT"
+            )
         
         pembelian.status_pembelian = StatusPembelianEnum.DRAFT
 

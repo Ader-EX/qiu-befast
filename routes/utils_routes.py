@@ -14,6 +14,7 @@ from starlette import status
 
 from starlette.exceptions import HTTPException
 
+from models.InventoryLedger import InventoryLedger
 from models.KodeLambung import KodeLambung
 from models.Customer import Customer
 from models.Item import Item
@@ -890,200 +891,94 @@ def calculate_hpp(prev_balance: Decimal, prev_hpp: Decimal, qty_in: int, price_i
     
     return total_value / total_qty
 
-
 @router.get("/stock-adjustment", status_code=status.HTTP_200_OK, response_model=StockAdjustmentReportResponse)
 async def get_stock_adjustment_report(
-    from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-    to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
-    item_id: Optional[int] = Query(None, description="Filter by specific item"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    db: Session = Depends(get_db),
+        from_date: datetime = Query(..., description="Start datetime (inclusive)"),
+        to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
+        item_id: Optional[int] = Query(None, description="Filter by specific item"),
+        skip: int = Query(0, ge=0, description="Number of records to skip"),
+        limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+        db: Session = Depends(get_db),
 ):
     """
-    Get stock adjustment report with HPP calculation.
-    Combines data from Pembelian (IN), Penjualan (OUT), and StockAdjustment (IN/OUT).
+    Get stock adjustment report with HPP calculation from InventoryLedger.
     """
-    
+
     if to_date is None:
         to_date = datetime.now()
 
-    def _dec(x) -> Decimal:
-        return Decimal(str(x or 0))
+    # Convert datetime to date for querying
+    from_date_only = from_date.date()
+    to_date_only = to_date.date()
 
-    # Query 1: Pembelian (Stock IN)
-    pembelian_query = (
+    # Build base query
+    query = (
         db.query(
-            Pembelian.sales_date.label('transaction_date'),
-            Pembelian.no_pembelian.label('transaction_no'),
+            InventoryLedger.trx_date,
+            InventoryLedger.source_type,
+            InventoryLedger.source_id,
+            InventoryLedger.qty_in,
+            InventoryLedger.qty_out,
+            InventoryLedger.unit_price,
+            InventoryLedger.cumulative_qty,
+            InventoryLedger.moving_avg_cost,
             Item.code.label('item_code'),
             Item.name.label('item_name'),
-            PembelianItem.qty.label('qty'),
-            PembelianItem.unit_price.label('price'),
-            literal('IN').label('transaction_type'),
-            literal('PEMBELIAN').label('source')
         )
-        .join(PembelianItem, PembelianItem.pembelian_id == Pembelian.id)
-        .join(Item, Item.id == PembelianItem.item_id)
+        .join(Item, Item.id == InventoryLedger.item_id)
         .filter(
-            Pembelian.is_deleted == False,
-            Pembelian.status_pembelian != StatusPembelianEnum.DRAFT,
-            Pembelian.sales_date >= from_date,
-            Pembelian.sales_date <= to_date,
-        )
-    )
-
-    # Query 2: Penjualan (Stock OUT)
-    penjualan_query = (
-        db.query(
-            Penjualan.sales_date.label('transaction_date'),
-            Penjualan.no_penjualan.label('transaction_no'),
-            Item.code.label('item_code'),
-            Item.name.label('item_name'),
-            PenjualanItem.qty.label('qty'),
-            PenjualanItem.unit_price.label('price'),
-            literal('OUT').label('transaction_type'),
-            literal('PENJUALAN').label('source')
-        )
-        .join(PenjualanItem, PenjualanItem.penjualan_id == Penjualan.id)
-        .join(Item, Item.id == PenjualanItem.item_id)
-        .filter(
-            Penjualan.is_deleted == False,
-            Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
-            Penjualan.sales_date >= from_date,
-            Penjualan.sales_date <= to_date,
-        )
-    )
-
-    # Query 3: Stock Adjustment IN
-    adjustment_in_query = (
-        db.query(
-            StockAdjustment.adjustment_date.label('transaction_date'),
-            StockAdjustment.no_adjustment.label('transaction_no'),
-            Item.code.label('item_code'),
-            Item.name.label('item_name'),
-            StockAdjustmentItem.qty.label('qty'),
-            StockAdjustmentItem.adj_price.label('price'),
-            literal('IN').label('transaction_type'),
-            literal('ADJUSTMENT').label('source')
-        )
-        .join(StockAdjustmentItem, StockAdjustmentItem.stock_adjustment_id == StockAdjustment.id)
-        .join(Item, Item.id == StockAdjustmentItem.item_id)
-        .filter(
-            StockAdjustment.is_deleted == False,
-            StockAdjustment.status_adjustment != StatusStockAdjustmentEnum.DRAFT,
-            StockAdjustment.adjustment_type == AdjustmentTypeEnum.IN,
-            StockAdjustment.adjustment_date >= from_date.date(),
-            StockAdjustment.adjustment_date <= to_date.date(),
-        )
-    )
-
-    # Query 4: Stock Adjustment OUT
-    adjustment_out_query = (
-        db.query(
-            StockAdjustment.adjustment_date.label('transaction_date'),
-            StockAdjustment.no_adjustment.label('transaction_no'),
-            Item.code.label('item_code'),
-            Item.name.label('item_name'),
-            StockAdjustmentItem.qty.label('qty'),
-            StockAdjustmentItem.adj_price.label('price'),
-            literal('OUT').label('transaction_type'),
-            literal('ADJUSTMENT').label('source')
-        )
-        .join(StockAdjustmentItem, StockAdjustmentItem.stock_adjustment_id == StockAdjustment.id)
-        .join(Item, Item.id == StockAdjustmentItem.item_id)
-        .filter(
-            StockAdjustment.is_deleted == False,
-            StockAdjustment.status_adjustment != StatusStockAdjustmentEnum.DRAFT,
-            StockAdjustment.adjustment_type == AdjustmentTypeEnum.OUT,
-            StockAdjustment.adjustment_date >= from_date.date(),
-            StockAdjustment.adjustment_date <= to_date.date(),
-        )
+            InventoryLedger.voided == False,
+            InventoryLedger.trx_date >= from_date_only,
+            InventoryLedger.trx_date <= to_date_only,
+            )
     )
 
     # Apply item filter if specified
     if item_id is not None:
-        pembelian_query = pembelian_query.filter(Item.id == item_id)
-        penjualan_query = penjualan_query.filter(Item.id == item_id)
-        adjustment_in_query = adjustment_in_query.filter(Item.id == item_id)
-        adjustment_out_query = adjustment_out_query.filter(Item.id == item_id)
+        query = query.filter(InventoryLedger.item_id == item_id)
 
-    # Combine all queries
-    combined_query = union_all(
-        pembelian_query,
-        penjualan_query,
-        adjustment_in_query,
-        adjustment_out_query
-    ).alias('combined_transactions')
-
-    # Order by date and transaction
-    final_query = (
-        db.query(combined_query)
-        .order_by(combined_query.c.transaction_date.asc(), combined_query.c.item_code.asc())
+    # Order by date, item, and order_key for proper chronological sequence
+    query = query.order_by(
+        InventoryLedger.trx_date.asc(),
+        InventoryLedger.item_id.asc(),
+        InventoryLedger.order_key.asc()
     )
 
     # Get total count
-    total_count = final_query.count()
+    total_count = query.count()
 
     # Get paginated results
-    transactions = final_query.offset(skip).limit(limit).all()
+    ledger_entries = query.offset(skip).limit(limit).all()
 
-    # Process transactions and calculate HPP
+    # Process ledger entries into report rows
     report_rows: List[StockAdjustmentReportRow] = []
-    
-    # Track balance and HPP per item
-    item_state = {}  # {item_code: {'balance': qty, 'hpp': price}}
 
-    for trans in transactions:
-        item_code = trans.item_code or "N/A"
-        
-        # Initialize item state if not exists
-        if item_code not in item_state:
-            item_state[item_code] = {'balance': Decimal("0"), 'hpp': Decimal("0")}
-        
-        state = item_state[item_code]
-        qty = int(trans.qty or 0)
-        price = _dec(trans.price)
-        
-        # Determine qty_in and qty_out
-        qty_in = qty if trans.transaction_type == 'IN' else 0
-        qty_out = qty if trans.transaction_type == 'OUT' else 0
-        
-        # Determine price_in and price_out
-        price_in = price if trans.transaction_type == 'IN' else Decimal("0")
-        price_out = price if trans.transaction_type == 'OUT' else Decimal("0")
-        
-        # Calculate new HPP if there's incoming stock
-        if qty_in > 0:
-            new_hpp = calculate_hpp(state['balance'], state['hpp'], qty_in, price_in)
-        else:
-            new_hpp = state['hpp']  # Keep existing HPP for outgoing transactions
-        
-        # Update balance
-        new_balance = state['balance'] + qty_in - qty_out
-        
+    for entry in ledger_entries:
+        # Determine transaction number based on source
+        trans_no = entry.source_id or ""
+
+        # Calculate price in/out based on movement type
+        price_in = entry.unit_price if entry.qty_in > 0 else Decimal("0")
+        price_out = entry.unit_price if entry.qty_out > 0 else Decimal("0")
+
         # Create report row
         report_rows.append(
             StockAdjustmentReportRow(
-                date=trans.transaction_date if isinstance(trans.transaction_date, datetime) else datetime.combine(trans.transaction_date, datetime.min.time()),
-                no_transaksi=trans.transaction_no or "",
-                item_code=item_code,
-                item_name=trans.item_name or "N/A",
-                qty_masuk=qty_in,
-                qty_keluar=qty_out,
-                qty_balance=int(new_balance),
+                date=datetime.combine(entry.trx_date, datetime.min.time()),
+                no_transaksi=trans_no,
+                item_code=entry.item_code or "N/A",
+                item_name=entry.item_name or "N/A",
+                qty_masuk=entry.qty_in,
+                qty_keluar=entry.qty_out,
+                qty_balance=entry.cumulative_qty,
                 harga_masuk=price_in,
                 harga_keluar=price_out,
-                hpp=new_hpp
+                hpp=entry.moving_avg_cost
             )
         )
-        
-        # Update item state
-        state['balance'] = new_balance
-        state['hpp'] = new_hpp
 
     title = f"Laporan Stock Adjustment {from_date:%d/%m/%Y} - {to_date:%d/%m/%Y}"
-    
+
     return StockAdjustmentReportResponse(
         title=title,
         date_from=from_date,
@@ -1107,115 +1002,44 @@ async def download_stock_adjustment_report(
     if to_date is None:
         to_date = datetime.now()
 
-    def _dec(x) -> Decimal:
-        return Decimal(str(x or 0))
+    # Convert datetime to date for querying
+    from_date_only = from_date.date()
+    to_date_only = to_date.date()
 
-    # Same queries as above (reusing the logic)
-    pembelian_query = (
+    # Build query (same as above but without pagination)
+    query = (
         db.query(
-            Pembelian.sales_date.label('transaction_date'),
-            Pembelian.no_pembelian.label('transaction_no'),
+            InventoryLedger.trx_date,
+            InventoryLedger.source_type,
+            InventoryLedger.source_id,
+            InventoryLedger.qty_in,
+            InventoryLedger.qty_out,
+            InventoryLedger.unit_price,
+            InventoryLedger.cumulative_qty,
+            InventoryLedger.moving_avg_cost,
             Item.code.label('item_code'),
             Item.name.label('item_name'),
-            PembelianItem.qty.label('qty'),
-            PembelianItem.unit_price.label('price'),
-            literal('IN').label('transaction_type'),
-            literal('PEMBELIAN').label('source')
         )
-        .join(PembelianItem, PembelianItem.pembelian_id == Pembelian.id)
-        .join(Item, Item.id == PembelianItem.item_id)
+        .join(Item, Item.id == InventoryLedger.item_id)
         .filter(
-            Pembelian.is_deleted == False,
-            Pembelian.status_pembelian != StatusPembelianEnum.DRAFT,
-            Pembelian.sales_date >= from_date,
-            Pembelian.sales_date <= to_date,
+            InventoryLedger.voided == False,
+            InventoryLedger.trx_date >= from_date_only,
+            InventoryLedger.trx_date <= to_date_only,
             )
     )
 
-    penjualan_query = (
-        db.query(
-            Penjualan.sales_date.label('transaction_date'),
-            Penjualan.no_penjualan.label('transaction_no'),
-            Item.code.label('item_code'),
-            Item.name.label('item_name'),
-            PenjualanItem.qty.label('qty'),
-            PenjualanItem.unit_price.label('price'),
-            literal('OUT').label('transaction_type'),
-            literal('PENJUALAN').label('source')
-        )
-        .join(PenjualanItem, PenjualanItem.penjualan_id == Penjualan.id)
-        .join(Item, Item.id == PenjualanItem.item_id)
-        .filter(
-            Penjualan.is_deleted == False,
-            Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
-            Penjualan.sales_date >= from_date,
-            Penjualan.sales_date <= to_date,
-            )
-    )
-
-    adjustment_in_query = (
-        db.query(
-            StockAdjustment.adjustment_date.label('transaction_date'),
-            StockAdjustment.no_adjustment.label('transaction_no'),
-            Item.code.label('item_code'),
-            Item.name.label('item_name'),
-            StockAdjustmentItem.qty.label('qty'),
-            StockAdjustmentItem.adj_price.label('price'),
-            literal('IN').label('transaction_type'),
-            literal('ADJUSTMENT').label('source')
-        )
-        .join(StockAdjustmentItem, StockAdjustmentItem.stock_adjustment_id == StockAdjustment.id)
-        .join(Item, Item.id == StockAdjustmentItem.item_id)
-        .filter(
-            StockAdjustment.is_deleted == False,
-            StockAdjustment.status_adjustment != StatusStockAdjustmentEnum.DRAFT,
-            StockAdjustment.adjustment_type == AdjustmentTypeEnum.IN,
-            StockAdjustment.adjustment_date >= from_date.date(),
-            StockAdjustment.adjustment_date <= to_date.date(),
-            )
-    )
-
-    adjustment_out_query = (
-        db.query(
-            StockAdjustment.adjustment_date.label('transaction_date'),
-            StockAdjustment.no_adjustment.label('transaction_no'),
-            Item.code.label('item_code'),
-            Item.name.label('item_name'),
-            StockAdjustmentItem.qty.label('qty'),
-            StockAdjustmentItem.adj_price.label('price'),
-            literal('OUT').label('transaction_type'),
-            literal('ADJUSTMENT').label('source')
-        )
-        .join(StockAdjustmentItem, StockAdjustmentItem.stock_adjustment_id == StockAdjustment.id)
-        .join(Item, Item.id == StockAdjustmentItem.item_id)
-        .filter(
-            StockAdjustment.is_deleted == False,
-            StockAdjustment.status_adjustment != StatusStockAdjustmentEnum.DRAFT,
-            StockAdjustment.adjustment_type == AdjustmentTypeEnum.OUT,
-            StockAdjustment.adjustment_date >= from_date.date(),
-            StockAdjustment.adjustment_date <= to_date.date(),
-            )
-    )
-
+    # Apply item filter if specified
     if item_id is not None:
-        pembelian_query = pembelian_query.filter(Item.id == item_id)
-        penjualan_query = penjualan_query.filter(Item.id == item_id)
-        adjustment_in_query = adjustment_in_query.filter(Item.id == item_id)
-        adjustment_out_query = adjustment_out_query.filter(Item.id == item_id)
+        query = query.filter(InventoryLedger.item_id == item_id)
 
-    combined_query = union_all(
-        pembelian_query,
-        penjualan_query,
-        adjustment_in_query,
-        adjustment_out_query
-    ).alias('combined_transactions')
-
-    final_query = (
-        db.query(combined_query)
-        .order_by(combined_query.c.transaction_date.asc(), combined_query.c.item_code.asc())
+    # Order by date, item, and order_key
+    query = query.order_by(
+        InventoryLedger.trx_date.asc(),
+        InventoryLedger.item_id.asc(),
+        InventoryLedger.order_key.asc()
     )
 
-    transactions = final_query.all()
+    ledger_entries = query.all()
 
     # Create CSV
     output = io.StringIO()
@@ -1235,53 +1059,26 @@ async def download_stock_adjustment_report(
         'HPP'
     ])
 
-    # Process and write rows
-    item_state = {}
+    # Write rows
+    for entry in ledger_entries:
+        trans_no = entry.source_id or ""
+        price_in = entry.unit_price if entry.qty_in > 0 else Decimal("0")
+        price_out = entry.unit_price if entry.qty_out > 0 else Decimal("0")
 
-    for trans in transactions:
-        item_code = trans.item_code or "N/A"
-
-        if item_code not in item_state:
-            item_state[item_code] = {'balance': Decimal("0"), 'hpp': Decimal("0")}
-
-        state = item_state[item_code]
-        qty = int(trans.qty or 0)
-        price = _dec(trans.price)
-
-        qty_in = qty if trans.transaction_type == 'IN' else 0
-        qty_out = qty if trans.transaction_type == 'OUT' else 0
-        price_in = price if trans.transaction_type == 'IN' else Decimal("0")
-        price_out = price if trans.transaction_type == 'OUT' else Decimal("0")
-
-        if qty_in > 0:
-            new_hpp = calculate_hpp(state['balance'], state['hpp'], qty_in, price_in)
-        else:
-            new_hpp = state['hpp']
-
-        new_balance = state['balance'] + qty_in - qty_out
-
-        # Format date
-        trans_date = trans.transaction_date
-        if isinstance(trans_date, datetime):
-            date_str = trans_date.strftime('%d/%m/%Y')
-        else:
-            date_str = trans_date.strftime('%d/%m/%Y')
+        date_str = entry.trx_date.strftime('%d/%m/%Y')
 
         writer.writerow([
             date_str,
-            trans.transaction_no or '',
-            item_code,
-            trans.item_name or 'N/A',
-            str(qty_in),
-            str(qty_out),
-            str(int(new_balance)),
+            trans_no,
+            entry.item_code or 'N/A',
+            entry.item_name or 'N/A',
+            str(entry.qty_in),
+            str(entry.qty_out),
+            str(entry.cumulative_qty),
             f"{float(price_in):,.2f}",
             f"{float(price_out):,.2f}",
-            f"{float(new_hpp):,.2f}"
+            f"{float(entry.moving_avg_cost):,.2f}"
         ])
-
-        state['balance'] = new_balance
-        state['hpp'] = new_hpp
 
     csv_content = output.getvalue()
     output.close()
@@ -1296,4 +1093,3 @@ async def download_stock_adjustment_report(
             "Content-Type": "text/csv; charset=utf-8"
         }
     )
-

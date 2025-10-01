@@ -12,6 +12,7 @@ import os
 import uuid
 
 from models.AuditTrail import AuditEntityEnum
+from models.InventoryLedger import SourceTypeEnum
 from models.Item import Item
 from database import get_db
 from models.AllAttachment import AllAttachment, ParentType
@@ -27,6 +28,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from decimal import Decimal
 from services.audit_services import AuditService
+from services.inventoryledger_services import InventoryService
 from utils import generate_unique_record_code, soft_delete_record,get_current_user_name
 
 router = APIRouter()
@@ -61,24 +63,79 @@ class ImportOptions(BaseModel):
     default_item_type: ItemTypeEnum = ItemTypeEnum.FINISH_GOOD
 
 def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: AuditService, user_name: str):
-    """Create a new item."""
+    """Create a new item and post initial inventory."""
+    inventory_service = InventoryService(db)
+
     new_item = Item(**item_data)
     db.add(new_item)
     db.flush()
+
+    if item_data.get('total_item', 0) > 0:
+        unit_price = item_data.get('price', Decimal('0'))
+        qty = item_data['total_item']
+
+        inventory_service.post_inventory_in(  # MUST use await
+            item_id=new_item.id,
+            source_type=SourceTypeEnum.ITEM,
+            source_id=f"{new_item.id}",
+            qty=qty,
+            unit_price=unit_price,
+            trx_date=date.today(),
+            reason_code="Initial import"
+        )
+
     audit_service.default_log(
         entity_id=new_item.id,
         entity_type=AuditEntityEnum.ITEM,
         description=f"Data item {new_item.name} telah dibuat via import",
         user_name=user_name,
     )
+    return new_item
 
-def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_id: int):
-    """Update an existing item."""
+
+def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_id: int, audit_service: AuditService, user_name: str):
+    inventory_service = InventoryService(db)
     item = db.query(Item).filter(Item.id == existing_item_id).first()
-    if item:
-        for key, value in item_data.items():
-            if hasattr(item, key):
-                setattr(item, key, value)
+    if not item:
+        raise ValueError(f"Item with ID {existing_item_id} not found")
+
+    old_total_item = item.total_item
+
+    for key, value in item_data.items():
+        if hasattr(item, key):
+            setattr(item, key, value)
+    db.flush()
+
+    new_total_item = item_data.get('total_item', 0)
+    if new_total_item != old_total_item:
+        difference = new_total_item - old_total_item
+        if difference > 0:
+            inventory_service.post_inventory_in(  # MUST use await
+                item_id=item.id,
+                source_type=SourceTypeEnum.IN,
+                source_id=f"{item.id}",
+                qty=difference,
+                unit_price=item_data.get('price', Decimal('0')),
+                trx_date=date.today(),
+                reason_code="Import update - stock increase"
+            )
+        elif difference < 0:
+            inventory_service.post_inventory_out(  # MUST use await
+                item_id=item.id,
+                source_type=SourceTypeEnum.OUT,
+                source_id=f"{item.id}",
+                qty=abs(difference),
+                trx_date=date.today(),
+                reason_code="Import update - stock decrease"
+            )
+
+    audit_service.default_log(
+        entity_id=item.id,
+        entity_type=AuditEntityEnum.ITEM,
+        description=f"Data item {item.name} telah diupdate via import",
+        user_name=user_name,
+    )
+    return item
 
 @router.get("/{item_id}", response_model=ItemResponse)
 def get_item_by_id(
@@ -356,15 +413,13 @@ async def import_items_from_excel(
 
                 # Create or update item
                 if update_existing and item_data['sku'] in existing_skus:
-                    _update_existing_item(db, item_data, existing_skus[item_data['sku']])
+                    _update_existing_item(db, item_data, existing_skus[item_data['sku']], audit_service, user_name)
                     result.warnings.append({
                         'row': index + 2,
                         'message': f"Updated existing item with SKU: {item_data['sku']}"
                     })
-                    
                 else:
-                    _create_new_item(db, item_data, audit_service,user_name)
-
+                    _create_new_item(db, item_data, audit_service, user_name)
 
                 result.successful_imports += 1
 
