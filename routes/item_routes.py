@@ -102,6 +102,8 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
     old_total_item = item.total_item
 
     for key, value in item_data.items():
+        if key == "code":
+            continue
         if hasattr(item, key):
             setattr(item, key, value)
     db.flush()
@@ -413,13 +415,25 @@ async def import_items_from_excel(
 
                 # Create or update item
                 if update_existing and item_data['sku'] in existing_skus:
-                    _update_existing_item(db, item_data, existing_skus[item_data['sku']], audit_service, user_name)
+    # Jangan generate code baru, pakai code dari existing item
+                    existing_item = existing_skus[item_data['sku']]
+                    item_data['code'] = existing_item.code  
+                    
+                    _update_existing_item(
+                        db, item_data, existing_item, audit_service, user_name
+                    )
                     result.warnings.append({
                         'row': index + 2,
                         'message': f"Updated existing item with SKU: {item_data['sku']}"
                     })
                 else:
+                    # Create baru → generate code
+                    prefix = get_item_prefix(item_data['type'])
+                    item_code = generate_unique_record_code(db, Item, prefix)
+                    item_data['code'] = item_code
+
                     _create_new_item(db, item_data, audit_service, user_name)
+
 
                 result.successful_imports += 1
 
