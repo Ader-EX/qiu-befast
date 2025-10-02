@@ -330,6 +330,7 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
     db.flush()
 
     return item
+
 @router.post("/import-excel", response_model=ImportResult)
 async def import_items_from_excel(
         file: UploadFile = File(...),
@@ -366,7 +367,7 @@ async def import_items_from_excel(
 
         # Parse based on file type
         if file.filename.endswith('.csv'):
-            df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep=';')
+            df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep=None, engine='python')
         else:
             df = pd.read_excel(io.BytesIO(content))
 
@@ -482,8 +483,6 @@ def _process_row(
         default_item_type: ItemTypeEnum,
         update_existing: bool
 ) -> Optional[Dict[str, Any]]:
-    print(f"entry for {row.get('sku')} : update? {update_existing}")
-
     if pd.isna(row.get('name')) or not str(row.get('name')).strip():
         raise ValueError("Nama Item is required")
 
