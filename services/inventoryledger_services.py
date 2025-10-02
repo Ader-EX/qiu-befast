@@ -167,7 +167,7 @@ class InventoryService:
             raise ValueError("Quantity must be positive for OUT movements")
 
         # Get previous balance
-        last_entry = self._get_last_ledger_entry(item_id, trx_date)
+        last_entry = self._get_last_ledger_entry(item_id)
 
         if not last_entry:
             raise ValueError(f"No inventory found for item {item_id}")
