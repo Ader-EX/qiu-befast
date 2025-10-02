@@ -239,6 +239,160 @@ def create_stock_adjustment(
 
     return adjustment
 
+@router.put("/{adjustment_id}", response_model=StockAdjustmentResponse, status_code=status.HTTP_200_OK)
+def update_stock_adjustment(
+    adjustment_id: int,
+    payload: StockAdjustmentUpdate,
+    db: Session = Depends(get_db),
+    user_name: str = Depends(get_current_user_name),
+):
+    """
+    Update a stock adjustment (only allowed in DRAFT).
+    - Updates header fields: adjustment_date, warehouse_id, adjustment_type
+    - Upserts items:
+        * Existing items with an id -> updated
+        * Items without id -> created
+        * Existing items missing from payload -> deleted
+    """
+    audit_service = AuditService(db)
+
+    adjustment = (
+        db.query(StockAdjustment)
+        .options(
+            selectinload(StockAdjustment.stock_adjustment_items)
+            .selectinload(StockAdjustmentItem.item_rel)
+        )
+        .filter(
+            StockAdjustment.id == adjustment_id,
+            StockAdjustment.is_deleted == False
+        )
+        .first()
+    )
+    if not adjustment:
+        raise HTTPException(status_code=404, detail="Stock adjustment not found")
+
+    if adjustment.status_adjustment != StatusStockAdjustmentEnum.DRAFT:
+        raise HTTPException(
+            status_code=400,
+            detail="Only DRAFT stock adjustments can be updated. Roll back first if needed."
+        )
+
+    # Validate type if provided
+    if payload.adjustment_type is not None:
+        try:
+            _ = AdjustmentTypeEnum(payload.adjustment_type)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid adjustment type. Must be IN or OUT")
+
+    # Validate item list
+    if not payload.stock_adjustment_items or len(payload.stock_adjustment_items) == 0:
+        raise HTTPException(status_code=400, detail="Stock adjustment items are required")
+
+    # Ensure all referenced Items exist
+    item_ids = {it.item_id for it in payload.stock_adjustment_items}
+    existing_items = {
+        it.id: it for it in db.query(Item).filter(
+            Item.id.in_(item_ids),
+            Item.is_deleted == False
+        ).all()
+    }
+    missing = item_ids - set(existing_items.keys())
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Item(s) not found: {sorted(missing)}")
+
+    # Map existing items
+    current_items_by_id = {si.id: si for si in adjustment.stock_adjustment_items}
+
+    # Track diffs for audit
+    added, updated, removed = [], [], []
+
+    incoming_ids = set()
+    for item_in in payload.stock_adjustment_items:
+        qty = int(item_in.qty)
+        adj_price = int(item_in.adj_price)
+
+        if getattr(item_in, "id", None):  # update
+            incoming_ids.add(item_in.id)
+            si = current_items_by_id.get(item_in.id)
+            if not si or si.stock_adjustment_id != adjustment.id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"StockAdjustmentItem id {item_in.id} does not belong to this adjustment"
+                )
+
+            old_snapshot = {"item_id": si.item_id, "qty": si.qty, "adj_price": si.adj_price}
+            si.item_id = item_in.item_id
+            si.qty = qty
+            si.adj_price = adj_price
+            updated.append({"id": si.id, "from": old_snapshot,
+                            "to": {"item_id": si.item_id, "qty": si.qty, "adj_price": si.adj_price}})
+        else:  # create
+            si_new = StockAdjustmentItem(
+                stock_adjustment_id=adjustment.id,
+                item_id=item_in.item_id,
+                qty=qty,
+                adj_price=adj_price,
+            )
+            db.add(si_new)
+            db.flush()
+            added.append({"id": si_new.id, "item_id": si_new.item_id, "qty": si_new.qty, "adj_price": si_new.adj_price})
+
+    # delete missing
+    for si_id, si in current_items_by_id.items():
+        if si_id not in incoming_ids:
+            removed.append({"id": si.id, "item_id": si.item_id, "qty": si.qty, "adj_price": si.adj_price})
+            db.delete(si)
+
+    # Update header fields if provided
+    header_changes = []
+    def _apply(field_name):
+        if hasattr(payload, field_name):
+            val = getattr(payload, field_name)
+            if val is not None:
+                old = getattr(adjustment, field_name)
+                if old != val:
+                    header_changes.append({"field": field_name, "from": old, "to": val})
+                    setattr(adjustment, field_name, val)
+
+    for field in ["adjustment_date", "warehouse_id", "adjustment_type"]:
+        _apply(field)
+
+    adjustment.updated_at = datetime.now()
+    db.flush()
+
+    # Recompute totals for audit context
+    db.refresh(adjustment)
+    total_qty = sum(int(si.qty or 0) for si in adjustment.stock_adjustment_items)
+    total_price = sum(int(si.adj_price or 0) for si in adjustment.stock_adjustment_items)
+
+    # Audit
+    audit_parts = []
+    if header_changes:
+        audit_parts.append(
+            "Header updated: " + ", ".join([f"{c['field']}: {c['from']} → {c['to']}" for c in header_changes])
+        )
+    if added:
+        audit_parts.append(f"Items added: {len(added)}")
+    if updated:
+        audit_parts.append(f"Items updated: {len(updated)}")
+    if removed:
+        audit_parts.append(f"Items removed: {len(removed)}")
+
+    audit_service.default_log(
+        entity_id=adjustment.id,
+        entity_type=AuditEntityEnum.STOCK_ADJUSTMENT,
+        description=(
+            f"Penyesuaian {adjustment.no_adjustment} diupdate (Draft). "
+            f"{' | '.join(audit_parts) if audit_parts else 'No changes detected.'} "
+            f"Total qty: {total_qty}, total harga: {total_price}"
+        ),
+        user_name=user_name
+    )
+
+    db.commit()
+    db.refresh(adjustment)
+    return adjustment
+
 
 @router.get("", response_model=PaginatedResponse[StockAdjustmentResponse])
 def get_stock_adjustments(
