@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from decimal import Decimal
 from typing import List, Optional, Dict
+import pytz
 from sqlalchemy import select, and_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -16,6 +17,13 @@ class InventoryService:
 
     def __init__(self, db: Session):
         self.db = db
+        
+    def _now(self) -> datetime:
+    # Set the timezone to Jakarta Time (Asia/Jakarta, which is UTC+7)
+        jakarta_tz = pytz.timezone('Asia/Jakarta')
+        # Get the current time in the specified timezone
+        return datetime.now(jakarta_tz)
+
 
     def _get_last_ledger_entry(
             self,
@@ -58,64 +66,35 @@ class InventoryService:
         sequence = result.scalar() or 0
 
         return f"{trx_date.isoformat()}_{sequence + 1:010d}"
-
     def post_inventory_in(
-            self,
-            item_id: int,
-            source_type: SourceTypeEnum,
-            source_id: str,
-            qty: int,
-            unit_price: Decimal,
-            trx_date: date,
-            reason_code: Optional[str] = None
+        self,
+        item_id: int,
+        source_type: SourceTypeEnum,
+        source_id: str,
+        qty: int,
+        unit_price: Decimal,
+        trx_date: Optional[datetime] = None,   # <-- keep param for signature
+        reason_code: Optional[str] = None
     ) -> InventoryLedger:
+        # FORCE: always use "now", ignore any caller-provided date
+        trx_dt = self._now()
 
-        """
-        Post incoming inventory movement (Pembelian, Stock Adjustment IN, Item Import)
-
-        Args:
-            item_id: ID of the item
-            source_type: PEMBELIAN, IN, or ITEM
-            source_id: Unique identifier for the source transaction
-            qty: Quantity received (must be positive)
-            unit_price: Unit price of incoming goods
-            trx_date: Transaction date
-            reason_code: Optional reason for the transaction
-
-        Returns:
-            Created InventoryLedger entry
-        """
         if qty <= 0:
             raise ValueError("Quantity must be positive for IN movements")
-
         if unit_price < 0:
             raise ValueError("Unit price cannot be negative")
 
-        # Get previous balance
-        last_entry = self._get_last_ledger_entry(item_id, trx_date)
+        last_entry = self._get_last_ledger_entry(item_id)  # latest row
+        prev_qty = last_entry.cumulative_qty if last_entry else 0
+        prev_value = last_entry.cumulative_value if last_entry else Decimal("0")
 
-        if last_entry:
-            prev_qty = last_entry.cumulative_qty
-            prev_value = last_entry.cumulative_value
-        else:
-            prev_qty = 0
-            prev_value = Decimal("0")
-
-        # Calculate new values
         value_in = Decimal(qty) * unit_price
         new_cumulative_qty = prev_qty + qty
         new_cumulative_value = prev_value + value_in
+        moving_avg_cost = (new_cumulative_value / Decimal(new_cumulative_qty)) if new_cumulative_qty > 0 else Decimal("0")
 
-        # Calculate moving average cost
-        if new_cumulative_qty > 0:
-            moving_avg_cost = new_cumulative_value / Decimal(new_cumulative_qty)
-        else:
-            moving_avg_cost = Decimal("0")
+        order_key = self._generate_order_key(item_id, trx_dt)
 
-        # Generate order key
-        order_key =  self._generate_order_key(item_id, trx_date)
-
-        # Create ledger entry
         ledger_entry = InventoryLedger(
             item_id=item_id,
             source_type=source_type,
@@ -127,48 +106,32 @@ class InventoryService:
             cumulative_qty=new_cumulative_qty,
             moving_avg_cost=moving_avg_cost,
             cumulative_value=new_cumulative_value,
-            trx_date=trx_date,
+            trx_date=trx_dt,     # <-- always now
             order_key=order_key,
             reason_code=reason_code,
             voided=False
         )
-
         self.db.add(ledger_entry)
         self.db.commit()
         self.db.refresh(ledger_entry)
-
         return ledger_entry
 
     def post_inventory_out(
-            self,
-            item_id: int,
-            source_type: SourceTypeEnum,
-            source_id: str,
-            qty: int,
-            trx_date: date,
-            reason_code: Optional[str] = None
+        self,
+        item_id: int,
+        source_type: SourceTypeEnum,
+        source_id: str,
+        qty: int,
+        trx_date: Optional[datetime] = None,   # <-- keep param
+        reason_code: Optional[str] = None
     ) -> InventoryLedger:
-        """
-        Post outgoing inventory movement (Penjualan, Stock Adjustment OUT)
-        Uses current moving average cost as the unit price.
+        # FORCE: always use "now"
+        trx_dt = self._now()
 
-        Args:
-            item_id: ID of the item
-            source_type: PENJUALAN or OUT
-            source_id: Unique identifier for the source transaction
-            qty: Quantity to remove (must be positive)
-            trx_date: Transaction date
-            reason_code: Optional reason for the transaction
-
-        Returns:
-            Created InventoryLedger entry
-        """
         if qty <= 0:
             raise ValueError("Quantity must be positive for OUT movements")
 
-        # Get previous balance
         last_entry = self._get_last_ledger_entry(item_id)
-
         if not last_entry:
             raise ValueError(f"No inventory found for item {item_id}")
 
@@ -177,47 +140,35 @@ class InventoryService:
         current_moving_avg = last_entry.moving_avg_cost
 
         if prev_qty < qty:
-            raise ValueError(
-                f"Insufficient stock. Available: {prev_qty}, Requested: {qty}"
-            )
+            raise ValueError(f"Insufficient stock. Available: {prev_qty}, Requested: {qty}")
 
-        # Calculate new values
         new_cumulative_qty = prev_qty - qty
         value_out = Decimal(qty) * current_moving_avg
         new_cumulative_value = prev_value - value_out
-
-        # Moving average cost stays the same for OUT transactions
-        moving_avg_cost = current_moving_avg
-
-        # Prevent negative cumulative value due to rounding
         if new_cumulative_value < 0:
             new_cumulative_value = Decimal("0")
 
-        # Generate order key
-        order_key = self._generate_order_key(item_id, trx_date)
+        order_key = self._generate_order_key(item_id, trx_dt)
 
-        # Create ledger entry
         ledger_entry = InventoryLedger(
             item_id=item_id,
             source_type=source_type,
             source_id=source_id,
             qty_in=0,
             qty_out=qty,
-            unit_price=current_moving_avg,  # Record the cost at time of sale
+            unit_price=current_moving_avg,
             value_in=Decimal("0"),
             cumulative_qty=new_cumulative_qty,
-            moving_avg_cost=moving_avg_cost,
+            moving_avg_cost=current_moving_avg,
             cumulative_value=new_cumulative_value,
-            trx_date=trx_date,
+            trx_date=trx_dt,     # <-- always now
             order_key=order_key,
             reason_code=reason_code,
             voided=False
         )
-
         self.db.add(ledger_entry)
         self.db.commit()
         self.db.refresh(ledger_entry)
-
         return ledger_entry
 
     def get_current_stock(self, item_id: int) -> Dict:
@@ -243,7 +194,47 @@ class InventoryService:
             "moving_avg_cost": last_entry.moving_avg_cost,
             "total_value": last_entry.cumulative_value
         }
+    def _recompute_from(self, item_id: int, start_date: date) -> None:
+        """
+        Recompute cumulative_qty, cumulative_value, moving_avg_cost for all rows
+        with trx_date >= start_date, ordered strictly by (trx_date, id).
+        """
+        q = select(InventoryLedger).where(
+            and_(
+                InventoryLedger.item_id == item_id,
+                InventoryLedger.voided == False,
+                InventoryLedger.trx_date >= start_date,
+            )
+        ).order_by(InventoryLedger.trx_date.asc(), InventoryLedger.id.asc())
 
+        rows = list(self.db.execute(q).scalars().all())
+
+        # Seed from the last entry strictly BEFORE start_date
+        prev = self._get_last_ledger_entry(item_id, before_date=start_date.fromordinal(start_date.toordinal()-1))
+        cum_qty = prev.cumulative_qty if prev else 0
+        cum_val = prev.cumulative_value if prev else Decimal("0")
+        mac = prev.moving_avg_cost if prev else Decimal("0")
+
+        for r in rows:
+            if r.qty_in > 0:
+                value_in = Decimal(r.qty_in) * Decimal(str(r.unit_price))
+                cum_qty = cum_qty + r.qty_in
+                cum_val = cum_val + value_in
+                mac = (cum_val / Decimal(cum_qty)) if cum_qty > 0 else Decimal("0")
+                r.value_in = value_in
+            elif r.qty_out > 0:
+                value_out = Decimal(r.qty_out) * mac
+                cum_qty = cum_qty - r.qty_out
+                cum_val = cum_val - value_out
+                if cum_val < 0:  # rounding safety
+                    cum_val = Decimal("0")
+                # mac stays the same on OUT
+
+            r.cumulative_qty = cum_qty
+            r.cumulative_value = cum_val
+            r.moving_avg_cost = mac
+
+        self.db.commit()
 
 
     def void_ledger_entry(

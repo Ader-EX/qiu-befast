@@ -595,23 +595,23 @@ async def update_pembelian(
         # For DRAFT pembelians, we don't touch stock until finalization
         if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
             trx_date = pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date
-            for item_id, qty_change, pembelian_id in stock_adjustments:
-                if qty_change != 0:  # Only apply actual changes
+            for item_id, qty_change in stock_adjustments:
+                if qty_change != 0:
                     update_item_stock(db, item_id, qty_change)
+
                 if qty_change > 0:
-                    # Addition
-                    pi = db.query(PembelianItem).get(pembelian_id)
+                    # Need unit_price — fetch from the updated line:
+                    pi = next((x for x in pembelian.pembelian_items if x.item_id == item_id), None)
                     inventory_service.post_inventory_in(
                         item_id=item_id,
                         source_type=SourceTypeEnum.PEMBELIAN,
                         source_id=f"{pembelian_id}",
                         qty=qty_change,
-                        unit_price=Decimal(str(pi.unit_price)),
+                        unit_price=Decimal(str(pi.unit_price)) if pi else Decimal("0"),
                         trx_date=trx_date,
                         reason_code=f"Pembelian {pembelian.no_pembelian} updated"
                     )
                 else:
-                    # Reduction - use adjustment OUT
                     inventory_service.post_inventory_out(
                         item_id=item_id,
                         source_type=SourceTypeEnum.OUT,
@@ -620,6 +620,7 @@ async def update_pembelian(
                         trx_date=trx_date,
                         reason_code=f"Pembelian {pembelian.no_pembelian} quantity reduced"
                     )
+
 
     # Commit and recalc totals if anything changed
     if fields_changed or items_changed:

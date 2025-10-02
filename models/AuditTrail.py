@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import pytz
 from sqlalchemy import Column, Integer, String, Enum
 
 from datetime import datetime
@@ -7,6 +8,17 @@ from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
 from database import Base
 import enum
 
+
+
+def get_jkt_now():
+    """
+    Returns a timezone-aware datetime object set to Asia/Jakarta (WIB, UTC+7).
+    This function must be called as the default for the Column.
+    """
+    # Define the Jakarta timezone object
+    jakarta_tz = pytz.timezone('Asia/Jakarta')
+    # Get the current time localized to Jakarta
+    return datetime.now(jakarta_tz)
 
 class AuditActionEnum(enum.Enum):
     # Generic actions
@@ -48,7 +60,7 @@ class AuditTrail(Base):
     entity_type = Column(Enum(AuditEntityEnum), nullable=False)  # Type of entity
     description = Column(Text, nullable=False)  # What happened (human-readable)
     user_name = Column(String(100), nullable=False)  # Who did it
-    timestamp = Column(DateTime, default=datetime.now, nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=get_jkt_now, nullable=False)
 
     class Config:
         orm_mode = True
