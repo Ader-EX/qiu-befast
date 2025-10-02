@@ -1,7 +1,7 @@
 
 import os
 from typing import Optional
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime,Enum
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime, Enum, func
 from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -22,11 +22,11 @@ class Item(Base, SoftDeleteMixin):
     code= Column(String(100), unique=True, nullable=True)
     type = Column(Enum(ItemTypeEnum))
     name = Column(String(100), nullable=False)
-    sku = Column(String(100), nullable=False, index=True)
+    sku = Column(String(100), unique=True,nullable=False, index=True)
     total_item = Column(Integer, default=0, nullable=False)
     price = Column(Numeric(15,7), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.now(), nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
     
     # Foreign Key
     category_one = Column(Integer, ForeignKey("categories.id"), nullable=True)

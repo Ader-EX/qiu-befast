@@ -62,97 +62,6 @@ class ImportOptions(BaseModel):
     update_existing: bool = False
     default_item_type: ItemTypeEnum = ItemTypeEnum.FINISH_GOOD
 
-def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: AuditService, user_name: str):
-    """Create a new item and post initial inventory."""
-    inventory_service = InventoryService(db)
-
-    new_item = Item(**item_data)
-    db.add(new_item)
-    db.flush()
-
-    if item_data.get('total_item', 0) > 0:
-        unit_price = item_data.get('price', Decimal('0'))
-        qty = item_data['total_item']
-
-        inventory_service.post_inventory_in(  # MUST use await
-            item_id=new_item.id,
-            source_type=SourceTypeEnum.ITEM,
-            source_id=f"IMPORT-{new_item.sku}",
-            qty=qty,
-            unit_price=unit_price,
-            trx_date=date.today(),
-            reason_code="Initial import"
-        )
-
-    audit_service.default_log(
-        entity_id=new_item.id,
-        entity_type=AuditEntityEnum.ITEM,
-        description=f"Data item {new_item.name} telah dibuat via import",
-        user_name=user_name,
-    )
-    return new_item
-
-def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_id: int, audit_service: AuditService, user_name: str):
-    """Update an existing item without changing its code."""
-    inventory_service = InventoryService(db)
-    
-    # Query the existing item - it's automatically tracked by the session
-    item = db.query(Item).filter(Item.id == existing_item_id).first()
-    if not item:
-        raise ValueError(f"Item with ID {existing_item_id} not found")
-    
-    print(f"Item ID: {item.id}, Code: {item.code}")
-    print(f"Object state: {inspect(item).persistent}")  # Should be True
-    print(f"Item in session: {item in db}")  # Should be True
-
-    old_total_item = item.total_item
-
-    # Update ONLY the allowed fields - NEVER touch 'code', 'id', 'created_at'
-    updateable_fields = ['name', 'sku', 'type', 'total_item', 'price', 
-                        'category_one', 'category_two', 'satuan_id', 'is_active']
-    
-    for field in updateable_fields:
-        if field in item_data:
-            setattr(item, field, item_data[field])
-    
-    # DON'T call db.add(item) - it's already tracked!
-    # DON'T call db.flush() yet - wait until after inventory operations
-    
-    # Handle inventory changes
-    new_total_item = item_data.get('total_item', 0)
-    if new_total_item != old_total_item:
-        difference = new_total_item - old_total_item
-        if difference > 0:
-            inventory_service.post_inventory_in(
-                item_id=item.id,
-                source_type=SourceTypeEnum.IN,
-                source_id=f"IMPORT-{item.sku}",
-                qty=difference,
-                unit_price=item_data.get('price', Decimal('0')),
-                trx_date=date.today(),
-                reason_code="Import update - stock increase"
-            )
-        elif difference < 0:
-            inventory_service.post_inventory_out(
-                item_id=item.id,
-                source_type=SourceTypeEnum.OUT,
-                source_id=f"IMPORT-{item.sku}",
-                qty=abs(difference),
-                trx_date=date.today(),
-                reason_code="Import update - stock decrease"
-            )
-
-    audit_service.default_log(
-        entity_id=item.id,
-        entity_type=AuditEntityEnum.ITEM,
-        description=f"Data item {item.name} telah diupdate via import",
-        user_name=user_name,
-    )
-    
-    # Flush changes to the database
-    db.flush()
-    
-    return item
 
 @router.get("/{item_id}", response_model=ItemResponse)
 def get_item_by_id(
@@ -338,6 +247,89 @@ def get_items(
     return {"data": items_out, "total": total_count}
 
 
+def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: AuditService, user_name: str):
+    """Create a new item and post initial inventory."""
+    inventory_service = InventoryService(db)
+
+    new_item = Item(**item_data)
+    db.add(new_item)
+    db.flush()
+
+    if item_data.get('total_item', 0) > 0:
+        unit_price = item_data.get('price', Decimal('0'))
+        qty = item_data['total_item']
+
+        inventory_service.post_inventory_in(  # MUST use await
+            item_id=new_item.id,
+            source_type=SourceTypeEnum.ITEM,
+            source_id=f"IMPORT-{new_item.sku}",
+            qty=qty,
+            unit_price=unit_price,
+            trx_date=date.today(),
+            reason_code="Initial import"
+        )
+
+    audit_service.default_log(
+        entity_id=new_item.id,
+        entity_type=AuditEntityEnum.ITEM,
+        description=f"Data item {new_item.name} telah dibuat via import",
+        user_name=user_name,
+    )
+    return new_item
+
+def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_id: int, audit_service: AuditService, user_name: str):
+    """Update an existing item without changing its code."""
+    inventory_service = InventoryService(db)
+
+    item = db.query(Item).filter(Item.id == existing_item_id).first()
+    if not item:
+        raise ValueError(f"Item with ID {existing_item_id} not found")
+
+    old_total_item = item.total_item
+
+    # Update ONLY the allowed fields - NEVER touch 'code', 'id', 'created_at'
+    updateable_fields = ['name', 'type', 'total_item', 'price',
+                         'category_one', 'category_two', 'satuan_id', 'is_active']
+
+    for field in updateable_fields:
+        if field in item_data:
+            setattr(item, field, item_data[field])
+
+    # Handle inventory changes
+    new_total_item = item_data.get('total_item', 0)
+    if new_total_item != old_total_item:
+        difference = new_total_item - old_total_item
+        if difference > 0:
+            inventory_service.post_inventory_in(
+                item_id=item.id,
+                source_type=SourceTypeEnum.IN,
+                source_id=f"IMPORT-{item.sku}",
+                qty=difference,
+                unit_price=item_data.get('price', Decimal('0')),
+                trx_date=date.today(),
+                reason_code="Import update - stock increase"
+            )
+        elif difference < 0:
+            inventory_service.post_inventory_out(
+                item_id=item.id,
+                source_type=SourceTypeEnum.OUT,
+                source_id=f"IMPORT-{item.sku}",
+                qty=abs(difference),
+                trx_date=date.today(),
+                reason_code="Import update - stock decrease"
+            )
+
+    audit_service.default_log(
+        entity_id=item.id,
+        entity_type=AuditEntityEnum.ITEM,
+        description=f"Data item {item.name} telah diupdate via import",
+        user_name=user_name,
+    )
+
+    # Flush changes to the database
+    db.flush()
+
+    return item
 @router.post("/import-excel", response_model=ImportResult)
 async def import_items_from_excel(
         file: UploadFile = File(...),
@@ -490,6 +482,7 @@ def _process_row(
         default_item_type: ItemTypeEnum,
         update_existing: bool
 ) -> Optional[Dict[str, Any]]:
+    print(f"entry for {row.get('sku')} : update? {update_existing}")
 
     if pd.isna(row.get('name')) or not str(row.get('name')).strip():
         raise ValueError("Nama Item is required")
@@ -503,7 +496,7 @@ def _process_row(
     sku = str(row['sku']).strip()
 
     if sku in existing_skus and not update_existing:
-        raise ValueError(f"SKU '{sku}' already exists. Use update_existing=true to update.")
+        raise ValueError(f"SKU '{sku}' already exists.")
 
     satuan_symbol = str(row['satuan_unit']).lower().strip()
     satuan_id = satuans_lookup.get(satuan_symbol)
@@ -556,6 +549,7 @@ def _process_row(
     return {
         'name': str(row['name']).strip(),
         'sku': sku,
+        'code': str(row.get('code', '')).strip() if not pd.isna(row.get('code')) else None,
         'type': item_type,
         'total_item': total_item,
         'price': price,
