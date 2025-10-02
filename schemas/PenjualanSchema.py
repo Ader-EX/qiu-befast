@@ -7,20 +7,14 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator, AliasChoices, ConfigDict
 
-# Enums come from Pembelian module (shared)
 from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
 from schemas.ItemSchema import ItemResponse
-from schemas.KodeLambungSchema import KodeLambungResponse  # if you expose related Item as in Pembelian schemas
-
+from schemas.KodeLambungSchema import KodeLambungResponse
 # ---------------------------------
 # Helpers / common aliases & types
 # ---------------------------------
 NonNegDec = Decimal
 
-
-# ================================
-# PenjualanItem Schemas (mirror PembelianItem)
-# ================================
 
 class PenjualanItemBase(BaseModel):
     item_id: Optional[int] = None

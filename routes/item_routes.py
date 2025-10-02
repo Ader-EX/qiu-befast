@@ -77,7 +77,7 @@ def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: Audi
         inventory_service.post_inventory_in(  # MUST use await
             item_id=new_item.id,
             source_type=SourceTypeEnum.ITEM,
-            source_id=f"{new_item.id}",
+            source_id=f"IMPORT-{new_item.sku}",
             qty=qty,
             unit_price=unit_price,
             trx_date=date.today(),
@@ -126,7 +126,7 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
             inventory_service.post_inventory_in(
                 item_id=item.id,
                 source_type=SourceTypeEnum.IN,
-                source_id=f"import-{item.id}",
+                source_id=f"IMPORT-{item.sku}",
                 qty=difference,
                 unit_price=item_data.get('price', Decimal('0')),
                 trx_date=date.today(),
@@ -136,7 +136,7 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
             inventory_service.post_inventory_out(
                 item_id=item.id,
                 source_type=SourceTypeEnum.OUT,
-                source_id=f"import-{item.id}",
+                source_id=f"IMPORT-{item.sku}",
                 qty=abs(difference),
                 trx_date=date.today(),
                 reason_code="Import update - stock decrease"
@@ -214,7 +214,7 @@ async def create_item(
             db.refresh(existing_item)
             return existing_item
         else:
-            raise HTTPException(status_code=400, detail="SKU already exists")
+            raise HTTPException(status_code=400, detail="SKU sudah ada")
 
     try:
         db_item = Item(
@@ -618,7 +618,7 @@ async def update_item(
 
     existing_item = db.query(Item).filter(Item.sku == sku, Item.id != item_id).first()
     if existing_item:
-        raise HTTPException(status_code=400, detail="SKU already exists")
+        raise HTTPException(status_code=400, detail="SKU sudah ada")
 
     try:
         db_item.type = type

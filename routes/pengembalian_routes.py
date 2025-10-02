@@ -22,7 +22,6 @@ from utils import generate_unique_record_number, get_current_user_name
 router = APIRouter()
 
 
-# NEW: Recalculate total_return from ACTIVE pengembalians, then reuse update_payment_status
 def recalc_return_and_update_payment_status(db: Session, reference_id: int, reference_type: PembayaranPengembalianType, no_pengembalian : str, user_name  : str) -> None:
     """
     1) Recalculate and persist total_return on the referenced record (Pembelian/Penjualan)

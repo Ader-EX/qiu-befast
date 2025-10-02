@@ -59,11 +59,10 @@ async def startup_event():
     print(f"📁 Items directory: {os.path.abspath(items_dir)}")
     print(f"📁 Static dir exists: {os.path.exists(STATIC_URL)}")
     print(f"📁 Items dir exists: {os.path.exists(items_dir)}")
-    
-    # List files in items directory
+
     if os.path.exists(items_dir):
         files = os.listdir(items_dir)
-        print(f"📄 Files in items dir: {files[:5]}")  # Show first 5 files
+        print(f"📄 Files in items dir: {files[:5]}")
     
     print("🚀 Starting FastAPI project")
 
