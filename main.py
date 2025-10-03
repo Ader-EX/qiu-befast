@@ -69,6 +69,9 @@ async def startup_event():
 origins = [
     "http://localhost:3000",
     "https://qiu-system.vercel.app",
+    "https://qiuparts.com",
+     "https://www.qiuparts.com",
+
 ]
 
 app.add_middleware(

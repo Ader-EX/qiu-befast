@@ -22,20 +22,38 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 def get_hashed_password(password: str) -> str:
     return password_context.hash(password)
 
+# def get_current_user_name(token: Optional[str] = Depends(oauth2_scheme)) -> str:
+#     # If no token is provided, return "KOSONGAN" for testing
+#     if token is None:
+#         raise HTTPException(status_code=401, detail="Update gagal, Silahkan logout terlebih dahulu")
+
+#     try:
+#         # Decode JWT token
+#         payload = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=[os.getenv("ALGORITHM")])
+#         username: str = payload.get("un")  # or "sub", depending on how your JWT is structured
+#         if username is None:
+#             raise HTTPException(status_code=401, detail="Update gagal, Silahkan logout terlebih dahulu")
+#         return username
+#     except jwt.exceptions.PyJWTError:
+#         raise HTTPException(status_code=401, detail="Update gagal, silahkan logout terlebih dahulu")
+    
+    
+
 def get_current_user_name(token: Optional[str] = Depends(oauth2_scheme)) -> str:
     # If no token is provided, return "KOSONGAN" for testing
     if token is None:
-        raise HTTPException(status_code=401, detail="Update gagal, Silahkan logout terlebih dahulu")
+        return "KOSONGAN"
 
     try:
         # Decode JWT token
         payload = jwt.decode(token, os.getenv("JWT_SECRET_KEY"), algorithms=[os.getenv("ALGORITHM")])
         username: str = payload.get("un")  # or "sub", depending on how your JWT is structured
         if username is None:
-            raise HTTPException(status_code=401, detail="Update gagal, Silahkan logout terlebih dahulu")
+            return "KOSONGAN"
         return username
     except jwt.exceptions.PyJWTError:
-        raise HTTPException(status_code=401, detail="Update gagal, silahkan logout terlebih dahulu")
+        return "KOSONGAN"
+    
 def verify_password(password: str, hashed_pass: str) -> bool:
     return password_context.verify(password, hashed_pass)
 
