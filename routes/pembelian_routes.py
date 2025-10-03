@@ -656,15 +656,23 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
     if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
         for pembelian_item in pembelian.pembelian_items:
             update_item_stock(db, pembelian_item.item_id, -pembelian_item.qty)
+            try :
+                inventory_service.post_inventory_out(
+                    item_id=pembelian_item.item_id,
+                    source_type=SourceTypeEnum.OUT,
+                    source_id=f"ROLLBACK_PEMBELIAN_ITEM:{pembelian_item.id}",
+                    qty=pembelian_item.qty,
+                    trx_date=date.today(),
+                    reason_code=f"Rollback Pembelian {pembelian.no_pembelian} to DRAFT"
+                )
+            except ValueError as e:
+                # Rollback the transaction and return error
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{str(e)}"
+                )
 
-            inventory_service.post_inventory_out(
-                item_id=pembelian_item.item_id,
-                source_type=SourceTypeEnum.OUT,
-                source_id=f"ROLLBACK_PEMBELIAN_ITEM:{pembelian_item.id}",
-                qty=pembelian_item.qty,
-                trx_date=date.today(),
-                reason_code=f"Rollback Pembelian {pembelian.no_pembelian} to DRAFT"
-            )
         
         pembelian.status_pembelian = StatusPembelianEnum.DRAFT
 
