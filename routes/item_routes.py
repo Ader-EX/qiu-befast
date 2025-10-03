@@ -377,8 +377,8 @@ async def import_items_from_excel(
             'Type': 'type',
             'Nama Item': 'name',
             'SKU': 'sku',
-            'Kategori 1': 'kategori_1',
-            'Kategori 2': 'kategori_2',
+            'Brand': 'brand',
+            'Jenis Barang': 'jenis_barang',
             'Jumlah Unit': 'jumlah_unit',
             'Harga Jual': 'harga_jual',
             'Satuan Unit': 'satuan_unit'
@@ -505,17 +505,17 @@ def _process_row(
     category_one_id = None
     category_two_id = None
 
-    if not pd.isna(row.get('kategori_1')) and str(row.get('kategori_1')).strip():
-        cat1_name = str(row['kategori_1']).lower().strip()
+    if not pd.isna(row.get('brand')) and str(row.get('brand')).strip():
+        cat1_name = str(row['brand']).lower().strip()
         category_one_id = categories_lookup.get(cat1_name)
         if not category_one_id:
-            raise ValueError(f"Brand '{row['kategori_1']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
+            raise ValueError(f"Brand '{row['brand']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
 
-    if not pd.isna(row.get('kategori_2')) and str(row.get('kategori_2')).strip():
-        cat2_name = str(row['kategori_2']).lower().strip()
+    if not pd.isna(row.get('jenis_barang')) and str(row.get('jenis_barang')).strip():
+        cat2_name = str(row['jenis_barang']).lower().strip()
         category_two_id = categories_lookup.get(cat2_name)
         if not category_two_id:
-            raise ValueError(f"Jenis Barang '{row['kategori_2']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
+            raise ValueError(f"Jenis Barang '{row['jenis_barang']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
 
     try:
         if pd.isna(row.get('harga_jual')) or str(row.get('harga_jual')).strip() == '':
