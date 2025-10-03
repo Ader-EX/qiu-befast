@@ -247,36 +247,6 @@ def get_items(
     return {"data": items_out, "total": total_count}
 
 
-def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: AuditService, user_name: str):
-    """Create a new item and post initial inventory."""
-    inventory_service = InventoryService(db)
-
-    new_item = Item(**item_data)
-    db.add(new_item)
-    db.flush()
-
-    if item_data.get('total_item', 0) > 0:
-        unit_price = item_data.get('price', Decimal('0'))
-        qty = item_data['total_item']
-
-        inventory_service.post_inventory_in(  # MUST use await
-            item_id=new_item.id,
-            source_type=SourceTypeEnum.ITEM,
-            source_id=f"IMPORT-{new_item.sku}",
-            qty=qty,
-            unit_price=unit_price,
-            trx_date=date.today(),
-            reason_code="Initial import"
-        )
-
-    audit_service.default_log(
-        entity_id=new_item.id,
-        entity_type=AuditEntityEnum.ITEM,
-        description=f"Data item {new_item.name} telah dibuat via import",
-        user_name=user_name,
-    )
-    return new_item
-
 def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_id: int, audit_service: AuditService, user_name: str):
     """Update an existing item without changing its code."""
     inventory_service = InventoryService(db)
@@ -299,11 +269,17 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
     new_total_item = item_data.get('total_item', 0)
     if new_total_item != old_total_item:
         difference = new_total_item - old_total_item
+        
+        # Generate unique source_id using timestamp to avoid duplicates
+        import time
+        timestamp = int(time.time() * 1000)  # milliseconds
+        unique_source_id = f"IMPORT-{item.sku}-{timestamp}"
+        
         if difference > 0:
             inventory_service.post_inventory_in(
                 item_id=item.id,
                 source_type=SourceTypeEnum.IN,
-                source_id=f"IMPORT-{item.sku}",
+                source_id=unique_source_id,  # Use unique ID
                 qty=difference,
                 unit_price=item_data.get('price', Decimal('0')),
                 trx_date=date.today(),
@@ -313,7 +289,7 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
             inventory_service.post_inventory_out(
                 item_id=item.id,
                 source_type=SourceTypeEnum.OUT,
-                source_id=f"IMPORT-{item.sku}",
+                source_id=unique_source_id,  # Use unique ID
                 qty=abs(difference),
                 trx_date=date.today(),
                 reason_code="Import update - stock decrease"
@@ -330,6 +306,42 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
     db.flush()
 
     return item
+
+
+def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: AuditService, user_name: str):
+    """Create a new item and post initial inventory."""
+    inventory_service = InventoryService(db)
+
+    new_item = Item(**item_data)
+    db.add(new_item)
+    db.flush()
+
+    if item_data.get('total_item', 0) > 0:
+        unit_price = item_data.get('price', Decimal('0'))
+        qty = item_data['total_item']
+        
+        # Generate unique source_id using timestamp
+        import time
+        timestamp = int(time.time() * 1000)  # milliseconds
+        unique_source_id = f"IMPORT-{new_item.sku}-{timestamp}"
+
+        inventory_service.post_inventory_in(
+            item_id=new_item.id,
+            source_type=SourceTypeEnum.ITEM,
+            source_id=unique_source_id,  # Use unique ID
+            qty=qty,
+            unit_price=unit_price,
+            trx_date=date.today(),
+            reason_code="Initial import"
+        )
+
+    audit_service.default_log(
+        entity_id=new_item.id,
+        entity_type=AuditEntityEnum.ITEM,
+        description=f"Data item {new_item.name} telah dibuat via import",
+        user_name=user_name,
+    )
+    return new_item
 
 @router.post("/import-excel", response_model=ImportResult)
 async def import_items_from_excel(
@@ -418,23 +430,16 @@ async def import_items_from_excel(
                     continue
 
 
-                # Create or update item
-               # In your main import loop:
-                if update_existing and item_data['sku'] in existing_skus:
-                    existing_item_id = existing_skus[item_data['sku']]  # This is already an int
-                    _update_existing_item(
-                        db, item_data, existing_item_id, audit_service, user_name  # Pass ID directly
-                    )
-                    result.warnings.append({
-                        'row': index + 2,
-                        'message': f"Updated existing item with SKU: {item_data['sku']}"
-                    })
+                existing_item = db.query(Item).filter(Item.sku == item_data['sku'], Item.deleted_at.is_(None)).first()
+                if update_existing and existing_item:
+                    _update_existing_item(db, item_data, existing_item.id, audit_service, user_name)
                 else:
-                    # Only generate code for NEW items
                     prefix = get_item_prefix(item_data['type'])
                     item_code = generate_unique_record_code(db, Item, prefix)
                     item_data['code'] = item_code
-                    _create_new_item(db, item_data, audit_service, user_name)
+                    new_item = _create_new_item(db, item_data, audit_service, user_name)
+                    existing_skus[item_data['sku']] = new_item.id
+
 
                 result.successful_imports += 1
 
