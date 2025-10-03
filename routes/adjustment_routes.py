@@ -8,6 +8,7 @@ from datetime import datetime, date, time
 from decimal import Decimal
 
 from database import get_db
+from models import InventoryLedger
 from models.AllAttachment import AllAttachment
 from models.AuditTrail import AuditEntityEnum
 from models.StockAdjustment import StockAdjustment, StockAdjustmentItem, AdjustmentTypeEnum, StatusStockAdjustmentEnum
@@ -35,7 +36,8 @@ def adjust_item_stock(
         adjustment_price: Decimal,
         no_adj: str,
         trx_date: date,
-        user_name: str
+        user_name: str,
+        adjustment_item_id: int  # ADD THIS PARAMETER
 ):
     """
     Helper function to adjust item stock and post to inventory ledger
@@ -49,24 +51,20 @@ def adjust_item_stock(
 
     old_stock = item.total_item
 
-    # Determine source type based on adjustment type
     if adjustment_type == AdjustmentTypeEnum.OUT:
         source_type = SourceTypeEnum.OUT
 
-        # Check sufficient stock
         if item.total_item < qty:
             raise HTTPException(
                 status_code=400,
                 detail=f"Insufficient stock for item {item.name}. Available: {item.total_item}, Required: {qty}"
             )
 
-        # Post OUT to inventory ledger
         inventory_service.post_inventory_out(
             item_id=item_id,
             source_type=source_type,
-            source_id=f"{no_adj}",
+            source_id=f"ADJUSTMENT_ITEM:{adjustment_item_id}",  # UNIQUE PER ITEM
             qty=qty,
-            trx_date=trx_date,
             reason_code=f"Stock Adjustment OUT: {no_adj}"
         )
 
@@ -76,14 +74,12 @@ def adjust_item_stock(
     else:  # IN
         source_type = SourceTypeEnum.IN
 
-        # Post IN to inventory ledger
         inventory_service.post_inventory_in(
             item_id=item_id,
             source_type=source_type,
-            source_id=f"{no_adj}",
+            source_id=f"ADJUSTMENT_ITEM:{adjustment_item_id}",  # UNIQUE PER ITEM
             qty=qty,
             unit_price=adjustment_price,
-            trx_date=trx_date,
             reason_code=f"Stock Adjustment IN: {no_adj}"
         )
 
@@ -92,7 +88,6 @@ def adjust_item_stock(
 
     new_stock = item.total_item
 
-    # Log the stock change
     audit_service.default_log(
         entity_id=item.id,
         entity_type=AuditEntityEnum.ITEM,
@@ -512,19 +507,15 @@ async def download_attachment(
         media_type=attachment.mime_type
     )
 
-
-
-@router.patch("/{adjustment_id}/rollback", status_code=status.HTTP_200_OK)
+@router.put("/{adjustment_id}/rollback", status_code=status.HTTP_200_OK)
 async def rollback_stock_adjustment(
         adjustment_id: int,
         db: Session = Depends(get_db),
         user_name: str = Depends(get_current_user_name)
 ):
-    """
-    Rolls back a Stock Adjustment from ACTIVE → DRAFT.
-    Reverses the stock changes and inventory ledger entries.
-    """
+    """Rolls back a Stock Adjustment from ACTIVE → DRAFT"""
     audit_service = AuditService(db)
+    inventory_service = InventoryService(db)
 
     adjustment = (
         db.query(StockAdjustment)
@@ -540,27 +531,67 @@ async def rollback_stock_adjustment(
     )
 
     if not adjustment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Stock adjustment not found"
-        )
+        raise HTTPException(status_code=404, detail="Stock adjustment not found")
 
     if adjustment.status_adjustment != StatusStockAdjustmentEnum.ACTIVE:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail="Only ACTIVE stock adjustments can be rolled back"
         )
 
     # Reverse stock changes for each item
     for adj_item in adjustment.stock_adjustment_items:
-        reverse_item_stock_adjustment(
-            db=db,
-            item_id=adj_item.item_id,
-            qty=adj_item.qty,
-            adjustment_type=adjustment.adjustment_type,
-            adjustment_price=Decimal(str(adj_item.adj_price)),
-            no_adj=adjustment.no_adjustment,
-            trx_date=date.today(),  # Use today's date for reversal
+        item = db.query(Item).filter(
+            Item.id == adj_item.item_id,
+            Item.is_deleted == False
+        ).first()
+
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Item {adj_item.item_id} not found")
+
+        old_stock = item.total_item
+
+        # Reverse the adjustment
+        if adjustment.adjustment_type == AdjustmentTypeEnum.OUT:
+            # Original was OUT, post IN to reverse
+            inventory_service.post_inventory_in(
+                item_id=adj_item.item_id,
+                source_type=SourceTypeEnum.IN,
+                source_id=f"ROLLBACK_ADJUSTMENT_ITEM:{adj_item.id}",  # Unique per item
+                qty=adj_item.qty,
+                unit_price=Decimal(str(adj_item.adj_price)),
+                trx_date=date.today(),
+                reason_code=f"Rollback Adjustment {adjustment.no_adjustment} to DRAFT"
+            )
+            item.total_item += adj_item.qty
+            action = "ditambahkan kembali"
+
+        else:  # IN
+            # Original was IN, post OUT to reverse
+            if item.total_item < adj_item.qty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot rollback - insufficient stock for {item.name}"
+                )
+
+            inventory_service.post_inventory_out(
+                item_id=adj_item.item_id,
+                source_type=SourceTypeEnum.OUT,
+                source_id=f"ROLLBACK_ADJUSTMENT_ITEM:{adj_item.id}",  # Unique per item
+                qty=adj_item.qty,
+                trx_date=date.today(),
+                reason_code=f"Rollback Adjustment {adjustment.no_adjustment} to DRAFT"
+            )
+            item.total_item -= adj_item.qty
+            action = "dikurangi kembali"
+
+        new_stock = item.total_item
+
+        # Log the reversal
+        audit_service.default_log(
+            entity_id=item.id,
+            entity_type=AuditEntityEnum.ITEM,
+            description=f"Stok item {item.name} {action} sebanyak {adj_item.qty} (dari {old_stock} menjadi {new_stock}) - Rollback: {adjustment.no_adjustment}",
             user_name=user_name
         )
 
@@ -568,14 +599,10 @@ async def rollback_stock_adjustment(
     adjustment.status_adjustment = StatusStockAdjustmentEnum.DRAFT
 
     # Audit log
-    total_qty = sum(item.qty for item in adjustment.stock_adjustment_items)
     audit_service.default_log(
         entity_id=adjustment.id,
         entity_type=AuditEntityEnum.STOCK_ADJUSTMENT,
-        description=(
-            f"Penyesuaian {adjustment.no_adjustment} status diubah "
-            f"dari ACTIVE → DRAFT, tipe: {adjustment.adjustment_type.value}"
-        ),
+        description=f"Penyesuaian {adjustment.no_adjustment} status diubah dari ACTIVE → DRAFT",
         user_name=user_name
     )
 
@@ -623,7 +650,8 @@ def finalize_stock_adjustment(
             adjustment_price=Decimal(str(adj_item.adj_price)),
             no_adj=adjustment.no_adjustment,
             trx_date=adjustment.adjustment_date,
-            user_name=user_name
+            user_name=user_name,
+            adjustment_item_id=adj_item.id
         )
 
     # Update status to ACTIVE
