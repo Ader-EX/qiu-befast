@@ -10,6 +10,27 @@ from pydantic import BaseModel, Field, field_validator, model_validator, AliasCh
 from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
 from schemas.ItemSchema import ItemResponse
 from schemas.KodeLambungSchema import KodeLambungResponse
+
+class CustomerResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    address: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+
+class WarehouseResponse(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+from schemas.TopSchemas import TopOut
+
 # ---------------------------------
 # Helpers / common aliases & types
 # ---------------------------------
@@ -170,7 +191,9 @@ class PenjualanResponse(BaseModel):
     warehouse_name: Optional[str] = None
     customer_name: Optional[str] = None
     top_name: Optional[str] = None
+    top_code: Optional[str] = None
     currency_name: Optional[str] = None
+    currency_code: Optional[str] = None
     kode_lambung_name: Optional[str] = None
 
     # Computed helpers from model
@@ -189,6 +212,9 @@ class PenjualanResponse(BaseModel):
         default=None,
         validation_alias=AliasChoices("kode_lambung_rel", "kode_lambung"),
     )
+    customer_rel: Optional[CustomerResponse]
+    warehouse_rel: Optional[WarehouseResponse]
+    top_rel: Optional[TopOut]
 
 
 class PenjualanStatusUpdate(BaseModel):
