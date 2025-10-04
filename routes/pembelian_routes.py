@@ -163,11 +163,10 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name: str, m
         "expense": expense,
         "total_price": total_price,
     }
-
-def finalize_pembelian(db: Session, pembelian_id: int, user_name : str):
-    audit_service  = AuditService(db)
+def finalize_pembelian(db: Session, pembelian_id: int, user_name: str):
+    audit_service = AuditService(db)
     inventory_service = InventoryService(db)
-    """Finalize pembelian and update stock"""
+    
     pembelian = db.query(Pembelian).options(
         selectinload(Pembelian.warehouse_rel),
         selectinload(Pembelian.vend_rel),
@@ -182,7 +181,6 @@ def finalize_pembelian(db: Session, pembelian_id: int, user_name : str):
     if pembelian.status_pembelian != StatusPembelianEnum.DRAFT:
         raise HTTPException(status_code=400, detail="Can only finalize DRAFT pembelians")
 
-    # Validate required fields
     if not pembelian.warehouse_id or not pembelian.vendor_id or not pembelian.sumberdana_id:
         raise HTTPException(status_code=400, detail="Warehouse and Vendor are required for finalization")
 
@@ -197,17 +195,17 @@ def finalize_pembelian(db: Session, pembelian_id: int, user_name : str):
 
         update_item_stock(db, pembelian_item.item_id, pembelian_item.qty)
 
+        # ✅ FIX: Make source_id unique per item
         inventory_service.post_inventory_in(
             item_id=pembelian_item.item_id,
             source_type=SourceTypeEnum.PEMBELIAN,
-            source_id=f"{pembelian_id}",
+            source_id=f"PO{pembelian_id}-ITM{pembelian_item.item_id}",  # ✅ Readable + Unique
             qty=pembelian_item.qty,
             unit_price=Decimal(str(pembelian_item.unit_price)),
             trx_date=pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date,
             reason_code=f"Pembelian {pembelian.no_pembelian}"
         )
 
-    # Update status
     pembelian.status_pembelian = StatusPembelianEnum.ACTIVE
 
     audit_service.default_log(
@@ -591,31 +589,34 @@ async def update_pembelian(
                 db.delete(pi)
                 items_changed = True
 
-        # Apply stock adjustments if pembelian is finalized (ACTIVE/PROCESSED)
-        # For DRAFT pembelians, we don't touch stock until finalization
         if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
             trx_date = pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date
+            
             for item_id, qty_change in stock_adjustments:
                 if qty_change != 0:
                     update_item_stock(db, item_id, qty_change)
 
                 if qty_change > 0:
-                    # Need unit_price — fetch from the updated line:
+                    # Increase stock
                     pi = next((x for x in pembelian.pembelian_items if x.item_id == item_id), None)
+                    
+                    # ✅ FIX: Use unique source_id per item
                     inventory_service.post_inventory_in(
                         item_id=item_id,
                         source_type=SourceTypeEnum.PEMBELIAN,
-                        source_id=f"{pembelian_id}",
+                        source_id=f"PO{pembelian_id}-ITM{item_id}-UPD",  # ✅ Unique identifier
                         qty=qty_change,
                         unit_price=Decimal(str(pi.unit_price)) if pi else Decimal("0"),
                         trx_date=trx_date,
                         reason_code=f"Pembelian {pembelian.no_pembelian} updated"
                     )
                 else:
+                    # Decrease stock
+                    # ✅ FIX: Use unique source_id per item
                     inventory_service.post_inventory_out(
                         item_id=item_id,
                         source_type=SourceTypeEnum.OUT,
-                        source_id=f"{pembelian_id}",
+                        source_id=f"PO{pembelian_id}-ITM{item_id}-RED",  # ✅ Unique identifier
                         qty=abs(qty_change),
                         trx_date=trx_date,
                         reason_code=f"Pembelian {pembelian.no_pembelian} quantity reduced"

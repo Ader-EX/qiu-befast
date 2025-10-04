@@ -161,7 +161,7 @@ class InventoryService:
             cumulative_qty=new_cumulative_qty,
             moving_avg_cost=current_moving_avg,
             cumulative_value=new_cumulative_value,
-            trx_date=trx_dt,     # <-- always now
+            trx_date=trx_dt,     
             order_key=order_key,
             reason_code=reason_code,
             voided=False
