@@ -345,11 +345,11 @@ def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: Audi
 
 @router.post("/import-excel", response_model=ImportResult)
 async def import_items_from_excel(
+        db: Session = Depends(get_db),
         file: UploadFile = File(...),
         skip_on_error: bool = Query(True, description="Skip rows with errors instead of failing completely"),
         update_existing: bool = Query(False, description="Update existing items if SKU already exists"),
         default_item_type: ItemTypeEnum = Query(ItemTypeEnum.FINISH_GOOD, description="Default item type if not specified"),
-        db: Session = Depends(get_db),
         user_name: str = Depends(get_current_user_name)
 ):
     """
