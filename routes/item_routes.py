@@ -180,8 +180,6 @@ async def create_item(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"{str(e)}")
-
-
 @router.get("", response_model=PaginatedResponse[ItemResponse])
 def get_items(
         request: Request,
@@ -204,7 +202,8 @@ def get_items(
         joinedload(Item.category_two_rel),
         joinedload(Item.satuan_rel),
         joinedload(Item.attachments),
-    ).order_by(Item.created_at.desc())
+    )
+    # Remove the .order_by(Item.created_at.desc()) from here
     
     if contains_deleted is False:
         query = query.filter(Item.is_deleted == False)
@@ -226,8 +225,8 @@ def get_items(
     if from_date and to_date:
         query = query.filter(
             Item.created_at.between(
-                datetime.combine(from_date, Item.min),
-                datetime.combine(to_date, Item.max),
+                datetime.combine(from_date, time.min),
+                datetime.combine(to_date, time.max),
             )
         )
     elif from_date:
@@ -235,9 +234,13 @@ def get_items(
     elif to_date:
         query = query.filter(Item.created_at <= datetime.combine(to_date, time.max))
 
+    # Apply sorting - either custom or default
     if sortBy:
         sort_column = getattr(Item, sortBy)
         query = query.order_by(sort_column.desc() if sortOrder == "desc" else sort_column.asc())
+    else:
+        # Default sorting when no sortBy is specified
+        query = query.order_by(Item.created_at.desc())
 
     total_count = query.count()
     paginated_data = query.offset((page - 1) * rowsPerPage).limit(rowsPerPage).all()
@@ -245,7 +248,6 @@ def get_items(
     items_out = [construct_item_response(item, request) for item in paginated_data]
 
     return {"data": items_out, "total": total_count}
-
 
 def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_id: int, audit_service: AuditService, user_name: str):
     """Update an existing item without changing its code."""
