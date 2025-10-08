@@ -61,7 +61,9 @@ def create_access_token(subject: Union[str, Any],name : str, expires_delta: int 
         expires_delta = datetime.now() + timedelta(minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES",600)))
 
 
-    to_encode = {"exp": expires_delta, "sub": str(subject), "un": name}
+    # to_encode = {"exp": expires_delta, "sub": str(subject), "un": name}
+    to_encode = { "sub": str(subject), "un": name}
+    
     encoded_jwt = jwt.encode(to_encode, os.getenv("JWT_SECRET_KEY"), os.getenv("ALGORITHM"))
 
     return encoded_jwt
@@ -72,7 +74,9 @@ def create_refresh_token(subject: Union[str, Any],name : str, expires_delta: int
     else:
         expires_delta = datetime.now() + timedelta(minutes=600)
 
-    to_encode = {"exp": expires_delta, "sub": str(subject), "un": name}
+    # to_encode = {"exp": expires_delta, "sub": str(subject), "un": name}
+    
+    to_encode = {"sub": str(subject), "un": name}
     encoded_jwt = jwt.encode(to_encode, os.getenv("JWT_REFRESH_SECRET_KEY"), os.getenv("ALGORITHM"))
     return encoded_jwt
 
