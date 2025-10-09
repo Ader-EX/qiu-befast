@@ -40,6 +40,8 @@ class ItemBase(BaseModel):
     name: str
     sku: str
     total_item: int = 0
+    min_item: int = 0
+    modal_price : float  = 0
     price: float
     is_active: bool
 

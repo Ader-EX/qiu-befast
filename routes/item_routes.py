@@ -1,36 +1,55 @@
-from datetime import datetime, date, time
+# Standard Library Imports
+import io
+import os
+import shutil
+import uuid
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional
 
+# ---
+
+# Third-Party Imports
 import pandas as pd
-from fastapi import APIRouter, Depends, Form, Request, UploadFile, File, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Query,
+    Request,
+    UploadFile,
+)
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.worksheet.datavalidation import DataValidation
+from pydantic import BaseModel  # Added BaseModel from the duplicates
 from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import Session, joinedload
 from starlette.exceptions import HTTPException
-import shutil
-import os
-import uuid
+from starlette.responses import StreamingResponse
 
+# ---
+
+# Local/Application-Specific Imports
+from database import get_db
+from models.AllAttachment import AllAttachment, ParentType
 from models.AuditTrail import AuditEntityEnum
 from models.InventoryLedger import SourceTypeEnum
 from models.Item import Item
-from database import get_db
-from models.AllAttachment import AllAttachment, ParentType
 from routes.category_routes import _build_categories_lookup
 from routes.satuan_routes import _build_satuans_lookup
 from schemas.CategorySchemas import CategoryOut
 from schemas.ItemSchema import ItemResponse, ItemTypeEnum
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.SatuanSchemas import SatuanOut
-import pandas as pd
-import io
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel
-from decimal import Decimal
 from services.audit_services import AuditService
 from services.inventoryledger_services import InventoryService
-from utils import generate_unique_record_code, soft_delete_record,get_current_user_name
-
+from utils import (
+    generate_unique_record_code,
+    get_current_user_name,
+    soft_delete_record,
+)
 router = APIRouter()
 
 NEXT_PUBLIC_UPLOAD_DIR = os.getenv("UPLOAD_DIR", default="uploads/items")
@@ -88,7 +107,9 @@ async def create_item(
         name: str = Form(...),
         sku: str = Form(...),
         total_item: int = Form(0),
+        min_item: int = Form(0),
         price: float = Form(...),
+        modal_price: float = Form(...),
         is_active: bool = Form(True),
         category_one: Optional[int] = Form(None),
         category_two: Optional[int] = Form(None),
@@ -111,12 +132,13 @@ async def create_item(
             existing_item.code = generate_unique_record_code(db, Item, pattern)
             existing_item.name = name
             existing_item.total_item = total_item
+            existing_item.min_item = min_item
             existing_item.price = price
+            existing_item.modal_price = modal_price
             existing_item.is_active = is_active
             existing_item.category_one = category_one
             existing_item.category_two = category_two
             existing_item.satuan_id = satuan_id
-
             existing_item.is_deleted = False
             existing_item.deleted_at = None
             db.commit()
@@ -132,12 +154,13 @@ async def create_item(
             code=generate_unique_record_code(db, Item, pattern),
             sku=sku,
             total_item=total_item,
+            min_item=min_item,
             price=price,
+            modal_price=modal_price,
             is_active=is_active,
             category_one=category_one,
             category_two=category_two,
             satuan_id=satuan_id,
-
         )
 
         db.add(db_item)
@@ -345,6 +368,202 @@ def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: Audi
     )
     return new_item
 
+@router.get("/template/download")
+async def download_item_template(format: str = "xlsx"):
+    """
+    Download item import template in Excel format.
+
+    Features:
+    - Proper number formatting for prices and quantities
+    - Data validation dropdowns for Type column
+    - Helper notes for field usage
+    - UTF-8 encoding support
+    """
+
+    if format.lower() != "xlsx":
+        raise HTTPException(
+            status_code=400,
+            detail="Only xlsx format is supported. Use format=xlsx"
+        )
+
+    try:
+        # Create workbook with two sheets
+        wb = Workbook()
+
+        # Sheet 1: Main template
+        ws_template = wb.active
+        ws_template.title = "Item_Template"
+
+        # Sheet 2: Dropdown reference
+        ws_dropdown = wb.create_sheet("Dropdown_Reference")
+
+        # === SHEET 1: Item_Template ===
+
+        # Define headers
+        headers = [
+            "Type",
+            "Nama Item",
+            "SKU",
+            "Brand",
+            "Jenis Barang",
+            "Jumlah Unit",
+            "Harga Modal",
+            "Harga Jual",
+            "Satuan Unit"
+        ]
+
+        # Style definitions
+        header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+        header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        note_font = Font(name='Calibri', size=9, italic=True, color='7F7F7F')
+        note_fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
+
+        border_thin = Border(
+            left=Side(style='thin', color='D0D0D0'),
+            right=Side(style='thin', color='D0D0D0'),
+            top=Side(style='thin', color='D0D0D0'),
+            bottom=Side(style='thin', color='D0D0D0')
+        )
+
+        # Write headers (Row 1)
+        for col_idx, header in enumerate(headers, start=1):
+            cell = ws_template.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = border_thin
+
+        # Write helper notes (Row 2)
+        notes = [
+            "Finish Good / Raw Material / Service",
+            "Nama produk/barang (wajib diisi)",
+            "Kode unik produk (wajib diisi, tidak boleh duplikat)",
+            "Merek produk (opsional, harus sudah terdaftar)",
+            "Kategori barang (opsional, harus sudah terdaftar)",
+            "Jumlah stok awal (angka, default: 0)",
+            "Harga pokok/modal (angka, default: 0)",
+            "Harga jual (angka, wajib diisi)",
+            "Satuan unit (wajib diisi, harus sudah terdaftar, contoh: pcs, kg, box)"
+        ]
+
+        for col_idx, note in enumerate(notes, start=1):
+            cell = ws_template.cell(row=2, column=col_idx, value=note)
+            cell.font = note_font
+            cell.fill = note_fill
+            cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+            cell.border = border_thin
+
+        # Set column widths
+        column_widths = {
+            'A': 18,  # Type
+            'B': 30,  # Nama Item
+            'C': 15,  # SKU
+            'D': 15,  # Brand
+            'E': 18,  # Jenis Barang
+            'F': 14,  # Jumlah Unit
+            'G': 15,  # Harga Modal
+            'H': 15,  # Harga Jual
+            'I': 15   # Satuan Unit
+        }
+
+        for col, width in column_widths.items():
+            ws_template.column_dimensions[col].width = width
+
+        # Set row heights
+        ws_template.row_dimensions[1].height = 30
+        ws_template.row_dimensions[2].height = 45
+
+        # Add sample data (Row 3) with proper formatting
+        sample_data = [
+            "Finish Good",
+            "Contoh Produk A",
+            "SKU-001",
+            "Brand A",
+            "Elektronik",
+            100,
+            50000,
+            75000,
+            "pcs"
+        ]
+
+        for col_idx, value in enumerate(sample_data, start=1):
+            cell = ws_template.cell(row=3, column=col_idx, value=value)
+            cell.border = border_thin
+
+            # Apply number format to numeric columns
+            if col_idx in [6, 7, 8]:  # Jumlah Unit, Harga Modal, Harga Jual
+                cell.number_format = '#,##0'
+
+        # Format numeric columns for the entire range (rows 3-1000)
+        for row_idx in range(3, 1001):
+            # Jumlah Unit (F)
+            ws_template.cell(row=row_idx, column=6).number_format = '#,##0'
+            # Harga Modal (G)
+            ws_template.cell(row=row_idx, column=7).number_format = '#,##0'
+            # Harga Jual (H)
+            ws_template.cell(row=row_idx, column=8).number_format = '#,##0'
+
+        # === SHEET 2: Dropdown_Reference ===
+
+        # Add dropdown values
+        dropdown_values = ["Finish Good", "Raw Material", "Service"]
+
+        ws_dropdown.cell(row=1, column=1, value="Item Types")
+        ws_dropdown.cell(row=1, column=1).font = Font(bold=True)
+
+        for idx, value in enumerate(dropdown_values, start=2):
+            ws_dropdown.cell(row=idx, column=1, value=value)
+
+        ws_dropdown.column_dimensions['A'].width = 20
+
+        # === DATA VALIDATION for Type column ===
+
+        # Create data validation for Type column
+        dv = DataValidation(
+            type="list",
+            formula1="Dropdown_Reference!$A$2:$A$4",
+            allow_blank=True
+        )
+        dv.error = "Pilih salah satu: Finish Good, Raw Material, atau Service"
+        dv.errorTitle = "Input Tidak Valid"
+        dv.prompt = "Pilih tipe item dari dropdown"
+        dv.promptTitle = "Tipe Item"
+
+        # Apply validation to Type column (A3:A1000)
+        ws_template.add_data_validation(dv)
+        dv.add("A3:A1000")
+
+        # Freeze panes (freeze first 2 rows)
+        ws_template.freeze_panes = "A3"
+
+        # Hide Dropdown_Reference sheet
+        ws_dropdown.sheet_state = 'hidden'
+
+        # Save to BytesIO
+        excel_file = io.BytesIO()
+        wb.save(excel_file)
+        excel_file.seek(0)
+
+        # Return as streaming response
+        headers = {
+            'Content-Disposition': 'attachment; filename="Template_Import_Item.xlsx"',
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        }
+
+        return StreamingResponse(
+            excel_file,
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers=headers
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating Excel template: {str(e)}"
+        )
+
 @router.post("/import-excel", response_model=ImportResult)
 async def import_items_from_excel(
         db: Session = Depends(get_db),
@@ -358,11 +577,13 @@ async def import_items_from_excel(
     Import items from Excel/CSV file using the template format.
 
     Expected columns:
+    - Type (optional, uses default if not provided)
     - Nama Item (required)
     - SKU (required, unique)
-    - Kategori 1 (optional, by name)
-    - Kategori 2 (optional, by name)
+    - Brand (optional, by name)
+    - Jenis Barang (optional, by name)
     - Jumlah Unit (optional, defaults to 0)
+    - Harga Modal (optional, defaults to 0)
     - Harga Jual (required)
     - Satuan Unit (required, by name)
 
@@ -371,22 +592,35 @@ async def import_items_from_excel(
 
     # Validate file type
     if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
-        raise HTTPException(status_code=400, detail="File must be Excel (.xlsx, .xls) or CSV (.csv)")
+        raise HTTPException(
+            status_code=400,
+            detail="File must be Excel (.xlsx, .xls) or CSV (.csv)"
+        )
 
     try:
         # Read file content
         content = await file.read()
-
         audit_service = AuditService(db)
 
         # Parse based on file type
         if file.filename.endswith('.csv'):
-            df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep=None, engine='python')
+            df = pd.read_csv(
+                io.StringIO(content.decode('utf-8')),
+                sep=None,
+                engine='python'
+            )
         else:
-            df = pd.read_excel(io.BytesIO(content))
+            # Read Excel, skip the note row (row 2)
+            df = pd.read_excel(
+                io.BytesIO(content),
+                header=0,  # Headers are in row 1 (index 0)
+                skiprows=[1]  # Skip row 2 (index 1) which contains notes
+            )
 
+        # Clean column names
         df.columns = df.columns.str.strip()
 
+        # Column mapping to match new template
         column_mapping = {
             'Type': 'type',
             'Nama Item': 'name',
@@ -394,11 +628,13 @@ async def import_items_from_excel(
             'Brand': 'brand',
             'Jenis Barang': 'jenis_barang',
             'Jumlah Unit': 'jumlah_unit',
+            'Harga Modal': 'harga_modal',
             'Harga Jual': 'harga_jual',
             'Satuan Unit': 'satuan_unit'
         }
 
-        required_columns = ['Nama Item', 'SKU', 'Satuan Unit']
+        # Required columns
+        required_columns = ['Nama Item', 'SKU', 'Satuan Unit', 'Harga Jual']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             raise HTTPException(
@@ -406,22 +642,32 @@ async def import_items_from_excel(
                 detail=f"Missing required columns: {', '.join(missing_columns)}"
             )
 
+        # Rename columns
         df = df.rename(columns=column_mapping)
 
+        # Build lookup dictionaries
         categories_lookup = _build_categories_lookup(db)
         satuans_lookup = _build_satuans_lookup(db)
         existing_skus = _get_existing_skus(db)
 
-        # Process each row
+        # Initialize result
         result = ImportResult(
-            total_processed=len(df),
+            total_processed=0,
             successful_imports=0,
             failed_imports=0,
             errors=[],
             warnings=[]
         )
 
-        for index, row in df.iterrows():
+        # Filter out empty rows (where name and sku are both empty)
+        df_filtered = df[
+            ~(df['name'].isna() & df['sku'].isna())
+        ].copy()
+
+        result.total_processed = len(df_filtered)
+
+        # Process each row
+        for index, row in df_filtered.iterrows():
             try:
                 item_data = _process_row(
                     row, index, categories_lookup, satuans_lookup,
@@ -431,25 +677,35 @@ async def import_items_from_excel(
                 if item_data is None:
                     continue
 
+                # Check if item exists
+                existing_item = db.query(Item).filter(
+                    Item.sku == item_data['sku'],
+                    Item.deleted_at.is_(None)
+                ).first()
 
-                existing_item = db.query(Item).filter(Item.sku == item_data['sku'], Item.deleted_at.is_(None)).first()
                 if update_existing and existing_item:
-                    _update_existing_item(db, item_data, existing_item.id, audit_service, user_name)
+                    _update_existing_item(
+                        db, item_data, existing_item.id,
+                        audit_service, user_name
+                    )
                 else:
+                    # Generate unique code
                     prefix = get_item_prefix(item_data['type'])
                     item_code = generate_unique_record_code(db, Item, prefix)
                     item_data['code'] = item_code
-                    new_item = _create_new_item(db, item_data, audit_service, user_name)
+
+                    # Create new item
+                    new_item = _create_new_item(
+                        db, item_data, audit_service, user_name
+                    )
                     existing_skus[item_data['sku']] = new_item.id
 
-
                 result.successful_imports += 1
-
 
             except Exception as e:
                 error_msg = str(e)
                 result.errors.append({
-                    'row': index + 2,
+                    'row': index + 3,  # +3 because: +1 for header, +1 for note row, +1 for 1-based indexing
                     'sku': row.get('sku', 'N/A'),
                     'error': error_msg
                 })
@@ -459,7 +715,7 @@ async def import_items_from_excel(
                     db.rollback()
                     raise HTTPException(
                         status_code=400,
-                        detail=f"{error_msg}"
+                        detail=f"Row {index + 3}: {error_msg}"
                     )
 
         # Commit all changes
@@ -468,18 +724,30 @@ async def import_items_from_excel(
         return result
 
     except pd.errors.EmptyDataError:
-        raise HTTPException(status_code=400, detail="File is empty or has no data")
+        raise HTTPException(
+            status_code=400,
+            detail="File is empty or has no data"
+        )
     except pd.errors.ParserError as e:
-        raise HTTPException(status_code=400, detail=f"Error parsing file: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error parsing file: {str(e)}"
+        )
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"{str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"{str(e)}"
+        )
 
 
 def _get_existing_skus(db: Session) -> Dict[str, int]:
     """Get existing SKUs to check for duplicates."""
-    items = db.query(Item.sku, Item.id).filter(Item.deleted_at.is_(None)).all()
+    items = db.query(Item.sku, Item.id).filter(
+        Item.deleted_at.is_(None)
+    ).all()
     return {item.sku: item.id for item in items}
+
 
 def _process_row(
         row,
@@ -490,6 +758,9 @@ def _process_row(
         default_item_type: ItemTypeEnum,
         update_existing: bool
 ) -> Optional[Dict[str, Any]]:
+    """Process a single row from the Excel file."""
+
+    # Validate required fields
     if pd.isna(row.get('name')) or not str(row.get('name')).strip():
         raise ValueError("Nama Item is required")
 
@@ -501,52 +772,85 @@ def _process_row(
 
     sku = str(row['sku']).strip()
 
+    # Check for duplicate SKU
     if sku in existing_skus and not update_existing:
         raise ValueError(f"SKU '{sku}' already exists.")
 
+    # Validate Satuan Unit
     satuan_symbol = str(row['satuan_unit']).lower().strip()
     satuan_id = satuans_lookup.get(satuan_symbol)
     if not satuan_id:
-        raise ValueError(f"Satuan '{row['satuan_unit']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
+        raise ValueError(
+            f"Satuan '{row['satuan_unit']}' tidak ditemukan. "
+            f"Tambahkan entri terlebih dahulu."
+        )
 
+    # Process Brand (Category One)
     category_one_id = None
-    category_two_id = None
-
     if not pd.isna(row.get('brand')) and str(row.get('brand')).strip():
         cat1_name = str(row['brand']).lower().strip()
         category_one_id = categories_lookup.get(cat1_name)
         if not category_one_id:
-            raise ValueError(f"Brand '{row['brand']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
+            raise ValueError(
+                f"Brand '{row['brand']}' tidak ditemukan. "
+                f"Tambahkan entri terlebih dahulu."
+            )
 
+    # Process Jenis Barang (Category Two)
+    category_two_id = None
     if not pd.isna(row.get('jenis_barang')) and str(row.get('jenis_barang')).strip():
         cat2_name = str(row['jenis_barang']).lower().strip()
         category_two_id = categories_lookup.get(cat2_name)
         if not category_two_id:
-            raise ValueError(f"Jenis Barang '{row['jenis_barang']}' tidak ditemukan. tambahkan entri terlebih dahulu.")
+            raise ValueError(
+                f"Jenis Barang '{row['jenis_barang']}' tidak ditemukan. "
+                f"Tambahkan entri terlebih dahulu."
+            )
 
+    # Process Harga Modal (Cost Price)
+    try:
+        if pd.isna(row.get('harga_modal')) or str(row.get('harga_modal')).strip() == '':
+            modal_price = Decimal('0')
+        else:
+            # Handle both comma and dot as decimal separators
+            cost_value = str(row['harga_modal']).replace(',', '.')
+            modal_price = Decimal(cost_value)
+            if modal_price < 0:
+                raise ValueError("Harga Modal must be positive")
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"Invalid Harga Modal: {row.get('harga_modal', 'N/A')}")
+
+    # Process Harga Jual (Selling Price)
     try:
         if pd.isna(row.get('harga_jual')) or str(row.get('harga_jual')).strip() == '':
-            price = Decimal('0')
+            selling_price = Decimal('0')
         else:
-            price = Decimal(str(row['harga_jual']).replace(',', '.'))
-            if price < 0:
+            # Handle both comma and dot as decimal separators
+            sell_value = str(row['harga_jual']).replace(',', '.')
+            selling_price = Decimal(sell_value)
+            if selling_price < 0:
                 raise ValueError("Harga Jual must be positive")
-    except (ValueError, TypeError):
-        raise ValueError(f"Invalid Harga Jual: {row['harga_jual']}")
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"Invalid Harga Jual: {row.get('harga_jual', 'N/A')}")
 
+    # Process Jumlah Unit (Quantity)
     total_item = 0
     if not pd.isna(row.get('jumlah_unit')):
         try:
             total_item = int(float(row['jumlah_unit']))
+            if total_item < 0:
+                raise ValueError("Jumlah Unit must be non-negative")
         except (ValueError, TypeError):
-            raise ValueError(f"Invalid Jumlah Unit: {row['jumlah_unit']}")
+            raise ValueError(f"Invalid Jumlah Unit: {row.get('jumlah_unit', 'N/A')}")
 
-    type_value = str(row.get('type')).strip().lower() if row.get('type') else None
+    # Process Type column
+    type_value = str(row.get('type', '')).strip().lower() if not pd.isna(row.get('type')) else None
     type_mapping = {
         "finish good": ItemTypeEnum.FINISH_GOOD,
         "raw material": ItemTypeEnum.RAW_MATERIAL,
         "service": ItemTypeEnum.SERVICE,
     }
+
     if type_value and type_value in type_mapping:
         item_type = type_mapping[type_value]
     else:
@@ -555,17 +859,15 @@ def _process_row(
     return {
         'name': str(row['name']).strip(),
         'sku': sku,
-        'code': str(row.get('code', '')).strip() if not pd.isna(row.get('code')) else None,
         'type': item_type,
         'total_item': total_item,
-        'price': price,
+        'modal_price': modal_price,  # Harga Modal
+        'price': selling_price,    # Harga Jual
         'category_one': category_one_id,
         'category_two': category_two_id,
         'satuan_id': satuan_id,
         'is_active': True
     }
-
-
 @router.put("/{item_id}", response_model=ItemResponse)
 async def update_item(
         request: Request,
@@ -574,7 +876,9 @@ async def update_item(
         name: str = Form(...),
         sku: str = Form(...),
         total_item: int = Form(0),
+        min_item: int = Form(0),
         price: float = Form(...),
+        modal_price: float = Form(...),
         is_active: bool = Form(True),
         category_one: Optional[int] = Form(None),
         category_two: Optional[int] = Form(None),
@@ -625,7 +929,10 @@ async def update_item(
         db_item.name = name
         db_item.sku = sku
         db_item.total_item = total_item
+
+        db_item.min_item =min_item
         db_item.price = price
+        db_item.modal_price = modal_price
         db_item.is_active = is_active
         db_item.category_one = category_one
         db_item.category_two = category_two
@@ -735,6 +1042,9 @@ def construct_item_response(item: Item, request: Request) -> Dict[str, Any]:
         "name": item.name,
         "sku": item.sku,
         "code": item.code,
+
+        "min_item": item.min_item,
+        "modal_price": item.modal_price,
         "total_item": item.total_item,
         "price": item.price,
         "is_active": item.is_active,

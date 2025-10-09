@@ -76,7 +76,6 @@ class InventoryService:
         trx_date: Optional[datetime] = None,   # <-- keep param for signature
         reason_code: Optional[str] = None
     ) -> InventoryLedger:
-        # FORCE: always use "now", ignore any caller-provided date
         trx_dt = self._now()
 
         if qty <= 0:
