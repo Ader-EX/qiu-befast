@@ -195,11 +195,10 @@ def finalize_pembelian(db: Session, pembelian_id: int, user_name: str):
 
         update_item_stock(db, pembelian_item.item_id, pembelian_item.qty)
 
-        # ✅ FIX: Make source_id unique per item
         inventory_service.post_inventory_in(
             item_id=pembelian_item.item_id,
             source_type=SourceTypeEnum.PEMBELIAN,
-            source_id=f"PO{pembelian_id}-ITM{pembelian_item.item_id}",  # ✅ Readable + Unique
+            source_id=f"{pembelian_id}",
             qty=pembelian_item.qty,
             unit_price=Decimal(str(pembelian_item.unit_price)),
             trx_date=pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date,
@@ -604,7 +603,7 @@ async def update_pembelian(
                     inventory_service.post_inventory_in(
                         item_id=item_id,
                         source_type=SourceTypeEnum.PEMBELIAN,
-                        source_id=f"PO{pembelian_id}-ITM{item_id}-UPD",  # ✅ Unique identifier
+                        source_id=f"{pembelian_id}",  # ✅ Unique identifier
                         qty=qty_change,
                         unit_price=Decimal(str(pi.unit_price)) if pi else Decimal("0"),
                         trx_date=trx_date,

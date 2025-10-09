@@ -290,15 +290,11 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
         if field in item_data:
             setattr(item, field, item_data[field])
 
-    # Handle inventory changes
     new_total_item = item_data.get('total_item', 0)
     if new_total_item != old_total_item:
         difference = new_total_item - old_total_item
-        
-        # Generate unique source_id using timestamp to avoid duplicates
-        import time
-        timestamp = int(time.time() * 1000)  # milliseconds
-        unique_source_id = f"IMPORT-{item.sku}-{timestamp}"
+
+        unique_source_id = f"IMPORT-{item.sku}"
         
         if difference > 0:
             inventory_service.post_inventory_in(
@@ -345,15 +341,12 @@ def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: Audi
         unit_price = item_data.get('price', Decimal('0'))
         qty = item_data['total_item']
         
-        # Generate unique source_id using timestamp
-        import time
-        timestamp = int(time.time() * 1000)  # milliseconds
-        unique_source_id = f"IMPORT-{new_item.sku}-{timestamp}"
+        unique_source_id = f"IMPORT-{new_item.sku}"
 
         inventory_service.post_inventory_in(
             item_id=new_item.id,
             source_type=SourceTypeEnum.ITEM,
-            source_id=unique_source_id,  # Use unique ID
+            source_id=unique_source_id,
             qty=qty,
             unit_price=unit_price,
             trx_date=date.today(),

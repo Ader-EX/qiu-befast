@@ -63,7 +63,7 @@ def adjust_item_stock(
         inventory_service.post_inventory_out(
             item_id=item_id,
             source_type=source_type,
-            source_id=f"ADJUSTMENT_ITEM:{adjustment_item_id}",  # UNIQUE PER ITEM
+            source_id=f"{no_adj}",  # UNIQUE PER ITEM
             qty=qty,
             reason_code=f"Stock Adjustment OUT: {no_adj}"
         )
@@ -77,7 +77,7 @@ def adjust_item_stock(
         inventory_service.post_inventory_in(
             item_id=item_id,
             source_type=source_type,
-            source_id=f"ADJUSTMENT_ITEM:{adjustment_item_id}",  # UNIQUE PER ITEM
+            source_id=f"{no_adj}",  # UNIQUE PER ITEM
             qty=qty,
             unit_price=adjustment_price,
             reason_code=f"Stock Adjustment IN: {no_adj}"
@@ -557,7 +557,7 @@ async def rollback_stock_adjustment(
             inventory_service.post_inventory_in(
                 item_id=adj_item.item_id,
                 source_type=SourceTypeEnum.IN,
-                source_id=f"ROLLBACK_ADJUSTMENT_ITEM:{adj_item.id}",  # Unique per item
+                source_id=f"{adjustment.no_adjustment}",  # Unique per item
                 qty=adj_item.qty,
                 unit_price=Decimal(str(adj_item.adj_price)),
                 trx_date=date.today(),
@@ -577,7 +577,7 @@ async def rollback_stock_adjustment(
             inventory_service.post_inventory_out(
                 item_id=adj_item.item_id,
                 source_type=SourceTypeEnum.OUT,
-                source_id=f"ROLLBACK_ADJUSTMENT_ITEM:{adj_item.id}",  # Unique per item
+                source_id=f"{adjustment.no_adjustment}",  # Unique per item
                 qty=adj_item.qty,
                 trx_date=date.today(),
                 reason_code=f"Rollback Adjustment {adjustment.no_adjustment} to DRAFT"
