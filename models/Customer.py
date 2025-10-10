@@ -1,7 +1,7 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime, DECIMAL
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
 from database import Base
 from sqlalchemy.orm import relationship
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 

@@ -1,10 +1,10 @@
 
 import os
 from typing import Optional
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime, Enum, func
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, DateTime, Enum, func
 from database import Base
 from sqlalchemy.orm import relationship
-from datetime import datetime
+
 import enum
 
 from models.mixin.SoftDeleteMixin import SoftDeleteMixin

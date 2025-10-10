@@ -210,6 +210,8 @@ def get_items(
         page: int = 1,
         rowsPerPage: int = 5,
         search_key: Optional[str] = None,
+
+        vendor: Optional[str] = None,
         item_type: Optional[ItemTypeEnum] = None,
         
         contains_deleted: Optional[bool] = False,
@@ -238,6 +240,9 @@ def get_items(
                 Item.sku.ilike(f"%{search_key}%"),
             )
         )
+
+    if vendor:
+        query = query.filter(Item.vendor_rel)
 
     if item_type:
         query = query.filter(Item.type == item_type)

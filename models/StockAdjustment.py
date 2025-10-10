@@ -7,15 +7,6 @@ from sqlalchemy.orm import relationship
 from database import Base
 from models import SoftDeleteMixin
 
-# no_adj
-# adj type
-# adj date
-# warehouse
-# attachment
-#
-# ADJ ITeM
-# qty
-# adj_price
 
 class AdjustmentTypeEnum(enum.Enum):
     IN = "IN"

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional, Literal
+
 import enum
 
 from sqlalchemy import (
     Column, Integer, BigInteger, Numeric, String, DateTime, Date, Boolean,
-    Enum as SAEnum, Index, UniqueConstraint, func, case, and_, or_, asc, desc
+    Enum as SAEnum, Index,  func
 )
 
 from database import Base

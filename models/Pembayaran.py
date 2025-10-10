@@ -1,11 +1,10 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Integer, Column, DateTime, Enum, Numeric, ForeignKey, String, Boolean
+from sqlalchemy import Integer, Column, DateTime, Enum, Numeric, ForeignKey, String
 from sqlalchemy.orm import relationship
 from database import Base
 from models.Pembelian import StatusPembelianEnum
-from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 from schemas.PembayaranSchemas import PembayaranPengembalianType
 
 

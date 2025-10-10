@@ -1,10 +1,9 @@
-from datetime import datetime
 
 import pytz
-from sqlalchemy import Column, Integer, String, Enum
+from sqlalchemy import Enum
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Text
 from database import Base
 import enum
 

@@ -1,9 +1,9 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
-from models.Customer import Customer
+
 from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 
 

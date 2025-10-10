@@ -2,8 +2,7 @@ from decimal import Decimal
 import enum
 from typing import Optional
 
-from pydantic import validator
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Numeric, Text, DateTime, DECIMAL, Enum
+from sqlalchemy import Column, Integer, String, ForeignKey, Numeric, DateTime, Enum
 from sqlalchemy.ext.hybrid import hybrid_property
 
 from database import Base

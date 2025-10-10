@@ -551,13 +551,11 @@ async def rollback_stock_adjustment(
 
         old_stock = item.total_item
 
-        # Reverse the adjustment
         if adjustment.adjustment_type == AdjustmentTypeEnum.OUT:
-            # Original was OUT, post IN to reverse
             inventory_service.post_inventory_in(
                 item_id=adj_item.item_id,
                 source_type=SourceTypeEnum.IN,
-                source_id=f"{adjustment.no_adjustment}",  # Unique per item
+                source_id=f"{adjustment.no_adjustment}",
                 qty=adj_item.qty,
                 unit_price=Decimal(str(adj_item.adj_price)),
                 trx_date=date.today(),
@@ -567,7 +565,6 @@ async def rollback_stock_adjustment(
             action = "ditambahkan kembali"
 
         else:  # IN
-            # Original was IN, post OUT to reverse
             if item.total_item < adj_item.qty:
                 raise HTTPException(
                     status_code=400,
@@ -577,7 +574,7 @@ async def rollback_stock_adjustment(
             inventory_service.post_inventory_out(
                 item_id=adj_item.item_id,
                 source_type=SourceTypeEnum.OUT,
-                source_id=f"{adjustment.no_adjustment}",  # Unique per item
+                source_id=f"{adjustment.no_adjustment}",
                 qty=adj_item.qty,
                 trx_date=date.today(),
                 reason_code=f"Rollback Adjustment {adjustment.no_adjustment} to DRAFT"
