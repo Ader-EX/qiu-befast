@@ -241,8 +241,6 @@ def get_items(
             )
         )
 
-    if vendor:
-        query = query.filter(Item.vendor_rel)
 
     if item_type:
         query = query.filter(Item.type == item_type)
