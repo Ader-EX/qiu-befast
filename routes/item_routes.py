@@ -33,6 +33,8 @@ from starlette.responses import StreamingResponse
 
 # Local/Application-Specific Imports
 from database import get_db
+from models.Satuan import  Satuan
+from models.Category import Category
 from models.AllAttachment import AllAttachment, ParentType
 from models.AuditTrail import AuditEntityEnum
 from models.InventoryLedger import SourceTypeEnum
@@ -80,6 +82,166 @@ class ImportOptions(BaseModel):
     skip_on_error: bool = True
     update_existing: bool = False
     default_item_type: ItemTypeEnum = ItemTypeEnum.FINISH_GOOD
+
+
+
+
+@router.get("/export-excel")
+async def export_items_to_excel(
+        db: Session = Depends(get_db),
+        item_type: Optional[ItemTypeEnum] = Query(None, description="Filter by item type"),
+        is_active: Optional[bool] = Query(None, description="Filter by active status"),
+        include_inactive: bool = Query(False, description="Include inactive items"),
+):
+    """
+    Export all items to Excel file using the same template format as import.
+    
+    Columns exported:
+    - Type
+    - Nama Item
+    - SKU
+    - Brand
+    - Jenis Barang
+    - Jumlah Unit
+    - Harga Modal
+    - Harga Jual
+    - Satuan Unit
+    """
+    
+    try:
+        # Build query with filters
+        query = db.query(Item).filter(Item.deleted_at.is_(None))
+        
+        if item_type:
+            query = query.filter(Item.type == item_type)
+        
+        if is_active is not None:
+            query = query.filter(Item.is_active == is_active)
+        elif not include_inactive:
+            query = query.filter(Item.is_active == True)
+        
+        # Get all items
+        items = query.order_by(Item.code).all()
+        
+        if not items:
+            raise HTTPException(
+                status_code=404,
+                detail="No items found to export"
+            )
+        
+        # Build lookup dictionaries for efficient data retrieval
+        category_ids = set()
+        satuan_ids = set()
+        
+        for item in items:
+            if item.category_one:
+                category_ids.add(item.category_one)
+            if item.category_two:
+                category_ids.add(item.category_two)
+            if item.satuan_id:
+                satuan_ids.add(item.satuan_id)
+        
+        # Fetch categories and satuans
+        categories = {}
+        if category_ids:
+            cats = db.query(Category).filter(Category.id.in_(category_ids)).all()
+            categories = {cat.id: cat.name for cat in cats}
+        
+        satuans = {}
+        if satuan_ids:
+            sats = db.query(Satuan).filter(Satuan.id.in_(satuan_ids)).all()
+            satuans = {sat.id: sat.symbol for sat in sats}
+        
+        # Map ItemTypeEnum to readable format
+        type_mapping = {
+            ItemTypeEnum.FINISH_GOOD: "Finish Good",
+            ItemTypeEnum.RAW_MATERIAL: "Raw Material",
+            ItemTypeEnum.SERVICE: "Service"
+        }
+        
+        # Prepare data for DataFrame
+        data = []
+        for item in items:
+            data.append({
+                'Type': type_mapping.get(item.type, str(item.type)),
+                'Nama Item': item.name,
+                'SKU': item.sku,
+                'Brand': categories.get(item.category_one, ''),
+                'Jenis Barang': categories.get(item.category_two, ''),
+                'Jumlah Unit': item.total_item if item.total_item else 0,
+                'Harga Modal': float(item.modal_price) if item.modal_price else 0,
+                'Harga Jual': float(item.price) if item.price else 0,
+                'Satuan Unit': satuans.get(item.satuan_id, '')
+            })
+        
+        # Create DataFrame
+        df = pd.DataFrame(data)
+        
+        # Create Excel file with formatting
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Write the header row
+            df.to_excel(writer, index=False, sheet_name='Items', startrow=0)
+            
+            # Get the worksheet to add notes row
+            worksheet = writer.sheets['Items']
+            
+            # Insert a row for notes after the header
+            worksheet.insert_rows(2)
+            notes = [
+                'e.g., Finish Good, Raw Material, Service',
+                'Required: Item name',
+                'Required: Unique identifier',
+                'Optional: Brand category name',
+                'Optional: Item category name',
+                'Optional: Current stock quantity',
+                'Optional: Cost price',
+                'Required: Selling price',
+                'Required: Unit symbol (e.g., pcs, kg, m)'
+            ]
+            
+            for col_idx, note in enumerate(notes, start=1):
+                cell = worksheet.cell(row=2, column=col_idx)
+                cell.value = note
+                cell.font = cell.font.copy(italic=True, size=9)
+            
+            # Auto-adjust column widths
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if cell.value:
+                            max_length = max(max_length, len(str(cell.value)))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+        
+        output.seek(0)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"items_export_{timestamp}.xlsx"
+        
+        # Return as streaming response
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error exporting items: {str(e)}"
+        )
+
+
 
 
 @router.get("/{item_id}", response_model=ItemResponse)
@@ -559,6 +721,7 @@ async def download_item_template(format: str = "xlsx"):
             status_code=500,
             detail=f"Error generating Excel template: {str(e)}"
         )
+        
 
 @router.post("/import-excel", response_model=ImportResult)
 async def import_items_from_excel(
@@ -864,6 +1027,7 @@ def _process_row(
         'satuan_id': satuan_id,
         'is_active': True
     }
+    
 @router.put("/{item_id}", response_model=ItemResponse)
 async def update_item(
         request: Request,
