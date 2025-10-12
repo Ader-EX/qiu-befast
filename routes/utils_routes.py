@@ -178,7 +178,7 @@ async def get_laba_rugi(
 )
 async def download_laba_rugi(
     from_date: datetime = Query(..., description="Start datetime (ISO-8601)"),
-    to_date: datetime | None = Query(None, description="End datetime (ISO-8601)"),
+    to_date: Optional[datetime] = Query(None, description="End datetime (ISO-8601)"),
     db: Session = Depends(get_db),
 ):
     """
