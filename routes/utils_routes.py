@@ -398,8 +398,8 @@ async def get_penjualan_laporan(
 )
 async def download_penjualan_laporan(
     from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-    to_date: datetime | None = Query(None, description="End datetime (inclusive)"),
-    customer_id: int | None = Query(None, description="Customer ID"),
+    to_date: Optional[datetime ] = Query(None, description="End datetime (inclusive)"),
+    customer_id: Optional[int] = Query(None, description="Customer ID"),
     kode_lambung_id: int | None = Query(None, description="Kode Lambung ID"),
     db: Session = Depends(get_db),
 ):
@@ -693,7 +693,7 @@ async def get_pembelian_laporan(
 )
 async def download_pembelian_laporan(
     from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-    to_date: datetime | None = Query(None, description="End datetime (inclusive)"),
+    to_date: Optional[datetime ] = Query(None, description="End datetime (inclusive)"),
     db: Session = Depends(get_db),
 ):
     if to_date is None:
@@ -1042,7 +1042,7 @@ async def get_stock_adjustment_report(
 )
 async def download_stock_adjustment_report(
     from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-    to_date: datetime | None = Query(None, description="End datetime (inclusive)"),
+    to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
     item_id: int | None = Query(None, description="Filter by specific item"),
     db: Session = Depends(get_db),
 ):
