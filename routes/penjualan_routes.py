@@ -827,7 +827,7 @@ async def rollback_penjualan_status(
     if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
         # Void all ledger entries for this penjualan
         for line in penjualan.penjualan_items:
-            source_id = f"{penjualan_id}"
+            source_id = f"{penjualan.no_penjualan}"
             try:
                 inventory_service.void_ledger_entry_by_source(
                     source_id=source_id,
