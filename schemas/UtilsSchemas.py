@@ -32,6 +32,7 @@ class LabaRugiResponse(BaseModel):
 
 class SalesReportRow(BaseModel):
     date: datetime                         # Penjualan.sales_date
+    sales_due_date: datetime    
     customer: str                          # Penjualan.customer_name or Customer.name
     kode_lambung_rel: Optional[str] = None     # Penjualan.kode_lambung  (if you have this column)
     kode_lambung_penjualan: Optional[str] = None
@@ -68,6 +69,7 @@ class SalesReportResponse(BaseModel):
     
 class PurchaseReportRow(BaseModel):
     date: datetime
+    sales_due_date: datetime
     vendor: str
     no_pembelian: str
     status: str  # "Paid/Unpaid/Half_paid" etc. (stringified enum)
@@ -124,6 +126,7 @@ class LowStockAlertResponse(BaseModel):
     reorder_qty : int
     
     
+    
 
 class StockAdjustmentReportRow(BaseModel):
     """Single row in stock adjustment report"""
@@ -143,15 +146,20 @@ class StockAdjustmentReportRow(BaseModel):
         json_encoders = {
             Decimal: lambda v: float(v)
         }
-
+        
+class ItemStockAdjustmentReportRow(BaseModel):
+    item_name : str
+    data : List[StockAdjustmentReportRow]
 
 class StockAdjustmentReportResponse(BaseModel):
     """Response for stock adjustment report"""
     title: str
     date_from: datetime
     date_to: datetime
-    data: List[StockAdjustmentReportRow]
+    data: List[ItemStockAdjustmentReportRow]
     total: int
 
     class Config:
         from_attributes = True
+        
+    

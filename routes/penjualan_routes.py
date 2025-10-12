@@ -208,7 +208,10 @@ def validate_item_exists(db: Session, item_id: int) -> Item:
 
 def validate_item_stock(db: Session, item_id: int, requested_qty: int) -> None:
     """Ensure stock is sufficient based on the inventory ledger."""
+    
     inventory_service = InventoryService(db)
+    item_data =  db.query(Item).filter(Item.id  == item_id).first()
+    
     last_entry = inventory_service._get_last_ledger_entry(item_id)
 
     if requested_qty < 1:
@@ -218,7 +221,7 @@ def validate_item_stock(db: Session, item_id: int, requested_qty: int) -> None:
         available = last_entry.cumulative_qty if last_entry else 0
         raise HTTPException(
             status_code=400,
-            detail=f"Stock untuk item {item_id} tidak tersedia. "
+            detail=f"Stock untuk item {item_data.name} tidak tersedia. "
                    f"Tersedia: {available}, Requested: {requested_qty}"
         )
 
@@ -305,7 +308,7 @@ def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None
         inventory_service.post_inventory_out(
             item_id=line.item_id,
             source_type=SourceTypeEnum.PENJUALAN,
-            source_id=f"{penjualan_id}",
+            source_id=f"{penjualan.no_penjualan}",
             qty=int(line.qty or 0),
             trx_date=penjualan.sales_date.date(),
             reason_code=f"Penjualan {penjualan.no_penjualan}"
@@ -748,7 +751,7 @@ async def update_penjualan(
         # Apply ledger operations if not DRAFT
         if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
             for operation, item_id, old_qty, new_qty, line_id in ledger_operations:
-                source_id = f"{penjualan_id}"
+                source_id = f"{penjualan.no_penjualan}"
 
                 if operation == "delete":
                     # Void the old OUT entry

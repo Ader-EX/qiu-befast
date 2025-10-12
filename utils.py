@@ -53,7 +53,7 @@ def get_current_user_name(token: str = Depends(oauth2_scheme)) -> str:
 def verify_password(password: str, hashed_pass: str) -> bool:
     return password_context.verify(password, hashed_pass)
 
-def create_access_token(subject: Union[str, Any],name : str, expires_delta: int = None ) -> str:
+def create_access_token(subject: Union[str, Any],role : str,name : str, expires_delta: int = None ) -> str:
     if expires_delta is not None:
         expires_delta = datetime.now() + expires_delta
 
@@ -62,7 +62,7 @@ def create_access_token(subject: Union[str, Any],name : str, expires_delta: int 
 
 
     # to_encode = {"exp": expires_delta, "sub": str(subject), "un": name}
-    to_encode = { "sub": str(subject), "un": name}
+    to_encode = { "sub": str(subject), "un": name, "rl" :role}
     
     encoded_jwt = jwt.encode(to_encode, os.getenv("JWT_SECRET_KEY"), os.getenv("ALGORITHM"))
 

@@ -8,6 +8,7 @@ from fastapi import FastAPI,  APIRouter
 
 from fastapi.params import Depends, Query
 from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
 from sqlalchemy import extract, func, literal, or_, union_all
 from sqlalchemy.orm import Session, aliased
 from starlette import status
@@ -25,7 +26,7 @@ from models.Vendor import Vendor
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.UserSchemas import UserCreate, TokenSchema, RequestDetails, UserOut, UserUpdate, UserType
 from database import  get_db
-from schemas.UtilsSchemas import DashboardStatistics, LabaRugiResponse, PurchaseReportResponse, PurchaseReportRow, \
+from schemas.UtilsSchemas import DashboardStatistics, ItemStockAdjustmentReportRow, LabaRugiResponse, PurchaseReportResponse, PurchaseReportRow, \
     SalesReportRow, SalesReportResponse, SalesTrendResponse, SalesTrendDataPoint, StockAdjustmentReportResponse, StockAdjustmentReportRow
 from utils import get_hashed_password, verify_password, create_access_token, create_refresh_token
 from models.User import User
@@ -169,6 +170,88 @@ async def get_laba_rugi(
         profit_or_loss=profit_or_loss
     )
 
+
+@router.get(
+    "/laba-rugi/download",
+    status_code=status.HTTP_200_OK,
+    summary="Download Laporan Laba Rugi as XLSX",
+)
+async def download_laba_rugi(
+    from_date: datetime = Query(..., description="Start datetime (ISO-8601)"),
+    to_date: datetime | None = Query(None, description="End datetime (ISO-8601)"),
+    db: Session = Depends(get_db),
+):
+    """
+    Download profit and loss report (Laba Rugi) as XLSX file.
+    Includes total pembelian, total penjualan, and calculated profit/loss.
+    """
+
+    if to_date is None:
+        to_date = datetime.now()
+
+    # Calculate totals
+    total_pembelian = (
+        db.query(func.coalesce(func.sum(Pembelian.total_price), 0))
+        .filter(
+            Pembelian.is_deleted.is_(False),
+            Pembelian.status_pembelian != StatusPembelianEnum.DRAFT,
+            Pembelian.created_at >= from_date,
+            Pembelian.created_at <= to_date,
+        )
+        .scalar()
+    )
+
+    total_penjualan = (
+        db.query(func.coalesce(func.sum(Penjualan.total_price), 0))
+        .filter(
+            Penjualan.is_deleted.is_(False),
+            Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
+            Penjualan.created_at >= from_date,
+            Penjualan.created_at <= to_date,
+        )
+        .scalar()
+    )
+
+    # Calculate profit/loss
+    profit_or_loss = Decimal(total_penjualan) - Decimal(total_pembelian)
+
+    # Create workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Laba Rugi"
+
+    # Write headers
+    ws.append(["Laporan Laba Rugi"])
+    ws.append([f"Periode: {from_date.strftime('%d/%m/%Y')} - {to_date.strftime('%d/%m/%Y')}"])
+    ws.append([])  # empty line
+    ws.append(["Deskripsi", "Total (Rp)"])
+
+    # Write data rows
+    ws.append(["Total Pembelian", float(total_pembelian)])
+    ws.append(["Total Penjualan", float(total_penjualan)])
+    ws.append(["Laba / Rugi", float(profit_or_loss)])
+
+    # Optional: style headers (purely cosmetic)
+    ws["A4"].font = ws["B4"].font.copy(bold=True)
+    for col in ["A", "B"]:
+        ws.column_dimensions[col].width = 25
+
+    # Save to in-memory buffer
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"laba_rugi_{from_date:%Y%m%d}_{to_date:%Y%m%d}.xlsx"
+
+    # Return as downloadable Excel file
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
+    )
+
 @router.get(
     "/penjualan",
     status_code=status.HTTP_200_OK,
@@ -197,6 +280,7 @@ async def get_penjualan_laporan(
         db.query(
             Penjualan.id,
             Penjualan.sales_date.label("date"),
+             Penjualan.sales_due_date,
             Penjualan.customer_name,
             Customer.name.label("customer_name_rel"),
             Penjualan.kode_lambung_id,
@@ -273,6 +357,7 @@ async def get_penjualan_laporan(
         report_rows.append(
             SalesReportRow(
                 date=sale.date,
+                sales_due_date=sale.sales_due_date,
                 customer=sale.customer_name or sale.customer_name_rel or "—",
                 kode_lambung_rel=sale.penjualan_kode_lambung,
                 kode_lambung_penjualan=sale.penjualan_kode_lambung,
@@ -304,26 +389,34 @@ async def get_penjualan_laporan(
     status_code=status.HTTP_200_OK,
     summary="Download Laporan Penjualan as CSV (all records)",
 )
+
+
+@router.get(
+    "/penjualan/download",
+    status_code=status.HTTP_200_OK,
+    summary="Download Laporan Penjualan as XLSX (all records)",
+)
 async def download_penjualan_laporan(
-        from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-        to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
-        customer_id: Optional[int] = Query(None, description="Customer ID"),
-        kode_lambung_id: Optional[int] = Query(None, description="Kode Lambung ID"),
-        db: Session = Depends(get_db),
+    from_date: datetime = Query(..., description="Start datetime (inclusive)"),
+    to_date: datetime | None = Query(None, description="End datetime (inclusive)"),
+    customer_id: int | None = Query(None, description="Customer ID"),
+    kode_lambung_id: int | None = Query(None, description="Kode Lambung ID"),
+    db: Session = Depends(get_db),
 ):
     """
-    Download complete sales report as CSV without pagination.
-    Returns all records matching the date filter - one row per sale with concatenated items.
+    Download complete sales report as XLSX without pagination.
+    Returns all records matching the date filter — one row per sale with concatenated items.
     """
 
     if to_date is None:
         to_date = datetime.now()
 
-    # Base query to get sales (same as the main endpoint)
+    # Base query (same as before)
     sales_query = (
         db.query(
             Penjualan.id,
             Penjualan.sales_date.label("date"),
+            Penjualan.sales_due_date,
             Penjualan.customer_name,
             Customer.name.label("customer_name_rel"),
             Penjualan.kode_lambung_id,
@@ -334,52 +427,52 @@ async def download_penjualan_laporan(
         .join(Customer, Customer.id == Penjualan.customer_id, isouter=True)
         .join(KodeLambung, KodeLambung.id == Penjualan.kode_lambung_id, isouter=True)
         .filter(
-            Penjualan.is_deleted == False,
+            Penjualan.is_deleted.is_(False),
             Penjualan.status_penjualan != StatusPembelianEnum.DRAFT,
             Penjualan.sales_date >= from_date,
             Penjualan.sales_date <= to_date,
-            )
+        )
     )
 
-    # Apply optional filters
+    # Optional filters
     if customer_id is not None:
         sales_query = sales_query.filter(Penjualan.customer_id == customer_id)
-
     if kode_lambung_id is not None:
         sales_query = sales_query.filter(Penjualan.kode_lambung_id == kode_lambung_id)
 
     sales_query = sales_query.order_by(Penjualan.sales_date.asc(), Penjualan.no_penjualan.asc())
-
-    # Get all sales without pagination
     sales = sales_query.all()
 
     def _dec(x) -> Decimal:
         return Decimal(str(x or 0))
 
-    # Create CSV content with proper encoding
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    # Create Excel workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Laporan Penjualan"
 
     # Write header
-    writer.writerow([
-        'Date',
-        'Customer',
-        'Kode Lambung',
-        'No Penjualan',
-        'Status',
-        'Item Code',
-        'Item Name',
-        'Qty',
-        'Price',
-        'Sub Total',
-        'Total',
-        'Tax',
-        'Grand Total'
-    ])
+    headers = [
+        "Date",
+        "Due Date",
+        "Customer",
+        "Kode Lambung",
+        "No Penjualan",
+        "Status",
+        "Item Code",
+        "Item Name",
+        "Qty",
+        "Price",
+        "Sub Total",
+        "Total",
+        "Tax",
+        "Grand Total",
+    ]
+    ws.append(headers)
 
-    # Process each sale (same logic as main endpoint)
+
+    # Write rows
     for sale in sales:
-        # Get all items for this sale
         items_query = (
             db.query(
                 PenjualanItem.qty,
@@ -387,91 +480,75 @@ async def download_penjualan_laporan(
                 PenjualanItem.discount,
                 PenjualanItem.tax_percentage,
                 Item.code.label("item_code"),
-                Item.name.label("item_name")
+                Item.name.label("item_name"),
             )
             .join(Item, Item.id == PenjualanItem.item_id, isouter=True)
             .filter(PenjualanItem.penjualan_id == sale.id)
             .all()
         )
 
-        # Concatenate item details and calculate totals
-        item_codes = []
-        item_names = []
-        total_subtotal = Decimal("0")
-        total_discount = Decimal("0")
-        total_tax = Decimal("0")
+        item_codes, item_names = [], []
+        total_subtotal, total_discount, total_tax = Decimal("0"), Decimal("0"), Decimal("0")
         total_qty = 0
 
         for item in items_query:
-            # Get item details
             item_code = item.item_code or "N/A"
             item_name = item.item_name or "N/A"
             qty = int(item.qty or 0)
-
-            item_codes.append(item_code)
-            item_names.append(item_name)
-
-            # Calculate totals
             price = _dec(item.unit_price)
             item_subtotal = price * qty
             item_discount = _dec(item.discount)
-            item_total = item_subtotal - item_discount
-            if item_total < 0:
-                item_total = Decimal("0")
-
+            item_total = max(item_subtotal - item_discount, Decimal("0"))
             tax_pct = Decimal(str(item.tax_percentage or 0))
-            item_tax = (item_total * tax_pct / Decimal(100))
+            item_tax = item_total * tax_pct / Decimal(100)
+
+            item_codes.append(item_code)
+            item_names.append(item_name)
 
             total_subtotal += item_subtotal
             total_discount += item_discount
             total_tax += item_tax
             total_qty += qty
 
-        # Join items with comma
+        # Final totals
+        final_total = max(total_subtotal - total_discount, Decimal("0"))
+        grand_total = final_total + total_tax
         item_codes_str = ", ".join(item_codes) if item_codes else "No items"
         item_names_str = ", ".join(item_names) if item_names else "No items"
-
-        # Calculate final totals
-        final_total = total_subtotal - total_discount
-        if final_total < 0:
-            final_total = Decimal("0")
-        grand_total = final_total + total_tax
 
         customer_name = sale.customer_name or sale.customer_name_rel or "—"
         kode_lambung = sale.penjualan_kode_lambung or ""
 
-        # Write CSV row
-        writer.writerow([
-            sale.date.strftime('%d/%m/%Y') if sale.date else '',
+        ws.append([
+            sale.date.strftime("%d/%m/%Y") if sale.date else "",
+            sale.sales_due_date.strftime("%d/%m/%Y") if sale.sales_due_date else "",
             customer_name,
             kode_lambung,
-            sale.no_penjualan or '',
+            sale.no_penjualan or "",
             (sale.status_pembayaran.name.capitalize() if hasattr(sale.status_pembayaran, "name")
              else str(sale.status_pembayaran)),
             item_codes_str,
             item_names_str,
-            str(total_qty),
-            str(float(total_subtotal / total_qty if total_qty > 0 else Decimal("0"))),
-            str(float(total_subtotal)),
-            str(float(final_total)),
-            str(float(total_tax)),
-            str(float(grand_total))
+            total_qty,
+            float(total_subtotal / total_qty) if total_qty > 0 else 0.0,
+            float(total_subtotal),
+            float(final_total),
+            float(total_tax),
+            float(grand_total),
         ])
 
-    # Get the CSV content
-    csv_content = output.getvalue()
-    output.close()
+    # Save workbook to memory
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
 
-    # Generate filename
-    filename = f"laporan_penjualan_{from_date:%Y%m%d}_{to_date:%Y%m%d}.csv"
+    filename = f"laporan_penjualan_{from_date:%Y%m%d}_{to_date:%Y%m%d}.xlsx"
 
-    # Return as streaming response with proper headers
     return StreamingResponse(
-        io.BytesIO(csv_content.encode('utf-8-sig')),
-        media_type="text/csv",
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Type": "text/csv; charset=utf-8"
+            "Content-Disposition": f'attachment; filename="{filename}"'
         }
     )
 @router.get("/pembelian")
@@ -493,6 +570,7 @@ async def get_pembelian_laporan(
         db.query(
             Pembelian.id,
             Pembelian.sales_date.label("date"),
+            Pembelian.sales_due_date,
             Vendor.name.label("vendor_name_rel"),
             Pembelian.no_pembelian,
             Pembelian.status_pembayaran,
@@ -525,6 +603,7 @@ async def get_pembelian_laporan(
                 Item.sku.label("item_sku"),
                 Item.name.label("item_name"),
                 Item.code.label("item_code"),
+            
                 PembelianItem.qty,
                 PembelianItem.unit_price,
                 PembelianItem.discount,
@@ -582,6 +661,7 @@ async def get_pembelian_laporan(
         report_rows.append(
             PurchaseReportRow(
                 date=purchase.date,
+                sales_due_date = purchase.sales_due_date,
                 vendor=purchase.vendor_name_rel or "—",
                 no_pembelian=purchase.no_pembelian,
                 status=(purchase.status_pembayaran.name.capitalize() if hasattr(purchase.status_pembayaran, "name")
@@ -606,30 +686,24 @@ async def get_pembelian_laporan(
         total=total_count,
     )
 
-
 @router.get(
     "/pembelian/download",
     status_code=status.HTTP_200_OK,
-    summary="Download Laporan Pembelian as CSV (all records)",
+    summary="Download Laporan Pembelian as XLSX (all records)",
 )
 async def download_pembelian_laporan(
-        from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-        to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
-        db: Session = Depends(get_db),
+    from_date: datetime = Query(..., description="Start datetime (inclusive)"),
+    to_date: datetime | None = Query(None, description="End datetime (inclusive)"),
+    db: Session = Depends(get_db),
 ):
-    """
-    Download complete purchase report as CSV without pagination.
-    Returns one row per purchase with concatenated item details.
-    """
-    
     if to_date is None:
         to_date = datetime.now()
 
-    # Base query to get purchases (same as your working /pembelian endpoint)
     purchases_query = (
         db.query(
             Pembelian.id,
             Pembelian.sales_date.label("date"),
+            Pembelian.sales_due_date,
             Vendor.name.label("vendor_name_rel"),
             Pembelian.no_pembelian,
             Pembelian.status_pembayaran,
@@ -649,29 +723,19 @@ async def download_pembelian_laporan(
     def _dec(x) -> Decimal:
         return Decimal(str(x or 0))
 
-    # Create CSV content with proper encoding
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    
+    # Create Excel workbook and sheet
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Laporan Pembelian"
+
     # Write header
-    writer.writerow([
-        'Date',
-        'Vendor',
-        'No Pembelian',
-        'Status',
-        'Item Code',
-        'Item Name',
-        'Qty',
-        'Price',
-        'Sub Total',
-        'Total',
-        'Tax',
-        'Grand Total'
+    ws.append([
+        'Date', 'Due Date', 'Vendor', 'No Pembelian', 'Status',
+        'Item Code', 'Item Name', 'Qty', 'Price', 'Sub Total',
+        'Total', 'Tax', 'Grand Total'
     ])
 
-    # Process each purchase and concatenate items
     for purchase in purchases:
-        # Get all items for this purchase (same as your working /pembelian endpoint)
         items_query = (
             db.query(
                 Item.sku.label("item_sku"),
@@ -687,84 +751,66 @@ async def download_pembelian_laporan(
             .all()
         )
 
-        # Concatenate item details and calculate totals
-        item_codes = []
-        item_names = []
-        total_subtotal = Decimal("0")
-        total_discount = Decimal("0")
-        total_tax = Decimal("0")
+        item_codes, item_names = [], []
+        total_subtotal, total_discount, total_tax = Decimal("0"), Decimal("0"), Decimal("0")
         total_qty = 0
 
         for item in items_query:
-            # Build item detail strings (same logic as your working endpoint)
             item_code = item.item_code or item.item_sku or "N/A"
             item_name = item.item_name or "N/A"
             qty = int(item.qty or 0)
-            
+
             item_codes.append(item_code)
             item_names.append(item_name)
-            
-            # Calculate totals
+
             price = _dec(item.unit_price)
             item_subtotal = price * qty
             item_discount = _dec(item.discount)
-            item_total = item_subtotal - item_discount
-            if item_total < 0:
-                item_total = Decimal("0")
-            
+            item_total = max(item_subtotal - item_discount, Decimal("0"))
             tax_pct = Decimal(str(item.tax_percentage or 0))
-            item_tax = (item_total * tax_pct / Decimal(100))
-            
+            item_tax = item_total * tax_pct / Decimal(100)
+
             total_subtotal += item_subtotal
             total_discount += item_discount
             total_tax += item_tax
             total_qty += qty
 
-        # Join items with comma
         item_codes_str = ", ".join(item_codes) if item_codes else "No items"
         item_names_str = ", ".join(item_names) if item_names else "No items"
-        
-        # Calculate final totals
-        final_total = total_subtotal - total_discount
-        if final_total < 0:
-            final_total = Decimal("0")
+        final_total = max(total_subtotal - total_discount, Decimal("0"))
         grand_total = final_total + total_tax
 
-        # Write single row per purchase with concatenated items
-        writer.writerow([
+        ws.append([
             purchase.date.strftime('%d/%m/%Y') if purchase.date else '',
+            purchase.sales_due_date.strftime('%d/%m/%Y') if purchase.sales_due_date else '',
             purchase.vendor_name_rel or "—",
             purchase.no_pembelian or '',
             (purchase.status_pembayaran.name.capitalize() if hasattr(purchase.status_pembayaran, "name")
              else str(purchase.status_pembayaran)),
-            item_codes_str,  # 🔥 Concatenated item codes
-            item_names_str,  # 🔥 Concatenated item names
-            str(total_qty),  # 🔥 Total quantity across all items
-            str(float(total_subtotal / total_qty if total_qty > 0 else Decimal("0"))),  # Average price
-            str(float(total_subtotal)),
-            str(float(final_total)),
-            str(float(total_tax)),
-            str(float(grand_total))
+            item_codes_str,
+            item_names_str,
+            total_qty,
+            float(total_subtotal / total_qty) if total_qty > 0 else 0.0,
+            float(total_subtotal),
+            float(final_total),
+            float(total_tax),
+            float(grand_total),
         ])
 
-    # Get the CSV content
-    csv_content = output.getvalue()
-    output.close()
-    
-    # Generate filename
-    filename = f"laporan_pembelian_{from_date:%Y%m%d}_{to_date:%Y%m%d}.csv"
-    
-    # Return as streaming response with proper headers
+    # Save workbook to bytes
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"laporan_pembelian_{from_date:%Y%m%d}_{to_date:%Y%m%d}.xlsx"
+
     return StreamingResponse(
-        io.BytesIO(csv_content.encode('utf-8-sig')),
-        media_type="text/csv",
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Type": "text/csv; charset=utf-8"
+            "Content-Disposition": f'attachment; filename="{filename}"'
         }
     )
-
-
 @router.get("/tren-penjualan", response_model=SalesTrendResponse)
 async def get_sales_trend(
         period: str = Query(
@@ -891,27 +937,31 @@ def calculate_hpp(prev_balance: Decimal, prev_hpp: Decimal, qty_in: int, price_i
     
     return total_value / total_qty
 
-@router.get("/stock-adjustment", status_code=status.HTTP_200_OK, response_model=StockAdjustmentReportResponse)
+@router.get(
+    "/stock-adjustment",
+    status_code=status.HTTP_200_OK,
+    response_model=StockAdjustmentReportResponse,
+)
 async def get_stock_adjustment_report(
-        from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-        to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
-        item_id: Optional[int] = Query(None, description="Filter by specific item"),
-        skip: int = Query(0, ge=0, description="Number of records to skip"),
-        limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-        db: Session = Depends(get_db),
+    from_date: datetime = Query(..., description="Start datetime (inclusive)"),
+    to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
+    item_id: Optional[int] = Query(None, description="Filter by specific item"),
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    db: Session = Depends(get_db),
 ):
     """
     Get stock adjustment report with HPP calculation from InventoryLedger.
+    Returns grouped data by item name.
     """
 
     if to_date is None:
         to_date = datetime.now()
 
-    # Convert datetime to date for querying
     from_date_only = from_date.date()
     to_date_only = to_date.date()
 
-    # Build base query
+    # Base query
     query = (
         db.query(
             InventoryLedger.trx_date,
@@ -922,59 +972,58 @@ async def get_stock_adjustment_report(
             InventoryLedger.unit_price,
             InventoryLedger.cumulative_qty,
             InventoryLedger.moving_avg_cost,
-            Item.code.label('item_code'),
-            Item.name.label('item_name'),
+            Item.code.label("item_code"),
+            Item.name.label("item_name"),
         )
         .join(Item, Item.id == InventoryLedger.item_id)
         .filter(
-            InventoryLedger.voided == False,
+            InventoryLedger.voided.is_(False),
             InventoryLedger.trx_date >= from_date_only,
             InventoryLedger.trx_date <= to_date_only,
-            )
+        )
+        .order_by(Item.name.asc(), InventoryLedger.trx_date.desc())
     )
 
-    # Apply item filter if specified
+    # Apply optional filter
     if item_id is not None:
         query = query.filter(InventoryLedger.item_id == item_id)
 
-    # Order by date, item, and order_key for proper chronological sequence
-    query = query.order_by(
-        Item.name.asc(),
-        InventoryLedger.trx_date.desc()
-    )
-
-    # Get total count
+    # Total before pagination
     total_count = query.count()
 
-    # Get paginated results
+    # Paginate
     ledger_entries = query.offset(skip).limit(limit).all()
 
-    # Process ledger entries into report rows
-    report_rows: List[StockAdjustmentReportRow] = []
+    # ----------------------------
+    # Group by item_name
+    # ----------------------------
+    grouped_data: dict[str, List[StockAdjustmentReportRow]] = {}
 
     for entry in ledger_entries:
-        # Determine transaction number based on source
         trans_no = entry.source_id or ""
-
-        # Calculate price in/out based on movement type
         price_in = entry.unit_price if entry.qty_in > 0 else Decimal("0")
         price_out = entry.unit_price if entry.qty_out > 0 else Decimal("0")
 
-        # Create report row
-        report_rows.append(
-            StockAdjustmentReportRow(
-                date=datetime.combine(entry.trx_date, datetime.min.time()),
-                no_transaksi=trans_no,
-                item_code=entry.item_code or "N/A",
-                item_name=entry.item_name or "N/A",
-                qty_masuk=entry.qty_in,
-                qty_keluar=entry.qty_out,
-                qty_balance=entry.cumulative_qty,
-                harga_masuk=price_in,
-                harga_keluar=price_out,
-                hpp=entry.moving_avg_cost
-            )
+        row = StockAdjustmentReportRow(
+            date=datetime.combine(entry.trx_date, datetime.min.time()),
+            no_transaksi=trans_no,
+            item_code=entry.item_code or "N/A",
+            item_name=entry.item_name or "N/A",
+            qty_masuk=entry.qty_in,
+            qty_keluar=entry.qty_out,
+            qty_balance=entry.cumulative_qty,
+            harga_masuk=price_in,
+            harga_keluar=price_out,
+            hpp=entry.moving_avg_cost,
         )
+
+        grouped_data.setdefault(entry.item_name or "N/A", []).append(row)
+
+    # Convert to list of ItemStockAdjustmentReportRow
+    grouped_rows: List[ItemStockAdjustmentReportRow] = [
+        ItemStockAdjustmentReportRow(item_name=item, data=rows)
+        for item, rows in grouped_data.items()
+    ]
 
     title = f"Laporan Stock Adjustment {from_date:%d/%m/%Y} - {to_date:%d/%m/%Y}"
 
@@ -982,20 +1031,23 @@ async def get_stock_adjustment_report(
         title=title,
         date_from=from_date,
         date_to=to_date,
-        data=report_rows,
+        data=grouped_rows,
         total=total_count,
     )
 
-
-@router.get("/stock-adjustment/download", status_code=status.HTTP_200_OK)
+@router.get(
+    "/stock-adjustment/download",
+    status_code=status.HTTP_200_OK,
+    summary="Download Stock Adjustment Report as XLSX (all records)",
+)
 async def download_stock_adjustment_report(
-        from_date: datetime = Query(..., description="Start datetime (inclusive)"),
-        to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
-        item_id: Optional[int] = Query(None, description="Filter by specific item"),
-        db: Session = Depends(get_db),
+    from_date: datetime = Query(..., description="Start datetime (inclusive)"),
+    to_date: datetime | None = Query(None, description="End datetime (inclusive)"),
+    item_id: int | None = Query(None, description="Filter by specific item"),
+    db: Session = Depends(get_db),
 ):
     """
-    Download complete stock adjustment report as CSV without pagination.
+    Download complete stock adjustment report as XLSX without pagination.
     """
 
     if to_date is None:
@@ -1005,7 +1057,7 @@ async def download_stock_adjustment_report(
     from_date_only = from_date.date()
     to_date_only = to_date.date()
 
-    # Build query (same as above but without pagination)
+    # Base query
     query = (
         db.query(
             InventoryLedger.trx_date,
@@ -1016,78 +1068,80 @@ async def download_stock_adjustment_report(
             InventoryLedger.unit_price,
             InventoryLedger.cumulative_qty,
             InventoryLedger.moving_avg_cost,
-            Item.code.label('item_code'),
-            Item.name.label('item_name'),
+            Item.code.label("item_code"),
+            Item.name.label("item_name"),
         )
         .join(Item, Item.id == InventoryLedger.item_id)
         .filter(
-            InventoryLedger.voided == False,
+            InventoryLedger.voided.is_(False),
             InventoryLedger.trx_date >= from_date_only,
             InventoryLedger.trx_date <= to_date_only,
-            )
+        )
+        .order_by(Item.name.asc(), InventoryLedger.trx_date.desc())
     )
 
-    # Apply item filter if specified
+    # Apply filter
     if item_id is not None:
         query = query.filter(InventoryLedger.item_id == item_id)
 
-    # Order by date, item, and order_key
-    query = query.order_by(
-        Item.name.asc(),
-        InventoryLedger.trx_date.desc()
-    )
-
     ledger_entries = query.all()
 
-    # Create CSV
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    # Create workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Stock Adjustment"
 
-    # Write header
-    writer.writerow([
-        'Date',
-        'No Transaksi',
-        'Item Code',
-        'Item Name',
-        'Qty Masuk',
-        'Qty Keluar',
-        'Qty Balance',
-        'Harga Masuk',
-        'Harga Keluar',
-        'HPP'
-    ])
+    # Write header row
+    headers = [
+        "Date",
+        "No Transaksi",
+        "Item Code",
+        "Item Name",
+        "Qty Masuk",
+        "Qty Keluar",
+        "Qty Balance",
+        "Harga Masuk",
+        "Harga Keluar",
+        "HPP",
+    ]
+    ws.append(headers)
 
     # Write rows
     for entry in ledger_entries:
         trans_no = entry.source_id or ""
         price_in = entry.unit_price if entry.qty_in > 0 else Decimal("0")
         price_out = entry.unit_price if entry.qty_out > 0 else Decimal("0")
+        date_str = entry.trx_date.strftime("%d/%m/%Y")
 
-        date_str = entry.trx_date.strftime('%d/%m/%Y')
-
-        writer.writerow([
+        ws.append([
             date_str,
             trans_no,
-            entry.item_code or 'N/A',
-            entry.item_name or 'N/A',
-            str(entry.qty_in),
-            str(entry.qty_out),
-            str(entry.cumulative_qty),
-            f"{float(price_in):,.2f}",
-            f"{float(price_out):,.2f}",
-            f"{float(entry.moving_avg_cost):,.2f}"
+            entry.item_code or "N/A",
+            entry.item_name or "N/A",
+            float(entry.qty_in or 0),
+            float(entry.qty_out or 0),
+            float(entry.cumulative_qty or 0),
+            float(price_in),
+            float(price_out),
+            float(entry.moving_avg_cost or 0),
         ])
 
-    csv_content = output.getvalue()
-    output.close()
+    # Optional: auto-adjust column widths (just for readability)
+    for col in ws.columns:
+        max_length = max(len(str(cell.value or "")) for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max_length + 2, 40)
 
-    filename = f"laporan_stock_adjustment_{from_date:%Y%m%d}_{to_date:%Y%m%d}.csv"
+    # Save workbook in-memory
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"laporan_stock_adjustment_{from_date:%Y%m%d}_{to_date:%Y%m%d}.xlsx"
 
     return StreamingResponse(
-        io.BytesIO(csv_content.encode('utf-8-sig')),
-        media_type="text/csv",
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Type": "text/csv; charset=utf-8"
-        }
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
     )
