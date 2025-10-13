@@ -8,12 +8,14 @@ class UserType(enum.Enum):
     OWNER = 0
     STAFF = 1
     ALL =2
+    ADMIN = 3
+    SUPERVISOR = 4
 
 class UserCreate(BaseModel):
     username:str
     password:str
     is_active:bool = True
-    role: UserType = UserType.STAFF
+    role: UserType
 
 
 class RequestDetails(BaseModel):
@@ -22,6 +24,8 @@ class RequestDetails(BaseModel):
 
 class TokenSchema(BaseModel):
     access_token: str
+    role :int
+    name: str
     refresh_token: str
 
 class changepassword(BaseModel):

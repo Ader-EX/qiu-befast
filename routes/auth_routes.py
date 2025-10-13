@@ -38,7 +38,10 @@ def register_user(user: UserCreate, session: Session = Depends(get_db)):
 
     encrypted_password =get_hashed_password(user.password)
 
-    new_user = User(username=user.username, password=encrypted_password )
+    new_user = User(  username=user.username,
+                      password=encrypted_password,
+                      is_active=user.is_active,
+                      role=user.role)
 
     session.add(new_user)
     session.commit()
@@ -71,6 +74,8 @@ def login(request: RequestDetails, db: Session = Depends(get_db)):
 
     return {
         "access_token": access,
+        "name": user.username,
+        "role" : user.role.value,
         "refresh_token": refresh,
     }
 
@@ -106,10 +111,12 @@ def refresh_token(request: RefreshTokenRequest, db: Session = Depends(get_db)):
             )
         
         # Create new access token
-        new_access_token =  create_access_token(user.id,user.role, user.username)
+        new_access_token =  create_access_token(user.id,user.role.value, user.username)
         
         return {
-            "access_token": new_access_token
+            "access_token": new_access_token,
+            "name": user.username,
+            "role" : user.role.value,
         }
         
     except ExpiredSignatureError:

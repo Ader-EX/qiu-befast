@@ -275,6 +275,7 @@ async def create_item(
         is_active: bool = Form(True),
         category_one: Optional[int] = Form(None),
         category_two: Optional[int] = Form(None),
+        vendor_id: Optional[str] = Form(None),
         satuan_id: int = Form(...),
         db: Session = Depends(get_db),
         user_name: str = Depends(get_current_user_name),
@@ -301,6 +302,7 @@ async def create_item(
             existing_item.category_one = category_one
             existing_item.category_two = category_two
             existing_item.satuan_id = satuan_id
+            existing_item.vendor_id = vendor_id
             existing_item.is_deleted = False
             existing_item.deleted_at = None
             db.commit()
@@ -322,6 +324,7 @@ async def create_item(
             is_active=is_active,
             category_one=category_one,
             category_two=category_two,
+            vendor_id=vendor_id,
             satuan_id=satuan_id,
         )
 
@@ -1042,6 +1045,7 @@ async def update_item(
         is_active: bool = Form(True),
         category_one: Optional[int] = Form(None),
         category_two: Optional[int] = Form(None),
+        vendor_id: Optional[str] = Form(None),
         satuan_id: int = Form(...),
         images: List[UploadFile] = File(default=[]),
         db: Session = Depends(get_db),
@@ -1096,6 +1100,7 @@ async def update_item(
         db_item.is_active = is_active
         db_item.category_one = category_one
         db_item.category_two = category_two
+        db_item.vendor_id = vendor_id
         db_item.satuan_id = satuan_id
 
         if images and any(img.filename for img in images):
