@@ -11,7 +11,7 @@ from models.mixin.SoftDeleteMixin import SoftDeleteMixin
 
 
 class ItemTypeEnum(enum.Enum):
-    FINISH_GOOD = "FINISH_GOOD"
+    HIGH_QUALITY = "HIGH_QUALITY"
     RAW_MATERIAL = "RAW_MATERIAL"
     SERVICE = "SERVICE"
 

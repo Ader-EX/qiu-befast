@@ -41,6 +41,7 @@ from models.InventoryLedger import SourceTypeEnum
 from models.Item import Item
 from routes.category_routes import _build_categories_lookup
 from routes.satuan_routes import _build_satuans_lookup
+from routes.vendor_routes import _build_vendors_lookup
 from schemas.CategorySchemas import CategoryOut
 from schemas.ItemSchema import ItemResponse, ItemTypeEnum
 from schemas.PaginatedResponseSchemas import PaginatedResponse
@@ -59,7 +60,7 @@ os.makedirs(NEXT_PUBLIC_UPLOAD_DIR, exist_ok=True)
 
 
 def get_item_prefix(item_type: ItemTypeEnum) -> str:
-    if item_type == ItemTypeEnum.FINISH_GOOD:
+    if item_type == ItemTypeEnum.HIGH_QUALITY:
         return "FG"
     elif item_type == ItemTypeEnum.RAW_MATERIAL:
         return "RAW"
@@ -81,7 +82,7 @@ class ImportResult(BaseModel):
 class ImportOptions(BaseModel):
     skip_on_error: bool = True
     update_existing: bool = False
-    default_item_type: ItemTypeEnum = ItemTypeEnum.FINISH_GOOD
+    default_item_type: ItemTypeEnum = ItemTypeEnum.HIGH_QUALITY
 
 
 
@@ -154,7 +155,7 @@ async def export_items_to_excel(
         
         # Map ItemTypeEnum to readable format
         type_mapping = {
-            ItemTypeEnum.FINISH_GOOD: "Finish Good",
+            ItemTypeEnum.HIGH_QUALITY: "High Quality",
             ItemTypeEnum.RAW_MATERIAL: "Raw Material",
             ItemTypeEnum.SERVICE: "Service"
         }
@@ -189,7 +190,7 @@ async def export_items_to_excel(
             # Insert a row for notes after the header
             worksheet.insert_rows(2)
             notes = [
-                'e.g., Finish Good, Raw Material, Service',
+                'e.g., High Quality, Raw Material, Service',
                 'Required: Item name',
                 'Required: Unique identifier',
                 'Optional: Brand category name',
@@ -451,7 +452,7 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
     old_total_item = item.total_item
 
     # Update ONLY the allowed fields - NEVER touch 'code', 'id', 'created_at'
-    updateable_fields = ['name', 'type', 'total_item', 'price',
+    updateable_fields = ['name', 'type', 'total_item', 'price', 'vendor_id',
                          'category_one', 'category_two', 'satuan_id', 'is_active']
 
     for field in updateable_fields:
@@ -570,7 +571,8 @@ async def download_item_template(format: str = "xlsx"):
             "Jumlah Unit",
             "Harga Modal",
             "Harga Jual",
-            "Satuan Unit"
+            "Satuan Unit",
+            "Nama Vendor"
         ]
 
         # Style definitions
@@ -598,7 +600,7 @@ async def download_item_template(format: str = "xlsx"):
 
         # Write helper notes (Row 2)
         notes = [
-            "Finish Good / Raw Material / Service",
+            "High Quality / Raw Material / Service",
             "Nama produk/barang (wajib diisi)",
             "Kode unik produk (wajib diisi, tidak boleh duplikat)",
             "Merek produk (opsional, harus sudah terdaftar)",
@@ -606,7 +608,8 @@ async def download_item_template(format: str = "xlsx"):
             "Jumlah stok awal (angka, default: 0)",
             "Harga pokok/modal (angka, default: 0)",
             "Harga jual (angka, wajib diisi)",
-            "Satuan unit (wajib diisi, harus sudah terdaftar, contoh: pcs, kg, box)"
+            "Satuan unit (wajib diisi, harus sudah terdaftar, contoh: pcs, kg, box)",
+            "Nama Vendor (opsional, harus sudah terdaftar, contoh: Vendor A)"
         ]
 
         for col_idx, note in enumerate(notes, start=1):
@@ -626,7 +629,8 @@ async def download_item_template(format: str = "xlsx"):
             'F': 14,  # Jumlah Unit
             'G': 15,  # Harga Modal
             'H': 15,  # Harga Jual
-            'I': 15   # Satuan Unit
+            'I': 15,   # Satuan Unit
+            'J': 18   # Nama Vendor
         }
 
         for col, width in column_widths.items():
@@ -638,7 +642,7 @@ async def download_item_template(format: str = "xlsx"):
 
         # Add sample data (Row 3) with proper formatting
         sample_data = [
-            "Finish Good",
+            "High Quality",
             "Contoh Produk A",
             "SKU-001",
             "Brand A",
@@ -646,7 +650,8 @@ async def download_item_template(format: str = "xlsx"):
             100,
             50000,
             75000,
-            "pcs"
+            "pcs",
+            "Vendor A"
         ]
 
         for col_idx, value in enumerate(sample_data, start=1):
@@ -669,7 +674,7 @@ async def download_item_template(format: str = "xlsx"):
         # === SHEET 2: Dropdown_Reference ===
 
         # Add dropdown values
-        dropdown_values = ["Finish Good", "Raw Material", "Service"]
+        dropdown_values = ["High Quality", "Raw Material", "Service"]
 
         ws_dropdown.cell(row=1, column=1, value="Item Types")
         ws_dropdown.cell(row=1, column=1).font = Font(bold=True)
@@ -687,7 +692,7 @@ async def download_item_template(format: str = "xlsx"):
             formula1="Dropdown_Reference!$A$2:$A$4",
             allow_blank=True
         )
-        dv.error = "Pilih salah satu: Finish Good, Raw Material, atau Service"
+        dv.error = "Pilih salah satu: High Quality, Raw Material, atau Service"
         dv.errorTitle = "Input Tidak Valid"
         dv.prompt = "Pilih tipe item dari dropdown"
         dv.promptTitle = "Tipe Item"
@@ -732,7 +737,7 @@ async def import_items_from_excel(
         file: UploadFile = File(...),
         skip_on_error: bool = Query(True, description="Skip rows with errors instead of failing completely"),
         update_existing: bool = Query(False, description="Update existing items if SKU already exists"),
-        default_item_type: ItemTypeEnum = Query(ItemTypeEnum.FINISH_GOOD, description="Default item type if not specified"),
+        default_item_type: ItemTypeEnum = Query(ItemTypeEnum.HIGH_QUALITY, description="Default item type if not specified"),
         user_name: str = Depends(get_current_user_name)
 ):
     """
@@ -748,6 +753,7 @@ async def import_items_from_excel(
     - Harga Modal (optional, defaults to 0)
     - Harga Jual (required)
     - Satuan Unit (required, by name)
+    - Nama Vendor (optional, by name)
 
     Note: Item Code will be auto-generated based on item type
     """
@@ -792,7 +798,8 @@ async def import_items_from_excel(
             'Jumlah Unit': 'jumlah_unit',
             'Harga Modal': 'harga_modal',
             'Harga Jual': 'harga_jual',
-            'Satuan Unit': 'satuan_unit'
+            'Satuan Unit': 'satuan_unit',
+            'Nama Vendor': 'nama_vendor'
         }
 
         # Required columns
@@ -808,6 +815,7 @@ async def import_items_from_excel(
         df = df.rename(columns=column_mapping)
 
         # Build lookup dictionaries
+        vendors_lookup = _build_vendors_lookup(db)
         categories_lookup = _build_categories_lookup(db)
         satuans_lookup = _build_satuans_lookup(db)
         existing_skus = _get_existing_skus(db)
@@ -833,7 +841,7 @@ async def import_items_from_excel(
             try:
                 item_data = _process_row(
                     row, index, categories_lookup, satuans_lookup,
-                    existing_skus, default_item_type, update_existing
+                    existing_skus, default_item_type, update_existing, vendors_lookup
                 )
 
                 if item_data is None:
@@ -918,7 +926,8 @@ def _process_row(
         satuans_lookup: Dict[str, int],
         existing_skus: Dict[str, int],
         default_item_type: ItemTypeEnum,
-        update_existing: bool
+        update_existing: bool,
+        vendors_lookup: Dict[str, int],
 ) -> Optional[Dict[str, Any]]:
     """Process a single row from the Excel file."""
 
@@ -968,6 +977,16 @@ def _process_row(
                 f"Jenis Barang '{row['jenis_barang']}' tidak ditemukan. "
                 f"Tambahkan entri terlebih dahulu."
             )
+            
+    vendor_id = None
+    if not pd.isna(row.get('nama_vendor')) and str(row.get('nama_vendor')).strip():
+        vendor_name = str(row['nama_vendor']).lower().strip()
+        vendor_id = vendors_lookup.get(vendor_name)
+        if not vendor_id:
+            raise ValueError(
+                f"Vendor '{row['nama_vendor']}' tidak ditemukan. "
+                f"Tambahkan entri terlebih dahulu."
+            )
 
     # Process Harga Modal (Cost Price)
     try:
@@ -1008,7 +1027,7 @@ def _process_row(
     # Process Type column
     type_value = str(row.get('type', '')).strip().lower() if not pd.isna(row.get('type')) else None
     type_mapping = {
-        "finish good": ItemTypeEnum.FINISH_GOOD,
+        "high quality": ItemTypeEnum.HIGH_QUALITY,
         "raw material": ItemTypeEnum.RAW_MATERIAL,
         "service": ItemTypeEnum.SERVICE,
     }
@@ -1028,6 +1047,7 @@ def _process_row(
         'category_one': category_one_id,
         'category_two': category_two_id,
         'satuan_id': satuan_id,
+        'vendor_id': vendor_id,
         'is_active': True
     }
     

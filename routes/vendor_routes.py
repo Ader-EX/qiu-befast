@@ -3,7 +3,7 @@ from datetime import date, datetime, time
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from database import get_db
 from models.AuditTrail import AuditEntityEnum
@@ -17,6 +17,16 @@ from services.audit_services import AuditService
 from utils import soft_delete_record, get_current_user_name, generate_incremental_id
 
 router = APIRouter()
+
+
+
+
+
+def _build_vendors_lookup(db: Session) -> Dict[str, int]:
+    """Build a lookup dictionary for satuans by name."""
+    vendors = db.query(Vendor).filter(Vendor.deleted_at.is_(None)).all()
+    return {sat.name.lower().strip(): sat.id for sat in vendors}
+
 @router.get("", response_model=PaginatedResponse[VendorOut])
 def get_all_vendors(
         db: Session = Depends(get_db),
