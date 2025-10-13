@@ -39,6 +39,7 @@ from models.AllAttachment import AllAttachment, ParentType
 from models.AuditTrail import AuditEntityEnum
 from models.InventoryLedger import SourceTypeEnum
 from models.Item import Item
+from models.Vendor import Vendor
 from routes.category_routes import _build_categories_lookup
 from routes.satuan_routes import _build_satuans_lookup
 from routes.vendor_routes import _build_vendors_lookup
@@ -46,6 +47,7 @@ from schemas.CategorySchemas import CategoryOut
 from schemas.ItemSchema import ItemResponse, ItemTypeEnum
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.SatuanSchemas import SatuanOut
+from schemas.VendorSchemas import VendorOut
 from services.audit_services import AuditService
 from services.inventoryledger_services import InventoryService
 from utils import (
@@ -391,6 +393,7 @@ def get_items(
     query = db.query(Item).options(
         joinedload(Item.category_one_rel),
         joinedload(Item.category_two_rel),
+        joinedload(Item.vendor_rel),
         joinedload(Item.satuan_rel),
         joinedload(Item.attachments),
     )
@@ -406,6 +409,8 @@ def get_items(
                 Item.sku.ilike(f"%{search_key}%"),
             )
         )
+    if vendor and vendor != "all":
+        query = query.filter(Item.vendor_id == vendor)
 
 
     if item_type:
@@ -1238,5 +1243,6 @@ def construct_item_response(item: Item, request: Request) -> Dict[str, Any]:
         "category_one_rel": CategoryOut.model_validate(item.category_one_rel).model_dump() if item.category_one_rel else None,
         "category_two_rel": CategoryOut.model_validate(item.category_two_rel).model_dump() if item.category_two_rel else None,
         "satuan_rel": SatuanOut.model_validate(item.satuan_rel).model_dump() if item.satuan_rel else None,
+        "vendor_rel": VendorOut.model_validate(item.vendor_rel).model_dump() if item.vendor_rel else None,
         "attachments": enriched_attachments,
     }

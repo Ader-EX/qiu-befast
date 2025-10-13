@@ -7,6 +7,7 @@ from models.Item import ItemTypeEnum
 from schemas.CategorySchemas import CategoryOut
 from schemas.SatuanSchemas import SatuanOut
 from schemas.TopSchemas import TopOut
+from schemas.VendorSchemas import VendorOut
 
 class AttachmentResponse(BaseModel):
     id: int
@@ -49,6 +50,7 @@ class ItemBase(BaseModel):
     category_one_rel: Optional[CategoryOut] = None
     category_two_rel: Optional[CategoryOut] = None
     satuan_rel: Optional[SatuanOut] = None
+    vendor_rel: Optional[VendorOut] = None
 
     class Config:
         from_attributes = True
