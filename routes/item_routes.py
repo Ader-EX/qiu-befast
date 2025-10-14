@@ -534,7 +534,6 @@ def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: Audi
         user_name=user_name,
     )
     return new_item
-
 @router.get("/template/download")
 async def download_item_template(format: str = "xlsx"):
     """
@@ -566,7 +565,7 @@ async def download_item_template(format: str = "xlsx"):
 
         # === SHEET 1: Item_Template ===
 
-        # Define headers
+        # Define headers - ADDED Stock Minimum
         headers = [
             "Type",
             "Nama Item",
@@ -574,6 +573,7 @@ async def download_item_template(format: str = "xlsx"):
             "Brand",
             "Jenis Barang",
             "Jumlah Unit",
+            "Stock Minimum",  # NEW COLUMN
             "Harga Modal",
             "Harga Jual",
             "Satuan Unit",
@@ -603,7 +603,7 @@ async def download_item_template(format: str = "xlsx"):
             cell.alignment = header_alignment
             cell.border = border_thin
 
-        # Write helper notes (Row 2)
+        # Write helper notes (Row 2) - ADDED Stock Minimum note
         notes = [
             "High Quality / Raw Material / Service",
             "Nama produk/barang (wajib diisi)",
@@ -611,6 +611,7 @@ async def download_item_template(format: str = "xlsx"):
             "Merek produk (opsional, harus sudah terdaftar)",
             "Kategori barang (opsional, harus sudah terdaftar)",
             "Jumlah stok awal (angka, default: 0)",
+            "Batas minimal stok untuk notifikasi (angka, default: 0)",  # NEW NOTE
             "Harga pokok/modal (angka, default: 0)",
             "Harga jual (angka, wajib diisi)",
             "Satuan unit (wajib diisi, harus sudah terdaftar, contoh: pcs, kg, box)",
@@ -624,7 +625,7 @@ async def download_item_template(format: str = "xlsx"):
             cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
             cell.border = border_thin
 
-        # Set column widths
+        # Set column widths - ADDED Stock Minimum width
         column_widths = {
             'A': 18,  # Type
             'B': 30,  # Nama Item
@@ -632,10 +633,11 @@ async def download_item_template(format: str = "xlsx"):
             'D': 15,  # Brand
             'E': 18,  # Jenis Barang
             'F': 14,  # Jumlah Unit
-            'G': 15,  # Harga Modal
-            'H': 15,  # Harga Jual
-            'I': 15,   # Satuan Unit
-            'J': 18   # Nama Vendor
+            'G': 15,  # Stock Minimum (NEW)
+            'H': 15,  # Harga Modal
+            'I': 15,  # Harga Jual
+            'J': 15,  # Satuan Unit
+            'K': 18   # Nama Vendor
         }
 
         for col, width in column_widths.items():
@@ -645,16 +647,17 @@ async def download_item_template(format: str = "xlsx"):
         ws_template.row_dimensions[1].height = 30
         ws_template.row_dimensions[2].height = 45
 
-        # Add sample data (Row 3) with proper formatting
+        # Add sample data (Row 3) with proper formatting - ADDED Stock Minimum sample
         sample_data = [
             "High Quality",
             "Contoh Produk A",
             "SKU-001",
             "Brand A",
             "Elektronik",
-            100,
-            50000,
-            75000,
+            100,      # Jumlah Unit
+            10,       # Stock Minimum (NEW)
+            50000,    # Harga Modal
+            75000,    # Harga Jual
             "pcs",
             "Vendor A"
         ]
@@ -664,17 +667,19 @@ async def download_item_template(format: str = "xlsx"):
             cell.border = border_thin
 
             # Apply number format to numeric columns
-            if col_idx in [6, 7, 8]:  # Jumlah Unit, Harga Modal, Harga Jual
+            if col_idx in [6, 7, 8, 9]:  # Jumlah Unit, Stock Minimum, Harga Modal, Harga Jual
                 cell.number_format = '#,##0'
 
         # Format numeric columns for the entire range (rows 3-1000)
         for row_idx in range(3, 1001):
             # Jumlah Unit (F)
             ws_template.cell(row=row_idx, column=6).number_format = '#,##0'
-            # Harga Modal (G)
+            # Stock Minimum (G) - NEW
             ws_template.cell(row=row_idx, column=7).number_format = '#,##0'
-            # Harga Jual (H)
+            # Harga Modal (H)
             ws_template.cell(row=row_idx, column=8).number_format = '#,##0'
+            # Harga Jual (I)
+            ws_template.cell(row=row_idx, column=9).number_format = '#,##0'
 
         # === SHEET 2: Dropdown_Reference ===
 
@@ -734,7 +739,214 @@ async def download_item_template(format: str = "xlsx"):
             status_code=500,
             detail=f"Error generating Excel template: {str(e)}"
         )
+
         
+@router.get("/template/download")
+async def download_item_template(format: str = "xlsx"):
+    """
+    Download item import template in Excel format.
+
+    Features:
+    - Proper number formatting for prices and quantities
+    - Data validation dropdowns for Type column
+    - Helper notes for field usage
+    - UTF-8 encoding support
+    """
+
+    if format.lower() != "xlsx":
+        raise HTTPException(
+            status_code=400,
+            detail="Only xlsx format is supported. Use format=xlsx"
+        )
+
+    try:
+        # Create workbook with two sheets
+        wb = Workbook()
+
+        # Sheet 1: Main template
+        ws_template = wb.active
+        ws_template.title = "Item_Template"
+
+        # Sheet 2: Dropdown reference
+        ws_dropdown = wb.create_sheet("Dropdown_Reference")
+
+        # === SHEET 1: Item_Template ===
+
+        # Define headers - ADDED Stock Minimum
+        headers = [
+            "Type",
+            "Nama Item",
+            "SKU",
+            "Brand",
+            "Jenis Barang",
+            "Jumlah Unit",
+            "Stock Minimum",  # NEW COLUMN
+            "Harga Modal",
+            "Harga Jual",
+            "Satuan Unit",
+            "Nama Vendor"
+        ]
+
+        # Style definitions
+        header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+        header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        note_font = Font(name='Calibri', size=9, italic=True, color='7F7F7F')
+        note_fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
+
+        border_thin = Border(
+            left=Side(style='thin', color='D0D0D0'),
+            right=Side(style='thin', color='D0D0D0'),
+            top=Side(style='thin', color='D0D0D0'),
+            bottom=Side(style='thin', color='D0D0D0')
+        )
+
+        # Write headers (Row 1)
+        for col_idx, header in enumerate(headers, start=1):
+            cell = ws_template.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = border_thin
+
+        # Write helper notes (Row 2) - ADDED Stock Minimum note
+        notes = [
+            "High Quality / Raw Material / Service",
+            "Nama produk/barang (wajib diisi)",
+            "Kode unik produk (wajib diisi, tidak boleh duplikat)",
+            "Merek produk (opsional, harus sudah terdaftar)",
+            "Kategori barang (opsional, harus sudah terdaftar)",
+            "Jumlah stok awal (angka, default: 0)",
+            "Batas minimal stok untuk notifikasi (angka, default: 0)",  # NEW NOTE
+            "Harga pokok/modal (angka, default: 0)",
+            "Harga jual (angka, wajib diisi)",
+            "Satuan unit (wajib diisi, harus sudah terdaftar, contoh: pcs, kg, box)",
+            "Nama Vendor (opsional, harus sudah terdaftar, contoh: Vendor A)"
+        ]
+
+        for col_idx, note in enumerate(notes, start=1):
+            cell = ws_template.cell(row=2, column=col_idx, value=note)
+            cell.font = note_font
+            cell.fill = note_fill
+            cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+            cell.border = border_thin
+
+        # Set column widths - ADDED Stock Minimum width
+        column_widths = {
+            'A': 18,  # Type
+            'B': 30,  # Nama Item
+            'C': 15,  # SKU
+            'D': 15,  # Brand
+            'E': 18,  # Jenis Barang
+            'F': 14,  # Jumlah Unit
+            'G': 15,  # Stock Minimum (NEW)
+            'H': 15,  # Harga Modal
+            'I': 15,  # Harga Jual
+            'J': 15,  # Satuan Unit
+            'K': 18   # Nama Vendor
+        }
+
+        for col, width in column_widths.items():
+            ws_template.column_dimensions[col].width = width
+
+        # Set row heights
+        ws_template.row_dimensions[1].height = 30
+        ws_template.row_dimensions[2].height = 45
+
+        # Add sample data (Row 3) with proper formatting - ADDED Stock Minimum sample
+        sample_data = [
+            "High Quality",
+            "Contoh Produk A",
+            "SKU-001",
+            "Brand A",
+            "Elektronik",
+            100,      # Jumlah Unit
+            10,       # Stock Minimum (NEW)
+            50000,    # Harga Modal
+            75000,    # Harga Jual
+            "pcs",
+            "Vendor A"
+        ]
+
+        for col_idx, value in enumerate(sample_data, start=1):
+            cell = ws_template.cell(row=3, column=col_idx, value=value)
+            cell.border = border_thin
+
+            # Apply number format to numeric columns
+            if col_idx in [6, 7, 8, 9]:  # Jumlah Unit, Stock Minimum, Harga Modal, Harga Jual
+                cell.number_format = '#,##0'
+
+        # Format numeric columns for the entire range (rows 3-1000)
+        for row_idx in range(3, 1001):
+            # Jumlah Unit (F)
+            ws_template.cell(row=row_idx, column=6).number_format = '#,##0'
+            # Stock Minimum (G) - NEW
+            ws_template.cell(row=row_idx, column=7).number_format = '#,##0'
+            # Harga Modal (H)
+            ws_template.cell(row=row_idx, column=8).number_format = '#,##0'
+            # Harga Jual (I)
+            ws_template.cell(row=row_idx, column=9).number_format = '#,##0'
+
+        # === SHEET 2: Dropdown_Reference ===
+
+        # Add dropdown values
+        dropdown_values = ["High Quality", "Raw Material", "Service"]
+
+        ws_dropdown.cell(row=1, column=1, value="Item Types")
+        ws_dropdown.cell(row=1, column=1).font = Font(bold=True)
+
+        for idx, value in enumerate(dropdown_values, start=2):
+            ws_dropdown.cell(row=idx, column=1, value=value)
+
+        ws_dropdown.column_dimensions['A'].width = 20
+
+        # === DATA VALIDATION for Type column ===
+
+        # Create data validation for Type column
+        dv = DataValidation(
+            type="list",
+            formula1="Dropdown_Reference!$A$2:$A$4",
+            allow_blank=True
+        )
+        dv.error = "Pilih salah satu: High Quality, Raw Material, atau Service"
+        dv.errorTitle = "Input Tidak Valid"
+        dv.prompt = "Pilih tipe item dari dropdown"
+        dv.promptTitle = "Tipe Item"
+
+        # Apply validation to Type column (A3:A1000)
+        ws_template.add_data_validation(dv)
+        dv.add("A3:A1000")
+
+        # Freeze panes (freeze first 2 rows)
+        ws_template.freeze_panes = "A3"
+
+        # Hide Dropdown_Reference sheet
+        ws_dropdown.sheet_state = 'hidden'
+
+        # Save to BytesIO
+        excel_file = io.BytesIO()
+        wb.save(excel_file)
+        excel_file.seek(0)
+
+        # Return as streaming response
+        headers = {
+            'Content-Disposition': 'attachment; filename="Template_Import_Item.xlsx"',
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        }
+
+        return StreamingResponse(
+            excel_file,
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers=headers
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating Excel template: {str(e)}"
+        )
+
 
 @router.post("/import-excel", response_model=ImportResult)
 async def import_items_from_excel(
@@ -755,6 +967,7 @@ async def import_items_from_excel(
     - Brand (optional, by name)
     - Jenis Barang (optional, by name)
     - Jumlah Unit (optional, defaults to 0)
+    - Stock Minimum (optional, defaults to 0) - NEW
     - Harga Modal (optional, defaults to 0)
     - Harga Jual (required)
     - Satuan Unit (required, by name)
@@ -793,7 +1006,7 @@ async def import_items_from_excel(
         # Clean column names
         df.columns = df.columns.str.strip()
 
-        # Column mapping to match new template
+        # Column mapping to match new template - ADDED Stock Minimum
         column_mapping = {
             'Type': 'type',
             'Nama Item': 'name',
@@ -801,6 +1014,7 @@ async def import_items_from_excel(
             'Brand': 'brand',
             'Jenis Barang': 'jenis_barang',
             'Jumlah Unit': 'jumlah_unit',
+            'Stock Minimum': 'stock_minimum',  # NEW MAPPING
             'Harga Modal': 'harga_modal',
             'Harga Jual': 'harga_jual',
             'Satuan Unit': 'satuan_unit',
@@ -1029,6 +1243,16 @@ def _process_row(
         except (ValueError, TypeError):
             raise ValueError(f"Invalid Jumlah Unit: {row.get('jumlah_unit', 'N/A')}")
 
+    # Process Stock Minimum (NEW)
+    min_item = 0
+    if not pd.isna(row.get('stock_minimum')):
+        try:
+            min_item = int(float(row['stock_minimum']))
+            if min_item < 0:
+                raise ValueError("Stock Minimum must be non-negative")
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid Stock Minimum: {row.get('stock_minimum', 'N/A')}")
+
     # Process Type column
     type_value = str(row.get('type', '')).strip().lower() if not pd.isna(row.get('type')) else None
     type_mapping = {
@@ -1047,6 +1271,7 @@ def _process_row(
         'sku': sku,
         'type': item_type,
         'total_item': total_item,
+        'min_item': min_item,  # NEW FIELD
         'modal_price': modal_price,  # Harga Modal
         'price': selling_price,    # Harga Jual
         'category_one': category_one_id,
