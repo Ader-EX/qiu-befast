@@ -25,8 +25,8 @@ class Item(Base, SoftDeleteMixin):
     sku = Column(String(100), unique=True,nullable=False, index=True)
     total_item = Column(Integer, default=0, nullable=False)
     min_item = Column(Integer, default=0, nullable=False)
-    modal_price = Column(Numeric(20,7), default=0, nullable=False)
-    price = Column(Numeric(20,7), nullable=False)
+    modal_price = Column(Numeric(24,7), default=0, nullable=False)
+    price = Column(Numeric(24,7), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=func.now(), nullable=False)
     

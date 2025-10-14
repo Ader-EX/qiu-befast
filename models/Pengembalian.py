@@ -43,7 +43,7 @@ class PengembalianDetails(Base):
     pembelian_id = Column(Integer, ForeignKey("pembelians.id"), nullable=True)
     penjualan_id = Column(Integer, ForeignKey("penjualans.id"), nullable=True)
 
-    total_return = Column(Numeric(15,7), default=0.00)
+    total_return = Column(Numeric(24,7), default=0.00)
 
     pengembalian_rel = relationship("Pengembalian", back_populates="pengembalian_details")
     pembelian_rel = relationship("Pembelian", back_populates="pengembalian_detail_rel")

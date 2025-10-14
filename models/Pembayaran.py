@@ -44,7 +44,7 @@ class PembayaranDetails(Base):
     pembelian_id = Column(Integer, ForeignKey("pembelians.id"), nullable=True)
     penjualan_id = Column(Integer, ForeignKey("penjualans.id"), nullable=True)
 
-    total_paid = Column(Numeric(15,7), default=0.00)
+    total_paid = Column(Numeric(24,7), default=0.00)
 
     pembayaran_rel = relationship("Pembayaran", back_populates="pembayaran_details")
     pembelian_rel = relationship("Pembelian", back_populates="pembayaran_detail_rel")

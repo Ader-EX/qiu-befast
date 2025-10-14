@@ -34,21 +34,21 @@ class Pembelian(Base,SoftDeleteMixin):
     status_pembelian = Column(Enum(StatusPembelianEnum), default=StatusPembelianEnum.DRAFT)
     sales_date = Column(DateTime, nullable=True, default=datetime.now)
     sales_due_date = Column(DateTime, nullable=True, default=lambda: datetime.now() + timedelta(weeks=1))
-    currency_amount = Column(Numeric(15,7), default=0.00)
+    currency_amount = Column(Numeric(24, 7), default=0.00)
   
 
-    total_subtotal = Column(Numeric(15,7), default=0.00)
+    total_subtotal = Column(Numeric(24, 7), default=0.00)
     
-    total_discount = Column(Numeric(15,7), default=0.00)
-    additional_discount = Column(Numeric(15,7), default=0.00)
+    total_discount = Column(Numeric(24, 7), default=0.00)
+    additional_discount = Column(Numeric(24, 7), default=0.00)
     
-    total_before_discount = Column(Numeric(15,7), default=0.00)
+    total_before_discount = Column(Numeric(24, 7), default=0.00)
     
-    total_tax = Column(Numeric(15,7), default=0.00)
-    expense = Column(Numeric(15,7), default=0.00)
-    total_price = Column(Numeric(15,7), default=0.00)
-    total_paid = Column(Numeric(15,7), default=0.00)
-    total_return = Column(Numeric(15,7), default=0.00)
+    total_tax = Column(Numeric(24, 7), default=0.00)
+    expense = Column(Numeric(24, 7), default=0.00)
+    total_price = Column(Numeric(24, 7), default=0.00)
+    total_paid = Column(Numeric(24, 7), default=0.00)
+    total_return = Column(Numeric(24, 7), default=0.00)
     # For DRAFT: store foreign keys to allow editing
     # For finalized: store names to preserve data even if master gets deleted
     # Draft mode - foreign keys (nullable when finalized)
@@ -121,14 +121,14 @@ class PembelianItem(Base):
    
    
     qty = Column(Integer, nullable=False, default=0)
-    unit_price = Column(Numeric(15, 7), nullable=False, default=0.00) # harga item per barang
-    unit_price_rmb = Column(Numeric(15, 7), nullable=False, default=0.00) # harga item per barang in RMB
+    unit_price = Column(Numeric(24, 7), nullable=False, default=0.00) # harga item per barang
+    unit_price_rmb = Column(Numeric(24, 7), nullable=False, default=0.00) # harga item per barang in RMB
     tax_percentage = Column(Integer, nullable=True, default=0)
-    discount = Column(Numeric(15,7), default=0.00)
-    price_after_tax =  Column(Numeric(15,7), default=0.00)
-    sub_total  = Column(Numeric(15,7), default=0.00)
-    total_price = Column(Numeric(15, 7), nullable=False, default=0.00)  # qty * unit_price
-    ongkir =Column(Numeric(15, 7), nullable=False, default=0.00)
+    discount = Column(Numeric(24, 7), default=0.00)
+    price_after_tax =  Column(Numeric(24, 7), default=0.00)
+    sub_total  = Column(Numeric(24, 7), default=0.00)
+    total_price = Column(Numeric(24, 7), nullable=False, default=0.00)  # qty * unit_price
+    ongkir =Column(Numeric(24, 7), nullable=False, default=0.00)
 
     # Relationships
     pembelian = relationship("Pembelian", back_populates="pembelian_items")

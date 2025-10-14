@@ -32,12 +32,12 @@ class InventoryLedger(Base):
     qty_in = Column(Integer, nullable=False, default=0)
     qty_out = Column(Integer, nullable=False, default=0)
 
-    unit_price = Column(Numeric(20, 7), nullable=False, default=Decimal("0"))
-    value_in = Column(Numeric(20, 7), nullable=False, default=Decimal("0"))
+    unit_price = Column(Numeric(24, 7), nullable=False, default=Decimal("0"))
+    value_in = Column(Numeric(24, 7), nullable=False, default=Decimal("0"))
 
     cumulative_qty = Column(Integer, nullable=False)
-    moving_avg_cost = Column(Numeric(20, 7), nullable=False)
-    cumulative_value = Column(Numeric(20, 7), nullable=False)
+    moving_avg_cost = Column(Numeric(24, 7), nullable=False)
+    cumulative_value = Column(Numeric(24, 7), nullable=False)
 
     order_key = Column(String(64), nullable=False)
     reason_code = Column(String(64), nullable=True)
