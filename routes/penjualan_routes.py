@@ -479,7 +479,7 @@ async def get_all_penjualan(
     for p in rows:
         customer_name = p.customer_name or (p.customer_rel.name if p.customer_rel else None)
         warehouse_name = p.warehouse_name or (p.warehouse_rel.name if p.warehouse_rel else None)
-        kode_lambung_name = p.kode_lambung_rel.name or (p.kode_lambung_rel.name if p.kode_lambung_rel else None)  # NEW
+        kode_lambung_name = p.kode_lambung_rel.name if p.kode_lambung_rel else None
 
         data.append(
             PenjualanListResponse(
@@ -496,7 +496,7 @@ async def get_all_penjualan(
                 attachments_count=len(p.attachments),
                 customer_name=customer_name,
                 warehouse_name=warehouse_name,
-                kode_lambung_name=kode_lambung_name,  
+                kode_lambung_name=kode_lambung_name,
             )
         )
 
