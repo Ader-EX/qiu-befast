@@ -1280,7 +1280,6 @@ def _process_row(
         'vendor_id': vendor_id,
         'is_active': True
     }
-    
 @router.put("/{item_id}", response_model=ItemResponse)
 async def update_item(
         request: Request,
@@ -1298,6 +1297,8 @@ async def update_item(
         vendor_id: Optional[str] = Form(None),
         satuan_id: int = Form(...),
         images: List[UploadFile] = File(default=[]),
+        existing_images: List[int] = Form(default=[]),  # IDs of images to keep
+        deleted_images: List[int] = Form(default=[]),   # IDs of images to delete
         db: Session = Depends(get_db),
         user_name: str = Depends(get_current_user_name),
 ):
@@ -1305,16 +1306,14 @@ async def update_item(
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB per file
     MAX_TOTAL_SIZE = 30 * 1024 * 1024  # 30MB total
 
-
     audit_service = AuditService(db)
 
     total_size = 0
     for image in images:
         if image.filename:
-            # Read file size (this doesn't load the entire file into memory)
-            image.file.seek(0, 2)  # Seek to end
+            image.file.seek(0, 2)
             file_size = image.file.tell()
-            image.file.seek(0)  # Reset to beginning
+            image.file.seek(0)
 
             if file_size > MAX_FILE_SIZE:
                 raise HTTPException(
@@ -1339,12 +1338,12 @@ async def update_item(
         raise HTTPException(status_code=400, detail="SKU sudah ada")
 
     try:
+        # Update basic fields
         db_item.type = type
         db_item.name = name
         db_item.sku = sku
         db_item.total_item = total_item
-
-        db_item.min_item =min_item
+        db_item.min_item = min_item
         db_item.price = price
         db_item.modal_price = modal_price
         db_item.is_active = is_active
@@ -1353,45 +1352,62 @@ async def update_item(
         db_item.vendor_id = vendor_id
         db_item.satuan_id = satuan_id
 
-        if images and any(img.filename for img in images):
-            if len(images) > 3:
-                raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
+        # Handle image deletions
+        if deleted_images:
+            attachments_to_delete = db.query(AllAttachment).filter(
+                AllAttachment.item_id == item_id,
+                AllAttachment.id.in_(deleted_images)
+            ).all()
 
-            # Remove existing attachments
-            existing_attachments = db.query(AllAttachment).filter(AllAttachment.item_id == item_id).all()
-            for attachment in existing_attachments:
+            for attachment in attachments_to_delete:
+                # Delete physical file
                 if os.path.exists(attachment.file_path):
                     os.remove(attachment.file_path)
+                # Delete database record
                 db.delete(attachment)
 
-            # Add new attachments
-            for image in images:
-                if image.filename:
-                    # Validate file type
-                    allowed_types = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
-                    if image.content_type not in allowed_types:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"File type {image.content_type} not allowed. Allowed types: JPEG, PNG, GIF, WebP"
-                        )
+        # Get current attachment count (after deletions)
+        current_attachment_count = db.query(AllAttachment).filter(
+            AllAttachment.item_id == item_id
+        ).count()
 
-                    ext = os.path.splitext(image.filename)[1]
-                    unique_filename = f"{uuid.uuid4()}{ext}"
-                    save_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
+        # Add new images
+        new_image_count = len([img for img in images if img.filename])
+        total_images = current_attachment_count + new_image_count
 
-                    with open(save_path, "wb") as buffer:
-                        shutil.copyfileobj(image.file, buffer)
+        if total_images > 3:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum 3 images allowed. Currently have {current_attachment_count}, trying to add {new_image_count}"
+            )
 
-                    attachment = AllAttachment(
-                        parent_type=ParentType.ITEMS,
-                        item_id=db_item.id,
-                        filename=image.filename,
-                        file_path=save_path,
-                        file_size=os.path.getsize(save_path),
-                        mime_type=image.content_type,
-                        created_at=datetime.now(),
+        for image in images:
+            if image.filename:
+                # Validate file type
+                allowed_types = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+                if image.content_type not in allowed_types:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"File type {image.content_type} not allowed. Allowed types: JPEG, PNG, GIF, WebP"
                     )
-                    db.add(attachment)
+
+                ext = os.path.splitext(image.filename)[1]
+                unique_filename = f"{uuid.uuid4()}{ext}"
+                save_path = os.path.join(NEXT_PUBLIC_UPLOAD_DIR, unique_filename)
+
+                with open(save_path, "wb") as buffer:
+                    shutil.copyfileobj(image.file, buffer)
+
+                attachment = AllAttachment(
+                    parent_type=ParentType.ITEMS,
+                    item_id=db_item.id,
+                    filename=image.filename,
+                    file_path=save_path,
+                    file_size=os.path.getsize(save_path),
+                    mime_type=image.content_type,
+                    created_at=datetime.now(),
+                )
+                db.add(attachment)
 
         db.commit()
         db.refresh(db_item)
@@ -1411,7 +1427,6 @@ async def update_item(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating item: {str(e)}")
-
 
 @router.delete("/{item_id}")
 def delete_item(item_id: int, db: Session = Depends(get_db)):
