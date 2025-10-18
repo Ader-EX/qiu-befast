@@ -462,7 +462,7 @@ def get_pengembalian_details(pengembalian_id: int, db: Session = Depends(get_db)
 
 
 @router.put("/{pengembalian_id}/draft")
-def revert_to_draft(pengembalian_id: int, db: Session = Depends(get_db)):
+def revert_to_draft(pengembalian_id: int, db: Session = Depends(get_db), user_name  : str = Depends(get_current_user_name)):
     """Revert an active return back to draft status"""
 
     pengembalian = db.query(Pengembalian).filter(
@@ -489,7 +489,7 @@ def revert_to_draft(pengembalian_id: int, db: Session = Depends(get_db)):
 
     # Update payment status for all related records (recalculate without this return)
     for reference_id, reference_type in reference_ids:
-        recalc_return_and_update_payment_status(db, reference_id, reference_type,pengembalian.no_pengembalian)
+        recalc_return_and_update_payment_status(db, reference_id, reference_type,pengembalian.no_pengembalian, user_name)
 
     db.commit()
     db.refresh(pengembalian)

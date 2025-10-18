@@ -300,6 +300,76 @@ def get_pembayaran(pembayaran_id: int, db: Session = Depends(get_db)):
 
     return pembayaran
 
+
+@router.put("/{pembayaran_id}/draft")
+def revert_to_draft(pembayaran_id: int, db: Session = Depends(get_db), user_name  : str = Depends(get_current_user_name)):
+    """Revert an active return back to draft status"""
+
+    pembayaran = db.query(Pembayaran).filter(
+        Pembayaran.id == pembayaran_id,
+    ).first()
+
+    if not pembayaran:
+        raise HTTPException(status_code=404, detail="Pembayaran not found")
+
+    if pembayaran.status != StatusPembelianEnum.ACTIVE:
+        raise HTTPException(status_code=400, detail="Only active returns can be reverted to draft")
+
+    # Store reference info for status update
+    reference_ids = []
+    for detail in pembayaran.pembayaran_details:
+        if detail.pembelian_id:
+            reference_ids.append((detail.pembelian_id, PembayaranPengembalianType.PEMBELIAN))
+        elif detail.penjualan_id:
+            reference_ids.append((detail.penjualan_id, PembayaranPengembalianType.PENJUALAN))
+
+    # Revert to draft
+    pembayaran.status = StatusPembelianEnum.DRAFT
+    db.flush()
+
+    # Update payment status for all related records (recalculate without this return)
+    for reference_id, reference_type in reference_ids:
+        recalc_return_and_update_payment_status(db, reference_id, reference_type,pembayaran.no_pembayaran, user_name)
+
+    db.commit()
+    db.refresh(pembayaran)
+
+    return {"message": "Pembayaran reverted to draft successfully", "pembayaran": pembayaran}
+
+
+def recalc_return_and_update_payment_status(db: Session, reference_id: int, reference_type: PembayaranPengembalianType, no_pembayaran : str, user_name  : str) -> None:
+    """
+    1) Recalculate and persist total_return on the referenced record (Pembelian/Penjualan)
+       from ACTIVE pembayaran rows.
+    2) Delegate to update_payment_status (which uses total_paid + total_return to set statuses).
+    """
+    if reference_type == PembayaranPengembalianType.PEMBELIAN:
+        record = db.query(Pembelian).filter(Pembelian.id == reference_id).first()
+        detail_filter = (PembayaranDetails.pembelian_id == reference_id)
+    else:
+        record = db.query(Penjualan).filter(Penjualan.id == reference_id).first()
+        detail_filter = (PembayaranDetails.penjualan_id == reference_id)
+
+    if not record:
+        return
+
+    total_returns = (
+        db.query(func.coalesce(func.sum(PembayaranDetails.total_return), 0))
+          .join(Pembayaran, PembayaranDetails.pembayaran_id == Pembayaran.id)
+          .filter(Pembayaran.status == StatusPembelianEnum.ACTIVE)
+          .filter(detail_filter)
+          .scalar()
+        or Decimal("0.00")
+    )
+
+    # Persist recalculated total_return on the referenced document
+    record.total_return = Decimal(str(total_returns))
+    db.flush()  # ensure the new total_return is visible to update_payment_status
+
+    # Let the shared payment status function compute statuses using total_paid + total_return
+    update_payment_status(db, reference_id, reference_type,user_name,no_pembayaran, "Pembayaran")
+
+
 @router.put("/{pembayaran_id}/finalize")
 def finalize_pembayaran(pembayaran_id: int, db: Session = Depends(get_db), user_name: str = Depends(get_current_user_name)):
     """Finalize payment record by ID"""
