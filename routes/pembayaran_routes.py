@@ -51,8 +51,8 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
 
     record.total_paid = total_payments
 
-    total_return = record.total_return or Decimal("0.00")
-    total_outstanding = record.total_price - (record.total_paid + total_return)
+    total_paid = record.total_paid or Decimal("0.00")
+    total_outstanding = record.total_price - (record.total_paid + total_paid)
 
     print(f"Total outstanding: {total_outstanding}")  # Debug log
 
@@ -60,7 +60,7 @@ def update_payment_status(db: Session, reference_id: int, reference_type: Pembay
     new_payment_status = None
     if total_outstanding <= 0:
         new_payment_status = StatusPembayaranEnum.PAID
-    elif record.total_paid > 0 or record.total_return > 0:
+    elif record.total_paid > 0 or record.total_paid > 0:
         new_payment_status = StatusPembayaranEnum.HALF_PAID
     else:
         new_payment_status = StatusPembayaranEnum.UNPAID
@@ -339,9 +339,9 @@ def revert_to_draft(pembayaran_id: int, db: Session = Depends(get_db), user_name
 
 def recalc_return_and_update_payment_status(db: Session, reference_id: int, reference_type: PembayaranPengembalianType, no_pembayaran : str, user_name  : str) -> None:
     """
-    1) Recalculate and persist total_return on the referenced record (Pembelian/Penjualan)
+    1) Recalculate and persist total_paid on the referenced record (Pembelian/Penjualan)
        from ACTIVE pembayaran rows.
-    2) Delegate to update_payment_status (which uses total_paid + total_return to set statuses).
+    2) Delegate to update_payment_status (which uses total_paid + total_paid to set statuses).
     """
     if reference_type == PembayaranPengembalianType.PEMBELIAN:
         record = db.query(Pembelian).filter(Pembelian.id == reference_id).first()
@@ -353,8 +353,8 @@ def recalc_return_and_update_payment_status(db: Session, reference_id: int, refe
     if not record:
         return
 
-    total_returns = (
-        db.query(func.coalesce(func.sum(PembayaranDetails.total_return), 0))
+    total_paids = (
+        db.query(func.coalesce(func.sum(PembayaranDetails.total_paid), 0))
           .join(Pembayaran, PembayaranDetails.pembayaran_id == Pembayaran.id)
           .filter(Pembayaran.status == StatusPembelianEnum.ACTIVE)
           .filter(detail_filter)
@@ -362,11 +362,11 @@ def recalc_return_and_update_payment_status(db: Session, reference_id: int, refe
         or Decimal("0.00")
     )
 
-    # Persist recalculated total_return on the referenced document
-    record.total_return = Decimal(str(total_returns))
-    db.flush()  # ensure the new total_return is visible to update_payment_status
+    # Persist recalculated total_paid on the referenced document
+    record.total_paid = Decimal(str(total_paids))
+    db.flush()  # ensure the new total_paid is visible to update_payment_status
 
-    # Let the shared payment status function compute statuses using total_paid + total_return
+    # Let the shared payment status function compute statuses using total_paid + total_paid
     update_payment_status(db, reference_id, reference_type,user_name,no_pembayaran, "Pembayaran")
 
 
