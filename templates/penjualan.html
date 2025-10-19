@@ -3,193 +3,590 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-
+    <title>Invoice</title>
     <style>
-      {{ css|safe }}
+      /* ===== THEME ===== */
+      :root {
+        --ink: #020617;
+        --muted: #64748b;
+        --brand: #fc440e;
+        --brand-12: rgba(251, 68, 15, 0.12);
+        --line: #e2e8f0;
+        --danger: #dc2626;
+        --bg: #fff;
+      }
+
+      /* ===== RESET ===== */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      body {
+        font-family: Geist, Inter, ui-sans-serif, system-ui, -apple-system,
+          Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji",
+          "Segoe UI Emoji";
+        color: var(--ink);
+        background: var(--bg);
+        display: flex;
+        justify-content: center;
+        padding: 20px;
+        line-height: 1.45;
+        font-size: 14px;
+      }
+
+      /* ===== LAYOUT ===== */
+      .invoice-container {
+        width: 100%;
+        max-width: 800px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      .header-section {
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .body-section {
+        page-break-inside: auto;
+        break-inside: auto;
+      }
+      .footer-section {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        display: block;
+        position: relative;
+      }
+
+      /* ===== HEADER ===== */
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .header-right {
+        text-align: right;
+        line-height: 1.2;
+        font-size: 14px;
+      }
+      .divider {
+        border: none;
+        border-top: 2px solid #fb440f;
+        margin-top: 8px;
+      }
+      h1 {
+        font-size: 32px;
+        font-weight: 700;
+        line-height: 40px;
+        color: var(--brand);
+      }
+
+      /* ===== INFO ===== */
+      .info-section {
+        display: flex;
+        gap: 20px;
+      }
+      .info-block {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .info-block .title {
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 14px;
+        line-height: 1.2;
+        gap: 12px;
+      }
+      .info-row .label {
+        color: var(--muted);
+        font-weight: 500;
+      }
+      .info-row .value {
+        color: var(--ink);
+        font-weight: 400;
+        width: 120px;
+        text-align: right;
+        word-break: break-word;
+      }
+
+      /* ===== TABLE ===== */
+      .table-wrapper {
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 600px;
+        table-layout: auto;
+      }
+      thead tr {
+        background: var(--brand-12);
+      }
+      tbody tr {
+        page-break-inside: avoid;
+      }
+      th,
+      td {
+        padding: 12px 16px;
+        font-size: 14px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: middle;
+      }
+      th {
+        font-weight: 500;
+        text-align: left;
+      }
+      td img {
+        display: block;
+        border-radius: 6px;
+        object-fit: cover;
+      }
+
+      /* column widths */
+      th:nth-child(1),
+      td:nth-child(1) {
+        width: 50px;
+        text-align: center;
+      }
+      th:nth-child(2),
+      td:nth-child(2) {
+        width: 350px;
+      }
+      th:nth-child(3),
+      td:nth-child(3),
+      th:nth-child(4),
+      td:nth-child(4),
+      th:nth-child(5),
+      td:nth-child(5) {
+        width: 60px;
+        text-align: center;
+      }
+      th:nth-child(6),
+      td:nth-child(6) {
+        width: 200px;
+        text-align: right;
+      }
+      th:nth-child(7),
+      td:nth-child(7) {
+        text-align: right;
+      }
+
+      /* ===== TOTALS / PAYMENT ===== */
+      .totals-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+      .totals-title {
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .totals-row,
+      .summary-row {
+        display: flex;
+        justify-content: space-between;
+      }
+      .totals-row .label {
+        color: var(--muted);
+        font-weight: 500;
+        font-size: 14px;
+      }
+      .totals-row .value {
+        color: var(--ink);
+        font-weight: 400;
+        font-size: 14px;
+      }
+      .totals-row .destructive {
+        color: var(--danger);
+      }
+      .summary-row {
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .summary-row[style] {
+        font-size: 14px;
+        font-weight: 400;
+      }
+      .summary-row .destructive {
+        color: var(--danger);
+      }
+      .payment {
+        font-size: 14px;
+        color: var(--muted);
+        line-height: 1.4;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+
+      /* ===== SIGNATURES ===== */
+      .signature-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        margin-top: 32px;
+        gap: 40px;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+      .customer-signature {
+        padding: 20px;
+        min-width: 250px;
+        min-height: 140px;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .customer-signature .sign-title {
+        font-size: 14px;
+        font-weight: 600;
+        text-align: center;
+        color: var(--muted);
+        border-bottom: 1px solid var(--ink);
+        padding-bottom: 70px;
+      }
+      .customer-signature .name-line {
+        border-top: 1px solid var(--ink);
+        padding-top: 8px;
+        font-size: 13px;
+        color: var(--muted);
+        text-align: center;
+      }
+      .signature-block {
+        width: 266px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .signature-block .line1 {
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .signature-block .line2 {
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .signature-block .line3 {
+        font-size: 14px;
+        font-weight: 400;
+      }
+
+      /* ===== SPACER BOX ===== */
+      .spacer-box {
+        height: 700px;
+        background: transparent;
+      }
+
+      @media screen {
+        .spacer-box {
+          background: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 10px,
+            rgba(100, 116, 139, 0.1) 10px,
+            rgba(100, 116, 139, 0.1) 11px
+          );
+          border: var(--muted);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--muted);
+          font-weight: 600;
+        }
+        .spacer-box::after {
+          content: "";
+        }
+      }
+
+      @media print {
+        .spacer-box {
+          page-break-after: always;
+          break-after: page;
+        }
+      }
+
+      /* ===== RESPONSIVE ===== */
+      @media (max-width: 600px) {
+        body {
+          padding: 12px;
+        }
+        .info-section {
+          flex-direction: column;
+        }
+        .info-row .value {
+          width: 100px;
+        }
+        h1 {
+          font-size: 28px;
+          line-height: 34px;
+        }
+        .signature-container {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .customer-signature {
+          min-width: 100%;
+        }
+        .signature-block {
+          width: 100%;
+        }
+        th,
+        td {
+          padding: 10px 12px;
+        }
+      }
+
+      /* ===== PRINT ===== */
+      @media print {
+        thead {
+          display: table-header-group;
+        }
+        tbody {
+          display: table-row-group;
+        }
+        .page-chunk {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+        .page-chunk + .page-chunk {
+          break-before: page;
+          page-break-before: always;
+        }
+      }
+
+      /* ===== UTIL ===== */
+      .text-right {
+        text-align: right;
+      }
+      .text-center {
+        text-align: center;
+      }
     </style>
   </head>
   <body>
-    {# Currency macro; change to .replace(",", ".") if you want Indo separators
-    #} {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float)
-    }} {%- endmacro %}
+    {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float) }}
+    {%- endmacro %}
 
     <div class="invoice-container">
       <!-- HEADER -->
-      <div class="header">
-        <img
-          src="{{ company.logo_url }}"
-          style="width: 150px; height: auto"
-          alt="Logo"
-        />
-        <div class="header-right">
-          <div>{{ company.address }}</div>
-          <div>{{ company.website }}</div>
+      <div class="header-section">
+        <div class="header">
+          <img
+            src="{{ company.logo_url }}"
+            style="width: 150px; height: auto"
+            alt="Logo"
+          />
+          <div class="header-right">
+            <div>{{ company.address }}</div>
+            <div>{{ company.website }}</div>
+          </div>
+        </div>
+        <hr class="divider" />
+        <h1>Invoice</h1>
+
+        <div class="info-section">
+          <div class="info-block">
+            <div class="title">Informasi Invoice</div>
+            <div class="info-row">
+              <div class="label">Nomor Faktur</div>
+              <div class="value">{{ penjualan.no_penjualan }}</div>
+            </div>
+            <div class="info-row">
+              <div class="label">Tanggal Terbit</div>
+              <div class="value">
+                {{ penjualan.sales_date.strftime('%d-%m-%Y') if
+                penjualan.sales_date else '-' }}
+              </div>
+            </div>
+            <div class="info-row">
+              <div class="label">Tanggal Jatuh Tempo</div>
+              <div class="value">
+                {{ penjualan.sales_due_date.strftime('%d-%m-%Y') if
+                penjualan.sales_due_date else '-' }}
+              </div>
+            </div>
+            <div class="info-row">
+              <div class="label">Kode Lambung Penjualan</div>
+              <div class="value">
+                {{ penjualan.kode_lambung_rel.name if penjualan.kode_lambung_rel
+                else '-' }}
+              </div>
+            </div>
+          </div>
+
+          <div class="info-block">
+            <div class="title">Kpd Yth.</div>
+            <div class="info-row">
+              <div class="label">Nama Customer</div>
+              <div class="value">{{ penjualan.customer_display }}</div>
+            </div>
+            <div class="info-row">
+              <div class="label">Alamat</div>
+              <div class="value">
+                {{ penjualan.customer_address_display if
+                penjualan.customer_address_display else '-' }}
+              </div>
+            </div>
+            <div class="info-row">
+              <div class="label">Status</div>
+              <div class="value">
+                {{ penjualan.status_pembayaran.value if
+                penjualan.status_pembayaran else '-' }}
+              </div>
+            </div>
+            <div class="info-row">
+              <div class="label">Kode Lambung Customer</div>
+              <div class="value">
+                {{ penjualan.customer_rel.kode_lambung if
+                penjualan.customer_rel.kode_lambung else '-' }}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <hr class="divider" />
-      <h1>Invoice</h1>
-
-      <!-- INFO SECTION -->
-      <div class="info-section">
-        <div class="info-block">
-          <div class="title">Informasi Invoice</div>
-          <div class="info-row">
-            <div class="label">Nomor Faktur</div>
-            <div class="value">{{ penjualan.no_penjualan }}</div>
-          </div>
-          <div class="info-row">
-            <div class="label">Tanggal Terbit</div>
-            <div class="value">
-              {{ penjualan.sales_date.strftime('%d-%m-%Y') if
-              penjualan.sales_date else '-' }}
-            </div>
-          </div>
-          <div class="info-row">
-            <div class="label">Tanggal Jatuh Tempo</div>
-            <div class="value">
-              {{ penjualan.sales_due_date.strftime('%d-%m-%Y') if
-              penjualan.sales_due_date else '-' }}
-            </div>
-          </div>
-          <div class="info-row">
-            <div class="label">Kode Lambung Penjualan</div>
-            <div class="value">
-              {{ penjualan.kode_lambung_rel.name if penjualan.kode_lambung_rel
-              else '-' }}
-            </div>
-          </div>
+      <!-- BODY -->
+      <div class="body-section">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Nama Barang</th>
+                <th>QTY</th>
+                <th>Satuan</th>
+                <th>Pajak (%)</th>
+                <th>Harga Satuan (IDR)</th>
+                <th>Nominal (IDR)</th>
+              </tr>
+            </thead>
+            <tbody class="page-chunk">
+              {% for row in enhanced_items %} {% if loop.index0 != 0 and
+              loop.index0 % 3 == 0 %}
+            </tbody>
+          </table>
         </div>
 
-        <div class="info-block">
-          <div class="title">Kpd Yth.</div>
-          <div class="info-row">
-            <div class="label">Nama Customer</div>
-            <div class="value">{{ penjualan.customer_display }}</div>
-          </div>
-          <div class="info-row">
-            <div class="label">Alamat</div>
-            <div class="value">
-              {{ penjualan.customer_address_display if
-              penjualan.customer_address_display else '-' }}
-            </div>
-          </div>
-          <div class="info-row">
-            <div class="label">Status</div>
-            <div class="value">
-              {{ penjualan.status_pembayaran.value if
-              penjualan.status_pembayaran else '-' }}
-            </div>
-          </div>
-          <div class="info-row">
-            <div class="label">Kode Lambung Customer</div>
-            <div class="value">
-              {{ penjualan.customer_rel.kode_lambung if
-              penjualan.customer_rel.kode_lambung else '-' }}
-            </div>
-          </div>
+        <!-- SPACER BOX FOR PAGE BREAK -->
+        <div class="spacer-box"></div>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Nama Barang</th>
+                <th>QTY</th>
+                <th>Satuan</th>
+                <th>Pajak (%)</th>
+                <th>Harga Satuan (IDR)</th>
+                <th>Nominal (IDR)</th>
+              </tr>
+            </thead>
+            <tbody class="page-chunk">
+              {% endif %}
+              <tr>
+                <td>{{ loop.index }}</td>
+                <td style="display: flex; align-items: center; gap: 12px">
+                  <img
+                    src="{{ row.image_url }}"
+                    alt="Product"
+                    style="width: 60px; height: 60px; object-fit: cover"
+                  />
+                  <span>{{ row.item_name }}</span>
+                </td>
+                <td class="text-center">{{ row.qty }}</td>
+                <td class="text-center">{{ row.satuan_name or '-' }}</td>
+                <td class="text-center">{{ row.tax_percentage or 0 }}</td>
+                <td class="text-right">{{ idr(row.unit_price) }}</td>
+                <td class="text-right">{{ idr(row.total_price) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <!-- ITEMS TABLE -->
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>No</th>
-              <th>Nama Barang</th>
-              <th>QTY</th>
-              <th>Satuan</th>
-              <th>Pajak (%)</th>
-              <th>Harga Satuan (IDR)</th>
-              <th>Nominal (IDR)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {# Use enhanced_items so image_url is already absolute/prefixed #}
-            {% for row in enhanced_items %}
-            <tr>
-              <td>{{ loop.index }}</td>
-              <td style="display: flex; align-items: center; gap: 12px">
-                <img
-                  src="{{ row.image_url }}"
-                  alt="Product"
-                  style="width: 60px; height: 60px; object-fit: cover"
-                />
-                <span>{{ row.item_name }}</span>
-              </td>
-              <td style="text-align: center">{{ row.qty }}</td>
-              <td style="text-align: center">{{ row.satuan_name or '-' }}</td>
-              <td style="text-align: center">{{ row.tax_percentage or 0 }}</td>
-              <td style="text-align: right">{{ idr(row.unit_price) }}</td>
-              <td style="text-align: right">{{ idr(row.total_price) }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+      <!-- FOOTER (ALWAYS AT BOTTOM) -->
+      <div class="footer-section">
+        <div class="totals-section">
+          <div class="totals-title">Total Invoice</div>
+          <div class="totals-row">
+            <div class="label">Sub Total</div>
+            <div class="value">{{ idr(totals.subtotal) }}</div>
+          </div>
+          <div class="totals-row">
+            <div class="label">Item Discounts</div>
+            <div class="value destructive">
+              -{{ idr(totals.item_discounts) }}
+            </div>
+          </div>
+          <div class="totals-row">
+            <div class="label">Additional Discount</div>
+            <div class="value destructive">
+              -{{ idr(totals.additional_discount) }}
+            </div>
+          </div>
 
-      <!-- TOTALS -->
-      <div class="totals-section">
-        <div class="totals-title">Total Invoice</div>
+          <div style="height: 16px"></div>
 
-        <div class="totals-row">
-          <div class="label">Sub Total</div>
-          <div class="value">{{ idr(totals.subtotal) }}</div>
-        </div>
-
-        <div class="totals-row">
-          <div class="label">Item Discounts</div>
-          <div class="value destructive">-{{ idr(totals.item_discounts) }}</div>
-        </div>
-
-        <div class="totals-row">
-          <div class="label">Additional Discount</div>
-          <div class="value destructive">
-            -{{ idr(totals.additional_discount) }}
+          <div class="summary-row">
+            <div>Total (Before Tax)</div>
+            <div>{{ idr(totals.final_total) }}</div>
+          </div>
+          <div class="summary-row" style="font-weight: 400; font-size: 14px">
+            <div>Pajak</div>
+            <div>{{ idr(totals.tax_amount) }}</div>
+          </div>
+          <div class="summary-row" style="font-weight: 400; font-size: 14px">
+            <div>Expense</div>
+            <div>{{ idr(penjualan.expense) }}</div>
+          </div>
+          <div class="summary-row" style="font-weight: 400; font-size: 14px">
+            <div>Remaining</div>
+            <div>{{ idr(penjualan.remaining) }}</div>
+          </div>
+          <div class="summary-row">
+            <div>Grand Total</div>
+            <div>{{ idr(totals.grand_total) }}</div>
           </div>
         </div>
 
-        <div style="height: 16px"></div>
-
-        <div class="summary-row">
-          <div>Total (Before Tax)</div>
-          <div>{{ idr(totals.final_total) }}</div>
-        </div>
-        <div class="summary-row" style="font-weight: 400; font-size: 14px">
-          <div>Pajak</div>
-          <div>{{ idr(totals.tax_amount) }}</div>
-        </div>
-        <div class="summary-row" style="font-weight: 400; font-size: 14px">
-          <div>Expense</div>
-          <div>{{ idr(penjualan.expense) }}</div>
-        </div>
-        <div class="summary-row" style="font-weight: 400; font-size: 14px">
-          <div>Remaining</div>
-          <div>{{ idr(penjualan.remaining) }}</div>
+        <div class="payment">
+          Mohon melakukan pembayaran ke rekening berikut:<br />
+          • Nama Bank: {{ company.bank_name }}<br />
+          • Nama Penerima: {{ company.account_name }}<br />
+          • No. Rekening: {{ company.account_number }}
         </div>
 
-        <div class="summary-row">
-          <div>Grand Total</div>
-          <div>{{ idr(totals.grand_total) }}</div>
-        </div>
-      </div>
-
-      <!-- PAYMENT INFO -->
-      <div class="payment">
-        Mohon melakukan pembayaran ke rekening berikut:<br />
-        • Nama Bank: {{ company.bank_name }}<br />
-        • Nama Penerima: {{ company.account_name }}<br />
-        • No. Rekening: {{ company.account_number }}
-      </div>
-
-      <!-- SIGNATURE -->
-      <div class="signature">
-        <div class="signature-block">
-          <div class="line1">Hormat kami,</div>
-          <div class="line2">{{ company.name }}</div>
-          <br /><br />
-          <div class="line3">{{ company.representative }}</div>
+        <div class="signature-container">
+          <div class="customer-signature">
+            <div class="sign-title">Tanda Terima</div>
+          </div>
+          <div class="signature-block">
+            <div class="line1">Hormat kami,</div>
+            <div class="line2">{{ company.name }}</div>
+            <br /><br />
+            <div class="line3">{{ company.representative }}</div>
+          </div>
         </div>
       </div>
     </div>

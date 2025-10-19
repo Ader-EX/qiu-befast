@@ -3,15 +3,401 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-
+    <title>Invoice</title>
     <style>
-      {{ css|safe }}
+      /* ===== THEME ===== */
+      :root {
+        --ink: #020617;
+        --muted: #64748b;
+        --brand: #fc440e;
+        --brand-12: rgba(251, 68, 15, 0.12);
+        --line: #e2e8f0;
+        --danger: #dc2626;
+        --bg: #fff;
+      }
+
+      /* ===== RESET ===== */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      body {
+        font-family: Geist, Inter, ui-sans-serif, system-ui, -apple-system,
+          Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji",
+          "Segoe UI Emoji";
+        color: var(--ink);
+        background: var(--bg);
+        display: flex;
+        justify-content: center;
+        padding: 20px;
+        line-height: 1.45;
+        font-size: 14px;
+      }
+
+      /* ===== LAYOUT ===== */
+      .invoice-container {
+        width: 100%;
+        max-width: 800px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      /* ===== HEADER ===== */
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .header-right {
+        text-align: right;
+        line-height: 1.2;
+        font-size: 14px;
+      }
+      .divider {
+        border: none;
+        border-top: 2px solid #fb440f;
+        margin-top: 8px;
+      }
+      h1 {
+        font-size: 32px;
+        font-weight: 700;
+        line-height: 40px;
+        color: var(--brand);
+      }
+
+      /* ===== INFO ===== */
+      .info-section {
+        display: flex;
+        gap: 20px;
+      }
+      .info-block {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .info-block .title {
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 14px;
+        line-height: 1.2;
+        gap: 12px;
+      }
+      .info-row .label {
+        color: var(--muted);
+        font-weight: 500;
+      }
+      .info-row .value {
+        color: var(--ink);
+        font-weight: 400;
+        width: 120px;
+        text-align: right;
+        word-break: break-word;
+      }
+
+      /* ===== TABLE ===== */
+      .table-wrapper {
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 600px;
+        table-layout: auto;
+      }
+      thead tr {
+        background: var(--brand-12);
+      }
+      tbody tr {
+        page-break-inside: avoid;
+      }
+      th,
+      td {
+        padding: 12px 16px;
+        font-size: 14px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: middle;
+      }
+      th {
+        font-weight: 500;
+        text-align: left;
+      }
+      td img {
+        display: block;
+        border-radius: 6px;
+        object-fit: cover;
+      }
+
+      /* column widths */
+      th:nth-child(1),
+      td:nth-child(1) {
+        width: 50px;
+        text-align: center;
+      }
+      th:nth-child(2),
+      td:nth-child(2) {
+        width: 350px;
+      }
+      th:nth-child(3),
+      td:nth-child(3),
+      th:nth-child(4),
+      td:nth-child(4),
+      th:nth-child(5),
+      td:nth-child(5) {
+        width: 60px;
+        text-align: center;
+      }
+      th:nth-child(6),
+      td:nth-child(6) {
+        width: 200px;
+        text-align: right;
+      }
+      th:nth-child(7),
+      td:nth-child(7) {
+        text-align: right;
+      }
+
+      /* ===== TOTALS / PAYMENT ===== */
+      .totals-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .totals-title {
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .totals-row,
+      .summary-row {
+        display: flex;
+        justify-content: space-between;
+      }
+      .totals-row .label {
+        color: var(--muted);
+        font-weight: 500;
+        font-size: 14px;
+      }
+      .totals-row .value {
+        color: var(--ink);
+        font-weight: 400;
+        font-size: 14px;
+      }
+      .totals-row .destructive {
+        color: var(--danger);
+      }
+      .summary-row {
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .summary-row[style] {
+        font-size: 14px;
+        font-weight: 400;
+      }
+      .summary-row .destructive {
+        color: var(--danger);
+      }
+      .payment {
+        font-size: 14px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+
+      /* ===== SIGNATURES (with Tanda Terima) ===== */
+      .signature-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 40px;
+      }
+      .customer-signature {
+        padding: 20px;
+        min-width: 250px;
+        min-height: 140px;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .customer-signature .sign-title {
+        font-size: 14px;
+        font-weight: 600;
+        text-align: center;
+        color: var(--muted);
+        border-bottom: 1px solid var(--ink);
+        padding-bottom: 70px;
+      }
+      .customer-signature .name-line {
+        border-top: 1px solid var(--ink);
+        padding-top: 8px;
+        font-size: 13px;
+        color: var(--muted);
+        text-align: center;
+      }
+      .signature-block {
+        width: 266px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .signature-block .line1 {
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .signature-block .line2 {
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .signature-block .line3 {
+        font-size: 14px;
+        font-weight: 400;
+      }
+
+      /* ===== SPACER BOX ===== */
+      .spacer-box {
+        height: 700px;
+        background: transparent;
+      }
+      @media screen {
+        .spacer-box {
+          background: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 10px,
+            rgba(100, 116, 139, 0.1) 10px,
+            rgba(100, 116, 139, 0.1) 11px
+          );
+          border: 1px dashed rgba(100, 116, 139, 0.35);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--muted);
+          font-weight: 600;
+        }
+        .spacer-box::after {
+          content: "PAGE BREAK";
+        }
+      }
+
+      /* ===== RESPONSIVE ===== */
+      @media (max-width: 600px) {
+        body {
+          padding: 12px;
+        }
+        .info-section {
+          flex-direction: column;
+        }
+        .info-row .value {
+          width: 100px;
+        }
+        h1 {
+          font-size: 28px;
+          line-height: 34px;
+        }
+        th,
+        td {
+          padding: 10px 12px;
+        }
+        .signature-container {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .customer-signature {
+          min-width: 100%;
+        }
+        .signature-block {
+          width: 100%;
+        }
+      }
+
+      /* ===== PRINT ===== */
+      @media print {
+        @page {
+          margin: 20mm;
+          size: A4 portrait;
+        }
+
+        /* kill flex in print so breaks actually work */
+        html,
+        body {
+          height: auto;
+        }
+        body {
+          display: block !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          background: #fff !important;
+        }
+        .invoice-container {
+          display: block !important;
+          max-width: 800px;
+          margin: 0 auto;
+          gap: 0 !important;
+        }
+
+        /* table behaves & header repeats */
+        thead {
+          display: table-header-group;
+        }
+        tbody {
+          display: table-row-group;
+        }
+        .table-wrapper {
+          overflow: visible !important;
+        }
+        tr,
+        td,
+        th {
+          page-break-inside: avoid;
+        }
+
+        /* spacer forces a new printed page (no visible height on paper) */
+        .spacer-box {
+          page-break-after: always;
+          break-after: page;
+          height: 0 !important;
+        }
+
+        /* signatures start on a new page & never split */
+        .signature-container {
+          break-before: page !important;
+          page-break-before: always !important;
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+        .customer-signature,
+        .signature-block {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+      }
+
+      /* ===== UTIL ===== */
+      .text-right {
+        text-align: right;
+      }
+      .text-center {
+        text-align: center;
+      }
     </style>
   </head>
   <body>
-    {# Currency macro; change to .replace(",", ".") if you want Indo separators
-    #} {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float)
-    }} {%- endmacro %}
+    {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float) }}
+    {%- endmacro %}
 
     <div class="invoice-container">
       <!-- HEADER -->
@@ -78,7 +464,7 @@
         </div>
       </div>
 
-      <!-- ITEMS TABLE -->
+      <!-- ITEMS TABLE (spacer-box every 3 rows) -->
       <div class="table-wrapper">
         <table>
           <thead>
@@ -93,8 +479,31 @@
             </tr>
           </thead>
           <tbody>
-            {# Use enhanced_items so image_url is already absolute/prefixed #}
-            {% for row in enhanced_items %}
+            {% for row in enhanced_items %} {% if loop.index0 != 0 and
+            loop.index0 % 3 == 0 %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- SPACER BOX FOR PAGE BREAK -->
+      <div class="spacer-box"></div>
+
+      <!-- Re-open table with header for next chunk -->
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Nama Barang</th>
+              <th>QTY</th>
+              <th>Satuan</th>
+              <th>Pajak (%)</th>
+              <th>Harga Satuan (IDR)</th>
+              <th>Nominal (IDR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% endif %}
             <tr>
               <td>{{ loop.index }}</td>
               <td style="display: flex; align-items: center; gap: 12px">
@@ -117,7 +526,6 @@
       </div>
 
       <!-- TOTALS -->
-      <!-- TOTALS -->
       <div class="totals-section">
         <div class="totals-title">Total Invoice</div>
 
@@ -125,12 +533,10 @@
           <div class="label">Sub Total</div>
           <div class="value">{{ idr(totals.subtotal) }}</div>
         </div>
-
         <div class="totals-row">
           <div class="label">Item Discounts</div>
           <div class="value destructive">-{{ idr(totals.item_discounts) }}</div>
         </div>
-
         <div class="totals-row">
           <div class="label">Additional Discount</div>
           <div class="value destructive">
@@ -156,7 +562,6 @@
           <div>Remaining</div>
           <div>{{ idr(pembelian.remaining) }}</div>
         </div>
-
         <div class="summary-row">
           <div>Grand Total</div>
           <div>{{ idr(totals.grand_total) }}</div>
@@ -171,8 +576,14 @@
         • No. Rekening: {{ company.account_number }}
       </div>
 
-      <!-- SIGNATURE -->
-      <div class="signature">
+      <!-- SIGNATURES PAGE (Tanda Terima + Perusahaan) -->
+      <div class="signature-container">
+        <!-- Tanda Terima (Customer) -->
+        <div class="customer-signature">
+          <div class="sign-title">Tanda Terima</div>
+        </div>
+
+        <!-- Perusahaan -->
         <div class="signature-block">
           <div class="line1">Hormat kami,</div>
           <div class="line2">{{ company.name }}</div>

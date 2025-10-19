@@ -1218,7 +1218,7 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
                 "website": "www.qiupart.com",
                 "bank_name": "Bank Mandiri",
                 "account_name": "PT. JAYAGIRI INDO ASIA",
-                "account_number": "167-00-07971095",
+                "account_number": "7285834627",
                 "representative": "AMAR",
             },
             "css": open("templates/invoice.css").read(),
