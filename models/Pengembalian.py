@@ -30,8 +30,8 @@ class Pengembalian(Base):
     vendor_id = Column(String(50), ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
     
     # Other info
-    currency_id = Column(Integer, ForeignKey("currencies.id", ondelete="SET NULL"), nullable=False)
-    warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=False)
+    currency_id = Column(Integer, ForeignKey("currencies.id", ondelete="SET NULL"), nullable=True)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
 
     # Totals (simpler than Pembelian - NO discounts)
     total_subtotal = Column(Numeric(24, 7), default=0.00)  # Sum of all item sub_totals (qty * price)
