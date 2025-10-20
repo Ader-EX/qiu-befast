@@ -46,6 +46,7 @@ class Item(Base, SoftDeleteMixin):
     pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
     penjualan_items  = relationship("PenjualanItem", back_populates="item_rel")
     stock_adjustment_items = relationship("StockAdjustmentItem", back_populates="item_rel")
+    pengembalian_items = relationship("PengembalianItem", back_populates="item_rel")
 
     @property
     def primary_image_url(self) -> Optional[str]:

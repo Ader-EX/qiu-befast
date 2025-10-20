@@ -38,6 +38,7 @@ class InventoryLedger(Base):
     cumulative_qty = Column(Integer, nullable=False)
     moving_avg_cost = Column(Numeric(24, 7), nullable=False)
     cumulative_value = Column(Numeric(24, 7), nullable=False)
+    is_open = Column(Boolean, default=True)
 
     order_key = Column(String(64), nullable=False)
     reason_code = Column(String(64), nullable=True)

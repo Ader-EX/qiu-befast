@@ -77,8 +77,8 @@ class Penjualan(Base, SoftDeleteMixin):
         back_populates="penjualan_rel",
         cascade="all, delete-orphan",
     )
-    pengembalian_detail_rel = relationship(
-        "PengembalianDetails",
+    pengembalian_rel = relationship(
+        "Pengembalian",
         back_populates="penjualan_rel",
         cascade="all, delete-orphan",
     )

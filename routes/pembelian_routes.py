@@ -1,6 +1,4 @@
 import base64
-import mimetypes
-import random
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, status
 from fastapi.responses import FileResponse

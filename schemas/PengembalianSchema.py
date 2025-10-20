@@ -2,90 +2,114 @@ from pydantic import BaseModel, field_validator, Field, model_validator
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
-
 from pydantic_core.core_schema import ValidationInfo
 
-from models.Pembelian import StatusPembayaranEnum, StatusPembelianEnum
-import enum
-
+from models.Pembelian import StatusPembelianEnum
 from schemas.ItemSchema import AttachmentResponse
 from schemas.PembelianSchema import PembelianResponse
 from schemas.PenjualanSchema import PenjualanResponse
 from schemas.PembayaranSchemas import CustomerResponse, PembayaranPengembalianType
 
 
-# Return Detail schemas
-class PengembalianDetailBase(BaseModel):
-    pembelian_id: Optional[int] = None
-    penjualan_id: Optional[int] = None
-    total_return: Decimal = Field(default=Decimal('0.00'), ge=0)  # This represents the return amount
-
-class PengembalianDetailCreate(PengembalianDetailBase):
-    @model_validator(mode='after')
-    def validate_reference_ids(self):
-        # Exactly one of pembelian_id or penjualan_id must be provided
-        if not self.pembelian_id and not self.penjualan_id:
-            raise ValueError('Either pembelian_id or penjualan_id must be provided')
-
-        if self.pembelian_id and self.penjualan_id:
-            raise ValueError('Only one of pembelian_id or penjualan_id can be provided')
-
-        return self
+# Pengembalian Item schemas (NO discount, simpler than Pembelian)
+class PengembalianItemBase(BaseModel):
+    item_id: int
+    qty_returned: int = Field(gt=0)
+    unit_price: Decimal = Field(ge=0)
+    tax_percentage: Optional[int] = Field(0, ge=0, le=100)
 
 
-class PengembalianDetailResponse(PengembalianDetailBase):
+class PengembalianItemCreate(PengembalianItemBase):
+    pass
+
+
+class PengembalianItemUpdate(BaseModel):
+    item_id: Optional[int] = None
+    qty_returned: Optional[int] = Field(None, gt=0)
+    unit_price: Optional[Decimal] = Field(None, ge=0)
+    tax_percentage: Optional[int] = Field(None, ge=0, le=100)
+
+
+class PengembalianItemResponse(BaseModel):
     id: int
     pengembalian_id: int
-
-    # Related objects
-    pembelian_rel: Optional['PembelianResponse'] = None
-    penjualan_rel: Optional['PenjualanResponse'] = None
+    item_id: Optional[int] = None
+    item_code: Optional[str] = None
+    item_name: Optional[str] = None
+    
+    qty_returned: int
+    unit_price: Decimal
+    tax_percentage: int
+    
+    # Computed totals
+    sub_total: Decimal = Field(default=Decimal("0.00"))  # qty * unit_price
+    total_return: Decimal = Field(default=Decimal("0.00"))  # sub_total + tax
+    
+    # Display properties
+    item_display_code: str = Field(default="—")
+    item_display_name: str = Field(default="—")
+    primary_image_url: Optional[str] = None
 
     class Config:
         from_attributes = True
 
-# Base schemas
+
+# Main Pengembalian schemas (NO additional_discount)
 class PengembalianBase(BaseModel):
     payment_date: datetime
     reference_type: PembayaranPengembalianType
     currency_id: int
     warehouse_id: int
+    notes: Optional[str] = None
 
 
 class PengembalianCreate(PengembalianBase):
+    # Single reference - exactly one must be provided based on reference_type
+    pembelian_id: Optional[int] = None
+    penjualan_id: Optional[int] = None
+    
     customer_id: Optional[int] = None
     vendor_id: Optional[str] = None
-    pengembalian_details: List[PengembalianDetailCreate] = Field(..., min_length=1)
+    
+    # Item list (required, at least 1 item)
+    pengembalian_items: List[PengembalianItemCreate] = Field(..., min_length=1)
 
     @model_validator(mode='after')
-    def validate_details_consistency(self):
+    def validate_reference_and_partner(self):
         reference_type = self.reference_type
 
-        for detail in self.pengembalian_details:
-            if reference_type == PembayaranPengembalianType.PEMBELIAN:
-                if not detail.pembelian_id:
-                    raise ValueError('All return details must have pembelian_id when reference_type is PEMBELIAN')
-                if detail.penjualan_id:
-                    raise ValueError('Return details cannot have penjualan_id when reference_type is PEMBELIAN')
-            elif reference_type == PembayaranPengembalianType.PENJUALAN:
-                if not detail.penjualan_id:
-                    raise ValueError('All return details must have penjualan_id when reference_type is PENJUALAN')
-                if detail.pembelian_id:
-                    raise ValueError('Return details cannot have pembelian_id when reference_type is PENJUALAN')
+        # Validate reference ID based on type
+        if reference_type == PembayaranPengembalianType.PEMBELIAN:
+            if not self.pembelian_id:
+                raise ValueError('pembelian_id is required when reference_type is PEMBELIAN')
+            if self.penjualan_id:
+                raise ValueError('penjualan_id should not be set when reference_type is PEMBELIAN')
+            if not self.vendor_id:
+                raise ValueError('vendor_id is required when reference_type is PEMBELIAN')
+            if self.customer_id:
+                raise ValueError('customer_id should not be set when reference_type is PEMBELIAN')
+                
+        elif reference_type == PembayaranPengembalianType.PENJUALAN:
+            if not self.penjualan_id:
+                raise ValueError('penjualan_id is required when reference_type is PENJUALAN')
+            if self.pembelian_id:
+                raise ValueError('pembelian_id should not be set when reference_type is PENJUALAN')
+            if not self.customer_id:
+                raise ValueError('customer_id is required when reference_type is PENJUALAN')
+            if self.vendor_id:
+                raise ValueError('vendor_id should not be set when reference_type is PENJUALAN')
 
         return self
 
+
 class PengembalianUpdate(BaseModel):
-    reference_type : Optional[PembayaranPengembalianType] = None
     payment_date: Optional[datetime] = None
     currency_id: Optional[int] = None
     warehouse_id: Optional[int] = None
-    customer_id: Optional[int] = None
-    vendor_id: Optional[str] = None
-
-    pengembalian_details: Optional[List[PengembalianDetailCreate]] = None
-
+    notes: Optional[str] = None
+    
+    # Items can be updated (replace all items)
+    pengembalian_items: Optional[List[PengembalianItemCreate]] = None
 
 
 class VendorResponse(BaseModel):
@@ -96,12 +120,14 @@ class VendorResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 class WarehouseResponse(BaseModel):
     id: int
     name: str
 
     class Config:
         from_attributes = True
+
 
 class CurrencyResponse(BaseModel):
     id: int
@@ -120,61 +146,46 @@ class PengembalianResponse(BaseModel):
     payment_date: datetime
 
     reference_type: PembayaranPengembalianType
+    pembelian_id: Optional[int] = None
+    penjualan_id: Optional[int] = None
+    
     customer_id: Optional[int] = None
     vendor_id: Optional[str] = None
     currency_id: int
     warehouse_id: int
+    
+    # Totals (simpler than Pembelian - no discounts)
+    total_subtotal: Decimal = Field(default=Decimal("0.00"))
+    total_tax: Decimal = Field(default=Decimal("0.00"))
+    total_return: Decimal = Field(default=Decimal("0.00"))
+    
+    notes: Optional[str] = None
 
+    # Relationships
     customer_rel: Optional[CustomerResponse] = None
+    vend_rel: Optional[VendorResponse] = None
     warehouse_rel: Optional[WarehouseResponse] = None
     curr_rel: Optional[CurrencyResponse] = None
-    pengembalian_details: List[PengembalianDetailResponse] = []
+    pembelian_rel: Optional[PembelianResponse] = None
+    penjualan_rel: Optional[PenjualanResponse] = None
+    
+    pengembalian_items: List[PengembalianItemResponse] = []
     attachments: List[AttachmentResponse] = []
 
     # Computed fields
-    reference_numbers: List[str] = Field(default_factory=list)
-    reference_partners: List[str] = Field(default_factory=list)
+    reference_number: str = Field(default="—")
+    partner_display: str = Field(default="—")
 
     class Config:
         from_attributes = True
 
-    @field_validator('reference_numbers', mode='before')
-    @classmethod
-    def set_reference_numbers(cls, v, info: ValidationInfo):
-        if info.data and 'pengembalian_details' in info.data:
-            details = info.data['pengembalian_details']
-            numbers = []
-
-            for detail in details:
-                if hasattr(detail, 'pembelian_rel') and detail.pembelian_rel:
-                    numbers.append(detail.pembelian_rel.no_pembelian)
-                elif hasattr(detail, 'penjualan_rel') and detail.penjualan_rel:
-                    numbers.append(detail.penjualan_rel.no_penjualan)
-
-            return numbers
-        return v or []
-
-    @field_validator('reference_partners', mode='before')
-    @classmethod
-    def set_reference_partners(cls, v, info: ValidationInfo):
-        if info.data and 'pengembalian_details' in info.data:
-            details = info.data['pengembalian_details']
-            partners = []
-
-            for detail in details:
-                if hasattr(detail, 'pembelian_rel') and detail.pembelian_rel:
-                    partners.append(detail.pembelian_rel.vendor_display or '—')
-                elif hasattr(detail, 'penjualan_rel') and detail.penjualan_rel:
-                    partners.append(detail.penjualan_rel.customer_display or '—')
-
-            return partners
-        return v or []
 
 class PengembalianListResponse(BaseModel):
     data: List[PengembalianResponse]
     total: int
     skip: int
     limit: int
+
 
 # Filter schema for queries
 class PengembalianFilter(BaseModel):
@@ -199,5 +210,5 @@ class PengembalianFilter(BaseModel):
         return v
 
 
-PengembalianDetailResponse.model_rebuild()
+PengembalianItemResponse.model_rebuild()
 PengembalianResponse.model_rebuild()
