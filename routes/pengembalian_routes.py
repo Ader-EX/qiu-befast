@@ -155,7 +155,7 @@ def _validate_items_payload(items_data: List):
             raise HTTPException(status_code=400, detail=f"items[{idx}]: tax_percentage must be between 0 and 100")
 
 
-@router.post("", response_model=PengembalianResponse)
+@router.post("")
 def create_pengembalian(
     pengembalian_data: PengembalianCreate, 
     db: Session = Depends(get_db), 
