@@ -172,6 +172,8 @@ def create_pengembalian(
 
     # Validate reference exists and is active
     if pengembalian_data.reference_type == PembayaranPengembalianType.PEMBELIAN:
+        pengembalian_data.penjualan_id = None
+        pengembalian_data.customer_id = None
         pembelian = db.query(Pembelian).filter(
             Pembelian.id == pengembalian_data.pembelian_id,
             Pembelian.is_deleted == False,
@@ -183,6 +185,8 @@ def create_pengembalian(
                 detail=f"Active Pembelian with ID {pengembalian_data.pembelian_id} not found"
             )
     else:
+        pengembalian_data.pembelian_id = None
+        pengembalian_data.vendor_id = None
         penjualan = db.query(Penjualan).filter(
             Penjualan.id == pengembalian_data.penjualan_id,
             Penjualan.is_deleted == False,
