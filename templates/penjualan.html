@@ -14,9 +14,7 @@
         --line: #e2e8f0;
         --danger: #dc2626;
         --bg: #fff;
-      }
-
-      /* ===== RESET ===== */
+      } /* ===== RESET ===== */
       *,
       *::before,
       *::after {
@@ -24,7 +22,6 @@
         margin: 0;
         padding: 0;
       }
-
       html {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -40,15 +37,7 @@
         padding: 20px;
         line-height: 1.45;
         font-size: 14px;
-      }
-
-      /* ===== PAGE SIZE (important for fit) ===== */
-      @page {
-        size: A4;
-        margin: 14mm 12mm; /* tweak if you’re still off by a few mm */
-      }
-
-      /* ===== LAYOUT ===== */
+      } /* ===== LAYOUT ===== */
       .invoice-container {
         width: 100%;
         max-width: 800px;
@@ -56,7 +45,6 @@
         flex-direction: column;
         gap: 24px;
       }
-
       .header-section {
         page-break-inside: avoid;
         break-inside: avoid;
@@ -70,9 +58,7 @@
         break-inside: avoid !important;
         display: block;
         position: relative;
-      }
-
-      /* ===== HEADER ===== */
+      } /* ===== HEADER ===== */
       .header {
         display: flex;
         justify-content: space-between;
@@ -82,7 +68,6 @@
         text-align: right;
         line-height: 1.2;
         font-size: 14px;
-        word-break: break-word;
       }
       .divider {
         border: none;
@@ -94,9 +79,7 @@
         font-weight: 700;
         line-height: 40px;
         color: var(--brand);
-      }
-
-      /* ===== INFO ===== */
+      } /* ===== INFO ===== */
       .info-section {
         display: flex;
         gap: 20px;
@@ -128,9 +111,7 @@
         width: 120px;
         text-align: right;
         word-break: break-word;
-      }
-
-      /* ===== TABLE ===== */
+      } /* ===== TABLE ===== */
       .table-wrapper {
         overflow-x: auto;
       }
@@ -138,7 +119,7 @@
         width: 100%;
         border-collapse: collapse;
         min-width: 600px;
-        table-layout: fixed; /* critical for predictable width/height */
+        table-layout: auto;
       }
       thead tr {
         background: var(--brand-12);
@@ -157,8 +138,11 @@
         font-weight: 500;
         text-align: left;
       }
-
-      /* column widths (strict) */
+      td img {
+        display: block;
+        border-radius: 6px;
+        object-fit: cover;
+      } /* column widths */
       th:nth-child(1),
       td:nth-child(1) {
         width: 50px;
@@ -166,7 +150,7 @@
       }
       th:nth-child(2),
       td:nth-child(2) {
-        width: 250px; /* name column */
+        width: 350px;
       }
       th:nth-child(3),
       td:nth-child(3),
@@ -185,43 +169,7 @@
       th:nth-child(7),
       td:nth-child(7) {
         text-align: right;
-      }
-
-      /* ===== ROW HEIGHT CONTROL ===== */
-      tr.invoice-row {
-        height: 120px; /* tune this value if needed */
-      }
-
-      /* ===== NAME CELL (no flex-in-td) ===== */
-      .item-cell {
-        display: grid;
-        grid-template-columns: 60px minmax(0, 1fr); /* <-- allow shrink */
-        align-items: center;
-        gap: 12px;
-      }
-      .item-img {
-        width: 60px;
-        height: 60px;
-        object-fit: cover;
-        border-radius: 6px;
-        display: block;
-      }
-      .item-text {
-        min-width: 0; /* <-- CRUCIAL for grid wrapping */
-        overflow: hidden;
-        display: -webkit-box;
-        -webkit-line-clamp: 3;
-        -webkit-box-orient: vertical;
-        line-height: 1.3;
-        max-height: calc(1.3em * 3);
-        word-break: break-word;
-        overflow-wrap: anywhere;
-        white-space: normal;
-        text-overflow: ellipsis;
-        padding-right: 2px; /* tiny buffer to avoid glyph cut-off */
-      }
-
-      /* ===== TOTALS / PAYMENT ===== */
+      } /* ===== TOTALS / PAYMENT ===== */
       .totals-section {
         display: flex;
         flex-direction: column;
@@ -268,9 +216,7 @@
         line-height: 1.4;
         page-break-inside: avoid !important;
         break-inside: avoid !important;
-      }
-
-      /* ===== SIGNATURES ===== */
+      } /* ===== SIGNATURES ===== */
       .signature-container {
         display: flex;
         justify-content: space-between;
@@ -323,14 +269,11 @@
       .signature-block .line3 {
         font-size: 14px;
         font-weight: 400;
-      }
-
-      /* ===== SPACER BOX ===== */
+      } /* ===== SPACER BOX ===== */
       .spacer-box {
         height: 700px;
         background: transparent;
       }
-
       @media screen {
         .spacer-box {
           background: repeating-linear-gradient(
@@ -351,15 +294,12 @@
           content: "";
         }
       }
-
       @media print {
         .spacer-box {
           page-break-after: always;
           break-after: page;
         }
-      }
-
-      /* ===== RESPONSIVE ===== */
+      } /* ===== RESPONSIVE ===== */
       @media (max-width: 600px) {
         body {
           padding: 12px;
@@ -388,9 +328,7 @@
         td {
           padding: 10px 12px;
         }
-      }
-
-      /* ===== PRINT ===== */
+      } /* ===== PRINT ===== */
       @media print {
         thead {
           display: table-header-group;
@@ -406,9 +344,7 @@
           break-before: page;
           page-break-before: always;
         }
-      }
-
-      /* ===== UTIL ===== */
+      } /* ===== UTIL ===== */
       .text-right {
         text-align: right;
       }
@@ -420,7 +356,6 @@
   <body>
     {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float) }}
     {%- endmacro %}
-
     <div class="invoice-container">
       <!-- HEADER -->
       <div class="header-section">
@@ -437,7 +372,6 @@
         </div>
         <hr class="divider" />
         <h1>Invoice</h1>
-
         <div class="info-section">
           <div class="info-block">
             <div class="title">Informasi Invoice</div>
@@ -467,7 +401,6 @@
               </div>
             </div>
           </div>
-
           <div class="info-block">
             <div class="title">Kpd Yth.</div>
             <div class="info-row">
@@ -498,7 +431,6 @@
           </div>
         </div>
       </div>
-
       <!-- BODY -->
       <div class="body-section">
         <div class="table-wrapper">
@@ -520,10 +452,8 @@
             </tbody>
           </table>
         </div>
-
         <!-- SPACER BOX FOR PAGE BREAK -->
         <div class="spacer-box"></div>
-
         <div class="table-wrapper">
           <table>
             <thead>
@@ -539,17 +469,15 @@
             </thead>
             <tbody class="page-chunk">
               {% endif %}
-              <tr class="invoice-row">
+              <tr>
                 <td>{{ loop.index }}</td>
-                <td>
-                  <div class="item-cell">
-                    <img
-                      class="item-img"
-                      src="{{ row.image_url }}"
-                      alt="Product"
-                    />
-                    <div class="item-text">{{ row.item_name }}</div>
-                  </div>
+                <td style="display: flex; align-items: center; gap: 12px">
+                  <img
+                    src="{{ row.image_url }}"
+                    alt="Product"
+                    style="width: 60px; height: 60px; object-fit: cover"
+                  />
+                  <span>{{ row.item_name }}</span>
                 </td>
                 <td class="text-center">{{ row.qty }}</td>
                 <td class="text-center">{{ row.satuan_name or '-' }}</td>
@@ -562,7 +490,6 @@
           </table>
         </div>
       </div>
-
       <!-- FOOTER (ALWAYS AT BOTTOM) -->
       <div class="footer-section">
         <div class="totals-section">
@@ -583,9 +510,7 @@
               -{{ idr(totals.additional_discount) }}
             </div>
           </div>
-
           <div style="height: 16px"></div>
-
           <div class="summary-row">
             <div>Total (Before Tax)</div>
             <div>{{ idr(totals.final_total) }}</div>
@@ -607,14 +532,12 @@
             <div>{{ idr(totals.grand_total) }}</div>
           </div>
         </div>
-
         <div class="payment">
           Mohon melakukan pembayaran ke rekening berikut:<br />
           • Nama Bank: {{ company.bank_name }}<br />
           • Nama Penerima: {{ company.account_name }}<br />
           • No. Rekening: {{ company.account_number }}
         </div>
-
         <div class="signature-container">
           <div class="customer-signature">
             <div class="sign-title">Tanda Terima</div>
