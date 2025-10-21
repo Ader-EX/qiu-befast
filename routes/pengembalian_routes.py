@@ -247,12 +247,10 @@ def create_pengembalian(
     db.commit()
     db.refresh(pengembalian)
 
-    return {"msg": "Pengembalian berhasil dibuat"}
-
-
+    return {"msg": "Pengembalian berhasil dibuat" ,"id":pengembalian.id}
 @router.get("", response_model=PengembalianListResponse)
 def get_pengembalians(
-    skip: int = Query(0, ge=0),
+    page: int = Query(1, ge=1, description="Page number (starts at 1)"),
     limit: int = Query(100, ge=1, le=1000),
     reference_type: Optional[PembayaranPengembalianType] = None,
     status: Optional[StatusPembelianEnum] = None,
@@ -262,55 +260,58 @@ def get_pengembalians(
     db: Session = Depends(get_db)
 ):
     """Get list of return records with filtering"""
-    query = db.query(Pengembalian).filter().order_by(
-        cast(func.substr(Pengembalian.no_pengembalian,
-                         func.length(Pengembalian.no_pengembalian) - 3), Integer).desc(),
-        cast(func.substr(Pengembalian.no_pengembalian,
-                         func.length(Pengembalian.no_pengembalian) - 6, 2), Integer).desc(),
-        cast(func.substr(Pengembalian.no_pengembalian, 7, 4), Integer).desc()
-    )
+    offset = (page - 1) * limit  # ✅ calculate proper offset
 
-    # Date filters
+    base_query = db.query(Pengembalian)
+
+    # filters...
     if from_date and to_date:
-        query = query.filter(
+        base_query = base_query.filter(
             Pengembalian.created_at.between(
                 datetime.combine(from_date, time.min),
                 datetime.combine(to_date, time.max),
             )
         )
     elif from_date:
-        query = query.filter(Pengembalian.created_at >= datetime.combine(from_date, time.min))
+        base_query = base_query.filter(Pengembalian.created_at >= datetime.combine(from_date, time.min))
     elif to_date:
-        query = query.filter(Pengembalian.created_at <= datetime.combine(to_date, time.max))
+        base_query = base_query.filter(Pengembalian.created_at <= datetime.combine(to_date, time.max))
 
-    # Type and status filters
     if reference_type and reference_type != "ALL":
-        query = query.filter(Pengembalian.reference_type == reference_type)
+        base_query = base_query.filter(Pengembalian.reference_type == reference_type)
 
     if status and status != "ALL":
-        query = query.filter(Pengembalian.status == status)
-        
+        base_query = base_query.filter(Pengembalian.status == status)
+
     if search_key:
-        query = query.filter(Pengembalian.no_pengembalian.ilike(f"%{search_key}%"))
+        base_query = base_query.filter(Pengembalian.no_pengembalian.ilike(f"%{search_key}%"))
 
-    total = query.count()
+    total = base_query.count()
 
-    pengembalians = query.options(
-        joinedload(Pengembalian.pengembalian_items).joinedload(PengembalianItem.item_rel),
-        joinedload(Pengembalian.pembelian_rel),
-        joinedload(Pengembalian.penjualan_rel),
-        joinedload(Pengembalian.customer_rel),
-        joinedload(Pengembalian.vend_rel),
-        joinedload(Pengembalian.warehouse_rel),
-        joinedload(Pengembalian.curr_rel)
-    ).order_by(Pengembalian.created_at.desc()).offset(skip).limit(limit).all()
+    pengembalians = (
+        base_query.options(
+            joinedload(Pengembalian.pengembalian_items).joinedload(PengembalianItem.item_rel),
+            joinedload(Pengembalian.pembelian_rel),
+            joinedload(Pengembalian.penjualan_rel),
+            joinedload(Pengembalian.customer_rel),
+            joinedload(Pengembalian.vend_rel),
+            joinedload(Pengembalian.warehouse_rel),
+            joinedload(Pengembalian.curr_rel),
+        )
+        .order_by(Pengembalian.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     return PengembalianListResponse(
         data=pengembalians,
         total=total,
-        skip=skip,
-        limit=limit
+        skip=offset,
+        limit=limit,
     )
+
+
 
 
 @router.get("/{pengembalian_id}", response_model=PengembalianResponse)
@@ -384,7 +385,6 @@ def finalize_pengembalian(
     db.refresh(pengembalian)
     return {"message": "Pengembalian finalized successfully", "pengembalian": pengembalian}
 
-
 @router.put("/{pengembalian_id}", response_model=PengembalianResponse)
 def update_pengembalian(
     pengembalian_id: int,
@@ -426,7 +426,8 @@ def update_pengembalian(
             db.delete(it)
         db.flush()
 
-        # Create new items (snapshot fields + tax)
+        # ✅ Re-create items and attach via relationship (not bare db.add)
+        new_items = []
         for it in pengembalian_data.pengembalian_items:
             item_obj = db.query(Item).filter(Item.id == it.item_id).first()
             new_item = PengembalianItem(
@@ -438,12 +439,14 @@ def update_pengembalian(
                 unit_price=it.unit_price,
                 tax_percentage=it.tax_percentage or 0,
             )
-            # compute per-line totals
             calculate_item_totals(new_item)
-            db.add(new_item)
+            new_items.append(new_item)
 
+        pengembalian.pengembalian_items.extend(new_items)
         db.flush()
-        # Recompute header totals
+
+        # Ensure parent sees fresh collection, then recalc header totals
+        db.refresh(pengembalian)  # optional but safe
         calculate_pengembalian_totals(pengembalian)
 
     audit_service.default_log(
@@ -456,6 +459,7 @@ def update_pengembalian(
     db.commit()
     db.refresh(pengembalian)
     return pengembalian
+
 
 
 @router.delete("/{pengembalian_id}")
