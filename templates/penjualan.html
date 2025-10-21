@@ -42,6 +42,12 @@
         font-size: 14px;
       }
 
+      /* ===== PAGE SIZE (important for fit) ===== */
+      @page {
+        size: A4;
+        margin: 14mm 12mm; /* tweak if you’re still off by a few mm */
+      }
+
       /* ===== LAYOUT ===== */
       .invoice-container {
         width: 100%;
@@ -76,6 +82,7 @@
         text-align: right;
         line-height: 1.2;
         font-size: 14px;
+        word-break: break-word;
       }
       .divider {
         border: none;
@@ -131,7 +138,7 @@
         width: 100%;
         border-collapse: collapse;
         min-width: 600px;
-        table-layout: auto;
+        table-layout: fixed; /* critical for predictable width/height */
       }
       thead tr {
         background: var(--brand-12);
@@ -145,18 +152,14 @@
         font-size: 14px;
         border-bottom: 1px solid var(--line);
         vertical-align: middle;
+        overflow: hidden; /* prevent accidental overflow */
       }
       th {
         font-weight: 500;
         text-align: left;
       }
-      td img {
-        display: block;
-        border-radius: 6px;
-        object-fit: cover;
-      }
 
-      /* column widths */
+      /* column widths (strict) */
       th:nth-child(1),
       td:nth-child(1) {
         width: 50px;
@@ -164,7 +167,7 @@
       }
       th:nth-child(2),
       td:nth-child(2) {
-        width: 350px;
+        width: 250px; /* name column */
       }
       th:nth-child(3),
       td:nth-child(3),
@@ -183,6 +186,37 @@
       th:nth-child(7),
       td:nth-child(7) {
         text-align: right;
+      }
+
+      /* ===== ROW HEIGHT CONTROL ===== */
+      tr.invoice-row {
+        height: 120px; /* tune this value if needed */
+      }
+
+      /* ===== NAME CELL (no flex-in-td) ===== */
+      .item-cell {
+        display: grid;
+        grid-template-columns: 60px 1fr;
+        align-items: center;
+        gap: 12px;
+      }
+      .item-img {
+        width: 60px;
+        height: 60px;
+        object-fit: cover;
+        border-radius: 6px;
+        display: block;
+      }
+      .item-text {
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 3; /* max 3 lines */
+        line-clamp: 3;
+        -webkit-box-orient: vertical;
+        line-height: 1.3;
+        max-height: calc(1.3em * 3);
+        word-break: break-word;
+        overflow-wrap: anywhere;
       }
 
       /* ===== TOTALS / PAYMENT ===== */
@@ -480,7 +514,7 @@
             </thead>
             <tbody class="page-chunk">
               {% for row in enhanced_items %} {% if loop.index0 != 0 and
-              loop.index0 % 2 == 0 %}
+              loop.index0 % 3 == 0 %}
             </tbody>
           </table>
         </div>
@@ -503,15 +537,17 @@
             </thead>
             <tbody class="page-chunk">
               {% endif %}
-              <tr>
+              <tr class="invoice-row">
                 <td>{{ loop.index }}</td>
-                <td style="display: flex; align-items: center; gap: 12px">
-                  <img
-                    src="{{ row.image_url }}"
-                    alt="Product"
-                    style="width: 60px; height: 60px; object-fit: cover"
-                  />
-                  <span>{{ row.item_name }}</span>
+                <td>
+                  <div class="item-cell">
+                    <img
+                      class="item-img"
+                      src="{{ row.image_url }}"
+                      alt="Product"
+                    />
+                    <div class="item-text">{{ row.item_name }}</div>
+                  </div>
                 </td>
                 <td class="text-center">{{ row.qty }}</td>
                 <td class="text-center">{{ row.satuan_name or '-' }}</td>
