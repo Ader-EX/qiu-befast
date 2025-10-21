@@ -152,7 +152,6 @@
         font-size: 14px;
         border-bottom: 1px solid var(--line);
         vertical-align: middle;
-        overflow: hidden; /* prevent accidental overflow */
       }
       th {
         font-weight: 500;
@@ -196,7 +195,7 @@
       /* ===== NAME CELL (no flex-in-td) ===== */
       .item-cell {
         display: grid;
-        grid-template-columns: 60px 1fr;
+        grid-template-columns: 60px minmax(0, 1fr); /* <-- allow shrink */
         align-items: center;
         gap: 12px;
       }
@@ -208,15 +207,18 @@
         display: block;
       }
       .item-text {
+        min-width: 0; /* <-- CRUCIAL for grid wrapping */
         overflow: hidden;
         display: -webkit-box;
-        -webkit-line-clamp: 3; /* max 3 lines */
-        line-clamp: 3;
+        -webkit-line-clamp: 3;
         -webkit-box-orient: vertical;
         line-height: 1.3;
         max-height: calc(1.3em * 3);
         word-break: break-word;
         overflow-wrap: anywhere;
+        white-space: normal;
+        text-overflow: ellipsis;
+        padding-right: 2px; /* tiny buffer to avoid glyph cut-off */
       }
 
       /* ===== TOTALS / PAYMENT ===== */
