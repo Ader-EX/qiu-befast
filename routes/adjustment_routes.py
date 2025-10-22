@@ -611,7 +611,123 @@ async def rollback_stock_adjustment(
         "adjustment": adjustment
     }
 
+@router.delete("/{adjustment_id}", status_code=status.HTTP_200_OK)
+def delete_stock_adjustment(
+    adjustment_id: int,
+    db: Session = Depends(get_db),
+    user_name: str = Depends(get_current_user_name)
+):
+    """
+    Delete a stock adjustment.
+    - DRAFT: Can be deleted directly (soft delete)
+    - ACTIVE: Must be rolled back first, then inventory entries are reversed
+    """
+    audit_service = AuditService(db)
+    inventory_service = InventoryService(db)
 
+    # Fetch adjustment with items
+    adjustment = (
+        db.query(StockAdjustment)
+        .options(
+            selectinload(StockAdjustment.stock_adjustment_items)
+            .selectinload(StockAdjustmentItem.item_rel)
+        )
+        .filter(
+            StockAdjustment.id == adjustment_id,
+            StockAdjustment.is_deleted == False
+        )
+        .first()
+    )
+
+    if not adjustment:
+        raise HTTPException(status_code=404, detail="Stock adjustment not found")
+
+    adjustment_number = adjustment.no_adjustment
+    adjustment_status = adjustment.status_adjustment
+    total_items = len(adjustment.stock_adjustment_items)
+
+    # Handle ACTIVE adjustments - must reverse stock changes first
+    if adjustment.status_adjustment == StatusStockAdjustmentEnum.ACTIVE:
+        # Reverse stock changes for each item
+        for adj_item in adjustment.stock_adjustment_items:
+            item = db.query(Item).filter(
+                Item.id == adj_item.item_id,
+                Item.is_deleted == False
+            ).first()
+
+            if not item:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Item {adj_item.item_id} not found - cannot delete adjustment"
+                )
+
+            old_stock = item.total_item
+
+            # Reverse the adjustment
+            if adjustment.adjustment_type == AdjustmentTypeEnum.OUT:
+                # Original was OUT, reverse with IN
+                inventory_service.post_inventory_in(
+                    item_id=adj_item.item_id,
+                    source_type=SourceTypeEnum.IN,
+                    source_id=f"{adjustment.no_adjustment}",
+                    qty=adj_item.qty,
+                    unit_price=Decimal(str(adj_item.adj_price)),
+                    trx_date=date.today(),
+                    reason_code=f"Deletion Reversal of Adjustment {adjustment.no_adjustment}"
+                )
+                item.total_item += adj_item.qty
+                action = "dikembalikan"
+
+            else:  # IN
+                # Original was IN, reverse with OUT
+                if item.total_item < adj_item.qty:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot delete - insufficient stock for {item.name}. Available: {item.total_item}, Required: {adj_item.qty}"
+                    )
+
+                inventory_service.post_inventory_out(
+                    item_id=adj_item.item_id,
+                    source_type=SourceTypeEnum.OUT,
+                    source_id=f"{adjustment.no_adjustment}",
+                    qty=adj_item.qty,
+                    trx_date=date.today(),
+                    reason_code=f"Deletion Reversal of Adjustment {adjustment.no_adjustment}"
+                )
+                item.total_item -= adj_item.qty
+                action = "dikurangi"
+
+            new_stock = item.total_item
+
+            # Log the reversal
+            audit_service.default_log(
+                entity_id=item.id,
+                entity_type=AuditEntityEnum.ITEM,
+                description=f"Stok item {item.name} {action} sebanyak {adj_item.qty} (dari {old_stock} menjadi {new_stock}) - Penghapusan Adjustment: {adjustment.no_adjustment}",
+                user_name=user_name
+            )
+
+    # Soft delete the adjustment (cascade will handle items and attachments)
+    adjustment.is_deleted = True
+    adjustment.deleted_at = datetime.now()
+
+    # Log deletion
+    audit_service.default_log(
+        entity_id=adjustment.id,
+        entity_type=AuditEntityEnum.STOCK_ADJUSTMENT,
+        description=f"Penyesuaian {adjustment_number} dihapus (Status: {adjustment_status.value}, Total Items: {total_items})",
+        user_name=user_name
+    )
+
+    db.commit()
+
+    return {
+        "message": "Stock adjustment deleted successfully",
+        "no_adjustment": adjustment_number,
+        "status": adjustment_status.value,
+        "items_affected": total_items
+    }
+    
 @router.put("/{adjustment_id}/finalize")
 def finalize_stock_adjustment(
         adjustment_id: int,
