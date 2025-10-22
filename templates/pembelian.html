@@ -170,6 +170,19 @@
         text-align: right;
       }
 
+      /* ===== PAGE BREAK ROW ===== */
+      .page-break-row {
+        page-break-after: always;
+        break-after: page;
+        height: 0;
+        border: none;
+      }
+      .page-break-row td {
+        padding: 0;
+        border: none;
+        height: 0;
+      }
+
       /* ===== TOTALS / PAYMENT ===== */
       .totals-section {
         display: flex;
@@ -267,32 +280,6 @@
         font-weight: 400;
       }
 
-      /* ===== SPACER BOX ===== */
-      .spacer-box {
-        height: 700px;
-        background: transparent;
-      }
-      @media screen {
-        .spacer-box {
-          background: repeating-linear-gradient(
-            0deg,
-            transparent,
-            transparent 10px,
-            rgba(100, 116, 139, 0.1) 10px,
-            rgba(100, 116, 139, 0.1) 11px
-          );
-
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--muted);
-          font-weight: 600;
-        }
-        .spacer-box::after {
-          content: "";
-        }
-      }
-
       /* ===== RESPONSIVE ===== */
       @media (max-width: 600px) {
         body {
@@ -331,7 +318,6 @@
           size: A4 portrait;
         }
 
-        /* kill flex in print so breaks actually work */
         html,
         body {
           height: auto;
@@ -349,7 +335,6 @@
           gap: 0 !important;
         }
 
-        /* table behaves & header repeats */
         thead {
           display: table-header-group;
         }
@@ -365,14 +350,11 @@
           page-break-inside: avoid;
         }
 
-        /* spacer forces a new printed page (no visible height on paper) */
-        .spacer-box {
-          page-break-after: always;
-          break-after: page;
-          height: 0 !important;
+        .page-break-row {
+          page-break-after: always !important;
+          break-after: page !important;
         }
 
-        /* signatures start on a new page & never split */
         .signature-container {
           break-before: page !important;
           page-break-before: always !important;
@@ -386,7 +368,6 @@
         }
       }
 
-      /* ===== UTIL ===== */
       .text-right {
         text-align: right;
       }
@@ -397,7 +378,7 @@
   </head>
   <body>
     {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float) }}
-    {%- endmacro %}
+    {%- endmacro %} {% set total_items = enhanced_items | length %}
 
     <div class="invoice-container">
       <!-- HEADER -->
@@ -464,7 +445,7 @@
         </div>
       </div>
 
-      <!-- ITEMS TABLE (spacer-box every 3 rows) -->
+      <!-- ITEMS TABLE -->
       <div class="table-wrapper">
         <table>
           <thead>
@@ -479,31 +460,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for row in enhanced_items %} {% if loop.index != 0 and loop.index
-            % 3 == 0 %}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- SPACER BOX FOR PAGE BREAK -->
-      <div class="spacer-box"></div>
-
-      <!-- Re-open table with header for next chunk -->
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>No</th>
-              <th>Nama Barang</th>
-              <th>QTY</th>
-              <th>Satuan</th>
-              <th>Pajak (%)</th>
-              <th>Harga Satuan (IDR)</th>
-              <th>Nominal (IDR)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% endif %}
+            {% for row in enhanced_items %}
             <tr>
               <td>{{ loop.index }}</td>
               <td style="display: flex; align-items: center; gap: 12px">
@@ -520,7 +477,25 @@
               <td style="text-align: right">{{ idr(row.unit_price) }}</td>
               <td style="text-align: right">{{ idr(row.total_price) }}</td>
             </tr>
-            {% endfor %}
+            {% if total_items < 4 %} {# No page breaks - everything on one page
+            #} {% elif total_items >= 4 and total_items <= 12 %} {# Break after
+            item 6 #} {% if loop.index == 6 %}
+            <tr class="page-break-row">
+              <td colspan="7"></td>
+            </tr>
+            {% endif %} {% elif total_items > 12 and total_items <= 15 %} {#
+            Break after item 6 and 12 #} {% if loop.index == 6 or loop.index ==
+            12 %}
+            <tr class="page-break-row">
+              <td colspan="7"></td>
+            </tr>
+            {% endif %} {% else %} {# Break after item 6, then every 9 items
+            after that #} {% if loop.index == 6 or (loop.index > 6 and
+            (loop.index - 6) % 9 == 0) %}
+            <tr class="page-break-row">
+              <td colspan="7"></td>
+            </tr>
+            {% endif %} {% endif %} {% endfor %}
           </tbody>
         </table>
       </div>
