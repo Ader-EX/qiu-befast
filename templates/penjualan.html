@@ -317,7 +317,7 @@
           flex-direction: column;
         }
         .info-row .value {
-          width: 150px;
+          width: 100px;
         }
         h1 {
           font-size: 28px;
@@ -529,7 +529,7 @@
             item 6, then every 9 items #} {% if loop.index == 6 %} {% set
             should_break = true %} {% elif loop.index > 6 and (loop.index - 6)
             is divisibleby 9 %} {% set should_break = true %} {% endif %} {%
-            endif %} {% if should_break %}
+            endif %} {% if should_break and total_items > 6 %}
           </tbody>
         </table>
       </div>
@@ -576,8 +576,9 @@
           </div>
         </div>
 
-        <div style="height: 16px"></div>
-
+        {% if total_items <= 6 and total_items >= 5 %}
+        <div style="height: 270px"></div>
+        {% endif %}
         <div class="summary-row">
           <div>Total (Before Tax)</div>
           <div>{{ idr(totals.final_total) }}</div>
@@ -588,7 +589,7 @@
         </div>
         <div class="summary-row" style="font-weight: 400; font-size: 14px">
           <div>Expense</div>
-          <div>{{ idr(penjualan.expense) }}</div>
+          <div>{{ idr(totals.expense) }}</div>
         </div>
         <div class="summary-row" style="font-weight: 400; font-size: 14px">
           <div>Remaining</div>
@@ -599,28 +600,38 @@
           <div>{{ idr(totals.grand_total) }}</div>
         </div>
       </div>
-
+      {% if total_items <= 3 and total_items >= 2 %}
+      <div style="height: 270px"></div>
+      {% endif %}
       <!-- PAYMENT INFO -->
       <div class="payment">
         Mohon melakukan pembayaran ke rekening berikut:<br />
         • Nama Bank: {{ company.bank_name }}<br />
         • Nama Penerima: {{ company.account_name }}<br />
         • No. Rekening: {{ company.account_number }}
+        <br />
+        ATAU
+        <br />
+        • Nama Bank: {{ company.bank_name_bca }}<br />
+        • Nama Penerima: {{ company.account_name_bca }}<br />
+        • No. Rekening: {{ company.account_number_bca }}
       </div>
 
       <!-- SIGNATURES PAGE (Tanda Terima + Perusahaan) -->
       <div class="signature-container">
         <!-- Tanda Terima (Customer) -->
         <div class="customer-signature">
-          <div class="sign-title">Tanda Terima</div>
+          <div class="sign-title">Tanda Terima<br /><br /></div>
         </div>
 
         <!-- Perusahaan -->
         <div class="signature-block">
-          <div class="line1">Hormat kami,</div>
-          <div class="line2">{{ company.name }}</div>
-          <br /><br />
-          <div class="line3">{{ company.representative }}</div>
+          <div class="customer-signature">
+            <div class="sign-title">
+              Hormat Kami, <br />
+              {{ company.name }}
+            </div>
+          </div>
         </div>
       </div>
     </div>
