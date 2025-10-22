@@ -542,8 +542,7 @@ async def rollback_stock_adjustment(
     # Reverse stock changes for each item
     for adj_item in adjustment.stock_adjustment_items:
         item = db.query(Item).filter(
-            Item.id == adj_item.item_id,
-            Item.is_deleted == False
+            Item.id == adj_item.item_id
         ).first()
 
         if not item:
@@ -652,8 +651,7 @@ def delete_stock_adjustment(
         # Reverse stock changes for each item
         for adj_item in adjustment.stock_adjustment_items:
             item = db.query(Item).filter(
-                Item.id == adj_item.item_id,
-                Item.is_deleted == False
+                Item.id == adj_item.item_id
             ).first()
 
             if not item:
