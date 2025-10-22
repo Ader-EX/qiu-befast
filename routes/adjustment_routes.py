@@ -547,7 +547,7 @@ async def rollback_stock_adjustment(
         ).first()
 
         if not item:
-            raise HTTPException(status_code=404, detail=f"Item {adj_item.item_id} not found")
+            raise HTTPException(status_code=404, detail=f"Item {adj_item.item_id} telah dihapus, tidak bisa di-rollback")
 
         old_stock = item.total_item
 
@@ -647,6 +647,7 @@ def delete_stock_adjustment(
     total_items = len(adjustment.stock_adjustment_items)
 
     # Handle ACTIVE adjustments - must reverse stock changes first
+    skipped_items = []
     if adjustment.status_adjustment == StatusStockAdjustmentEnum.ACTIVE:
         # Reverse stock changes for each item
         for adj_item in adjustment.stock_adjustment_items:
@@ -656,10 +657,19 @@ def delete_stock_adjustment(
             ).first()
 
             if not item:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Item {adj_item.item_id} not found - cannot delete adjustment"
+                # Item was deleted - skip reversal but log it
+                skipped_items.append({
+                    "item_id": adj_item.item_id,
+                    "qty": adj_item.qty,
+                    "reason": "Item sudah dihapus"
+                })
+                audit_service.default_log(
+                    entity_id=adjustment.id,
+                    entity_type=AuditEntityEnum.STOCK_ADJUSTMENT,
+                    description=f"Item ID {adj_item.item_id} dilewati saat penghapusan {adjustment.no_adjustment} (item sudah dihapus)",
+                    user_name=user_name
                 )
+                continue
 
             old_stock = item.total_item
 
@@ -721,13 +731,18 @@ def delete_stock_adjustment(
 
     db.commit()
 
-    return {
+    response = {
         "message": "Stock adjustment deleted successfully",
         "no_adjustment": adjustment_number,
         "status": adjustment_status.value,
         "items_affected": total_items
     }
     
+    if skipped_items:
+        response["skipped_items"] = skipped_items
+        response["warning"] = f"{len(skipped_items)} item(s) sudah dihapus, stok tidak dapat dikembalikan"
+    
+    return response 
 @router.put("/{adjustment_id}/finalize")
 def finalize_stock_adjustment(
         adjustment_id: int,
