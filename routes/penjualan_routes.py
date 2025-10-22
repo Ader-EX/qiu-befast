@@ -279,9 +279,21 @@ def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None
     if not penjualan.penjualan_items:
         raise HTTPException(status_code=400, detail="At least one item is required for finalization")
 
-    # 1) Validate stock first (checker)
+    # 1) Validate stock for ALL items FIRST - collect all errors before proceeding
+    validation_errors = []
     for line in penjualan.penjualan_items:
-        validate_item_stock(db, line.item_id, line.qty)
+        try:
+            validate_item_stock(db, line.item_id, line.qty)
+        except HTTPException as e:
+            item_name = line.item_rel.name if line.item_rel else f"ID {line.item_id}"
+            validation_errors.append(f"{item_name}: {e.detail}")
+    
+    # If ANY validation failed, raise error WITHOUT making any changes
+    if validation_errors:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Tidak dapat finalisasi - masalah stok: {'; '.join(validation_errors)}"
+        )
 
     # 2) Snapshot names / metadata (like your Pembelian)
     if penjualan.warehouse_rel:
@@ -297,7 +309,7 @@ def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None
     if penjualan.top_rel:
         penjualan.top_name = penjualan.top_rel.name
 
-    # 3) Subtract stock per line
+    # 3) NOW safe to subtract stock - we know ALL items have sufficient stock
     for line in penjualan.penjualan_items:
         # Keep some item snapshots if needed (optional)
         if line.item_rel:
@@ -325,7 +337,6 @@ def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None
     )
 
     db.commit()
-
 
 def validate_draft_status(penjualan: Penjualan):
     if penjualan.status_penjualan != StatusPembelianEnum.DRAFT:

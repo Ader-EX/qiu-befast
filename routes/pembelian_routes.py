@@ -161,6 +161,7 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name: str, m
         "expense": expense,
         "total_price": total_price,
     }
+    
 def finalize_pembelian(db: Session, pembelian_id: int, user_name: str):
     audit_service = AuditService(db)
     inventory_service = InventoryService(db)
@@ -185,6 +186,11 @@ def finalize_pembelian(db: Session, pembelian_id: int, user_name: str):
     if not pembelian.pembelian_items:
         raise HTTPException(status_code=400, detail="At least one item is required for finalization")
 
+    # 1) Validate ALL items first (if you have validation logic for pembelian)
+    # For pembelian (purchases), you're adding stock, so validation might be different
+    # But if you need to validate anything, do it here for ALL items before making changes
+    
+    # 2) Snapshot names and update stock
     for pembelian_item in pembelian.pembelian_items:
         if pembelian_item.item_rel:
             item = pembelian_item.item_rel
@@ -203,6 +209,7 @@ def finalize_pembelian(db: Session, pembelian_id: int, user_name: str):
             reason_code=f"Pembelian {pembelian.no_pembelian}"
         )
 
+    # 3) Activate
     pembelian.status_pembelian = StatusPembelianEnum.ACTIVE
 
     audit_service.default_log(
@@ -211,6 +218,7 @@ def finalize_pembelian(db: Session, pembelian_id: int, user_name: str):
         description=f"Pembelian {pembelian.no_pembelian} status transaksi diubah: Draft → Aktif",
         user_name=user_name
     )
+    
     db.commit()
 
 def validate_draft_status(pembelian: Pembelian):

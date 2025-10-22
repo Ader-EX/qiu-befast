@@ -740,7 +740,8 @@ def delete_stock_adjustment(
         response["skipped_items"] = skipped_items
         response["warning"] = f"{len(skipped_items)} item(s) sudah dihapus, stok tidak dapat dikembalikan"
     
-    return response 
+    return response
+ 
 @router.put("/{adjustment_id}/finalize")
 def finalize_stock_adjustment(
         adjustment_id: int,
@@ -766,7 +767,39 @@ def finalize_stock_adjustment(
     if adjustment.status_adjustment != StatusStockAdjustmentEnum.DRAFT:
         raise HTTPException(status_code=400, detail="Only draft adjustments can be finalized")
 
-    # Apply stock changes and post to inventory ledger
+    # 1) Validate ALL items first - collect all errors
+    validation_errors = []
+    for adj_item in adjustment.stock_adjustment_items:
+        try:
+            # Pre-validate without making changes (you might need to add a validation function)
+            # For now, we'll check basic constraints
+            if not adj_item.item_id:
+                item_name = adj_item.item_rel.name if adj_item.item_rel else "Unknown"
+                validation_errors.append(f"{item_name}: Item ID is missing")
+            
+            # If it's a reduction, check if stock is sufficient
+            if adjustment.adjustment_type == "REDUCTION":  # Adjust based on your enum
+                inventory_service = InventoryService(db)
+                last_entry = inventory_service._get_last_ledger_entry(adj_item.item_id)
+                available = last_entry.cumulative_qty if last_entry else 0
+                
+                if available < adj_item.qty:
+                    item_name = adj_item.item_rel.name if adj_item.item_rel else f"ID {adj_item.item_id}"
+                    validation_errors.append(
+                        f"{item_name}: Stock tidak mencukupi. Tersedia: {available}, Dibutuhkan: {adj_item.qty}"
+                    )
+        except Exception as e:
+            item_name = adj_item.item_rel.name if adj_item.item_rel else f"ID {adj_item.item_id}"
+            validation_errors.append(f"{item_name}: {str(e)}")
+    
+    # If ANY validation failed, raise error WITHOUT making any changes
+    if validation_errors:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Tidak dapat finalisasi adjustment - ada masalah: {'; '.join(validation_errors)}"
+        )
+
+    # 2) NOW safe to apply stock changes - we know ALL items are valid
     for adj_item in adjustment.stock_adjustment_items:
         adjust_item_stock(
             db=db,
@@ -780,7 +813,7 @@ def finalize_stock_adjustment(
             adjustment_item_id=adj_item.id
         )
 
-    # Update status to ACTIVE
+    # 3) Update status to ACTIVE
     adjustment.status_adjustment = StatusStockAdjustmentEnum.ACTIVE
     adjustment.updated_at = datetime.now()
 
