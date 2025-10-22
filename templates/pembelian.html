@@ -378,7 +378,8 @@
   </head>
   <body>
     {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float) }}
-    {%- endmacro %}
+    {%- endmacro %} {# Calculate total items count #} {% set total_items =
+    enhanced_items|length %}
 
     <div class="invoice-container">
       <!-- HEADER -->
@@ -477,8 +478,16 @@
               <td style="text-align: right">{{ idr(row.unit_price) }}</td>
               <td style="text-align: right">{{ idr(row.total_price) }}</td>
             </tr>
-            {% if loop.index == 3 or (loop.index > 3 and (loop.index - 3) % 10
-            == 0) %}
+            {# PAGE BREAK LOGIC #} {% set should_break = false %} {% if
+            total_items < 4 %} {# No breaks #} {% elif total_items <= 12 %} {#
+            Break after item 6 #} {% if loop.index == 6 %} {% set should_break =
+            true %} {% endif %} {% elif total_items <= 15 %} {# Break after
+            items 6 and 12 #} {% if loop.index == 6 or loop.index == 12 %} {%
+            set should_break = true %} {% endif %} {% else %} {# Break after
+            item 6, then every 9 items #} {% if loop.index == 6 %} {% set
+            should_break = true %} {% elif loop.index > 6 and (loop.index - 6)
+            is divisibleby 9 %} {% set should_break = true %} {% endif %} {%
+            endif %} {% if should_break %}
             <tr class="page-break-row">
               <td colspan="7"></td>
             </tr>

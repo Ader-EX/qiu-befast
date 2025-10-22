@@ -961,6 +961,7 @@ def calculate_pembelian_item_totals(item: PembelianItem) -> None:
     
     # For compatibility - price_after_tax as unit equivalent
     item.price_after_tax = (row_total / qty) if qty > 0 else Decimal('0')
+
 @router.get("/{pembelian_id}/invoice/html", response_class=HTMLResponse)
 async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: Session = Depends(get_db)):
     pembelian = (
