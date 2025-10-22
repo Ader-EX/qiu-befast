@@ -170,17 +170,45 @@
         text-align: right;
       }
 
-      /* ===== PAGE BREAK ROW ===== */
-      .page-break-row {
+      /* ===== PAGE BREAK SPACER ===== */
+      .page-break-spacer {
+        height: 297mm; /* A4 height */
         page-break-after: always;
         break-after: page;
-        height: 0;
-        border: none;
-      }
-      .page-break-row td {
+        visibility: hidden;
+        margin: 0;
         padding: 0;
-        border: none;
-        height: 0;
+      }
+
+      @media print {
+        .page-break-spacer {
+          display: block !important;
+          height: 0 !important;
+          page-break-before: always !important;
+          break-before: page !important;
+        }
+      }
+
+      @media screen {
+        .page-break-spacer {
+          background: repeating-linear-gradient(
+            45deg,
+            #f0f0f0,
+            #f0f0f0 10px,
+            #e0e0e0 10px,
+            #e0e0e0 20px
+          );
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #666;
+          font-weight: bold;
+          height: 60px;
+          visibility: visible;
+        }
+        .page-break-spacer::after {
+          content: "========== PAGE BREAK ==========";
+        }
       }
 
       /* ===== TOTALS / PAYMENT ===== */
@@ -488,9 +516,28 @@
             should_break = true %} {% elif loop.index > 6 and (loop.index - 6)
             is divisibleby 9 %} {% set should_break = true %} {% endif %} {%
             endif %} {% if should_break %}
-            <tr class="page-break-row">
-              <td colspan="7"></td>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- PAGE BREAK SPACER -->
+      <div class="page-break-spacer"></div>
+
+      <!-- RESTART TABLE -->
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Nama Barang</th>
+              <th>QTY</th>
+              <th>Satuan</th>
+              <th>Pajak (%)</th>
+              <th>Harga Satuan (IDR)</th>
+              <th>Nominal (IDR)</th>
             </tr>
+          </thead>
+          <tbody>
             {% endif %} {% endfor %}
           </tbody>
         </table>
