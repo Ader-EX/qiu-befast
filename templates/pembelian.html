@@ -378,7 +378,7 @@
   </head>
   <body>
     {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float) }}
-    {%- endmacro %} {% set total_items = enhanced_items | length %}
+    {%- endmacro %}
 
     <div class="invoice-container">
       <!-- HEADER -->
@@ -477,25 +477,12 @@
               <td style="text-align: right">{{ idr(row.unit_price) }}</td>
               <td style="text-align: right">{{ idr(row.total_price) }}</td>
             </tr>
-            {% if total_items < 4 %} {# No page breaks - everything on one page
-            #} {% elif total_items >= 4 and total_items <= 12 %} {# Break after
-            item 6 #} {% if loop.index == 6 %}
+            {% if loop.index == 3 or (loop.index > 3 and (loop.index - 3) % 10
+            == 0) %}
             <tr class="page-break-row">
               <td colspan="7"></td>
             </tr>
-            {% endif %} {% elif total_items > 12 and total_items <= 15 %} {#
-            Break after item 6 and 12 #} {% if loop.index == 6 or loop.index ==
-            12 %}
-            <tr class="page-break-row">
-              <td colspan="7"></td>
-            </tr>
-            {% endif %} {% else %} {# Break after item 6, then every 9 items
-            after that #} {% if loop.index == 6 or (loop.index > 6 and
-            (loop.index - 6) % 9 == 0) %}
-            <tr class="page-break-row">
-              <td colspan="7"></td>
-            </tr>
-            {% endif %} {% endif %} {% endfor %}
+            {% endif %} {% endfor %}
           </tbody>
         </table>
       </div>
