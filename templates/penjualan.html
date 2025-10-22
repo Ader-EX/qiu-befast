@@ -14,7 +14,9 @@
         --line: #e2e8f0;
         --danger: #dc2626;
         --bg: #fff;
-      } /* ===== RESET ===== */
+      }
+
+      /* ===== RESET ===== */
       *,
       *::before,
       *::after {
@@ -26,6 +28,7 @@
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
+
       body {
         font-family: Geist, Inter, ui-sans-serif, system-ui, -apple-system,
           Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji",
@@ -37,7 +40,9 @@
         padding: 20px;
         line-height: 1.45;
         font-size: 14px;
-      } /* ===== LAYOUT ===== */
+      }
+
+      /* ===== LAYOUT ===== */
       .invoice-container {
         width: 100%;
         max-width: 800px;
@@ -45,20 +50,8 @@
         flex-direction: column;
         gap: 24px;
       }
-      .header-section {
-        page-break-inside: avoid;
-        break-inside: avoid;
-      }
-      .body-section {
-        page-break-inside: auto;
-        break-inside: auto;
-      }
-      .footer-section {
-        page-break-inside: avoid !important;
-        break-inside: avoid !important;
-        display: block;
-        position: relative;
-      } /* ===== HEADER ===== */
+
+      /* ===== HEADER ===== */
       .header {
         display: flex;
         justify-content: space-between;
@@ -79,7 +72,9 @@
         font-weight: 700;
         line-height: 40px;
         color: var(--brand);
-      } /* ===== INFO ===== */
+      }
+
+      /* ===== INFO ===== */
       .info-section {
         display: flex;
         gap: 20px;
@@ -111,7 +106,9 @@
         width: 120px;
         text-align: right;
         word-break: break-word;
-      } /* ===== TABLE ===== */
+      }
+
+      /* ===== TABLE ===== */
       .table-wrapper {
         overflow-x: auto;
       }
@@ -142,7 +139,9 @@
         display: block;
         border-radius: 6px;
         object-fit: cover;
-      } /* column widths */
+      }
+
+      /* column widths */
       th:nth-child(1),
       td:nth-child(1) {
         width: 50px;
@@ -169,13 +168,54 @@
       th:nth-child(7),
       td:nth-child(7) {
         text-align: right;
-      } /* ===== TOTALS / PAYMENT ===== */
+      }
+
+      /* ===== PAGE BREAK SPACER ===== */
+      .page-break-spacer {
+        height: 297mm; /* A4 height */
+        page-break-after: always;
+        break-after: page;
+        visibility: hidden;
+        margin: 0;
+        padding: 0;
+      }
+
+      @media print {
+        .page-break-spacer {
+          display: block !important;
+          height: 0 !important;
+          page-break-before: always !important;
+          break-before: page !important;
+        }
+      }
+
+      @media screen {
+        .page-break-spacer {
+          background: repeating-linear-gradient(
+            45deg,
+            #f0f0f0,
+            #f0f0f0 10px,
+            #e0e0e0 10px,
+            #e0e0e0 20px
+          );
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #666;
+          font-weight: bold;
+          height: 225px;
+          visibility: visible;
+        }
+        .page-break-spacer::after {
+          content: "";
+        }
+      }
+
+      /* ===== TOTALS / PAYMENT ===== */
       .totals-section {
         display: flex;
         flex-direction: column;
         gap: 6px;
-        page-break-inside: avoid !important;
-        break-inside: avoid !important;
       }
       .totals-title {
         font-size: 14px;
@@ -214,17 +254,14 @@
         font-size: 14px;
         color: var(--muted);
         line-height: 1.4;
-        page-break-inside: avoid !important;
-        break-inside: avoid !important;
-      } /* ===== SIGNATURES ===== */
+      }
+
+      /* ===== SIGNATURES (with Tanda Terima) ===== */
       .signature-container {
         display: flex;
         justify-content: space-between;
         align-items: flex-end;
-        margin-top: 32px;
         gap: 40px;
-        page-break-inside: avoid !important;
-        break-inside: avoid !important;
       }
       .customer-signature {
         padding: 20px;
@@ -269,37 +306,9 @@
       .signature-block .line3 {
         font-size: 14px;
         font-weight: 400;
-      } /* ===== SPACER BOX ===== */
-      .spacer-box {
-        height: 700px;
-        background: transparent;
       }
-      @media screen {
-        .spacer-box {
-          background: repeating-linear-gradient(
-            0deg,
-            transparent,
-            transparent 10px,
-            rgba(100, 116, 139, 0.1) 10px,
-            rgba(100, 116, 139, 0.1) 11px
-          );
-          border: var(--muted);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--muted);
-          font-weight: 600;
-        }
-        .spacer-box::after {
-          content: "";
-        }
-      }
-      @media print {
-        .spacer-box {
-          page-break-after: always;
-          break-after: page;
-        }
-      } /* ===== RESPONSIVE ===== */
+
+      /* ===== RESPONSIVE ===== */
       @media (max-width: 600px) {
         body {
           padding: 12px;
@@ -314,6 +323,10 @@
           font-size: 28px;
           line-height: 34px;
         }
+        th,
+        td {
+          padding: 10px 12px;
+        }
         .signature-container {
           flex-direction: column;
           align-items: stretch;
@@ -324,27 +337,65 @@
         .signature-block {
           width: 100%;
         }
-        th,
-        td {
-          padding: 10px 12px;
-        }
-      } /* ===== PRINT ===== */
+      }
+
+      /* ===== PRINT ===== */
       @media print {
+        @page {
+          margin: 20mm;
+          size: A4 portrait;
+        }
+
+        html,
+        body {
+          height: auto;
+        }
+        body {
+          display: block !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          background: #fff !important;
+        }
+        .invoice-container {
+          display: block !important;
+          max-width: 800px;
+          margin: 0 auto;
+          gap: 0 !important;
+        }
+
         thead {
           display: table-header-group;
         }
         tbody {
           display: table-row-group;
         }
-        .page-chunk {
+        .table-wrapper {
+          overflow: visible !important;
+        }
+        tr,
+        td,
+        th {
+          page-break-inside: avoid;
+        }
+
+        .page-break-row {
+          page-break-after: always !important;
+          break-after: page !important;
+        }
+
+        .signature-container {
+          break-before: page !important;
+          page-break-before: always !important;
           break-inside: avoid !important;
           page-break-inside: avoid !important;
         }
-        .page-chunk + .page-chunk {
-          break-before: page;
-          page-break-before: always;
+        .customer-signature,
+        .signature-block {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
         }
-      } /* ===== UTIL ===== */
+      }
+
       .text-right {
         text-align: right;
       }
@@ -355,199 +406,221 @@
   </head>
   <body>
     {% macro idr(x) -%} {{ "{:,.0f}".format((x | default(0, true)) | float) }}
-    {%- endmacro %}
+    {%- endmacro %} {# Calculate total items count #} {% set total_items =
+    enhanced_items|length %}
+
     <div class="invoice-container">
       <!-- HEADER -->
-      <div class="header-section">
-        <div class="header">
-          <img
-            src="{{ company.logo_url }}"
-            style="width: 150px; height: auto"
-            alt="Logo"
-          />
-          <div class="header-right">
-            <div>{{ company.address }}</div>
-            <div>{{ company.website }}</div>
+      <div class="header">
+        <img
+          src="{{ company.logo_url }}"
+          style="width: 150px; height: auto"
+          alt="Logo"
+        />
+        <div class="header-right">
+          <div>{{ company.address }}</div>
+          <div>{{ company.website }}</div>
+        </div>
+      </div>
+
+      <hr class="divider" />
+      <h1>Invoice</h1>
+
+      <!-- INFO SECTION -->
+      <div class="info-section">
+        <div class="info-block">
+          <div class="title">Informasi Invoice</div>
+          <div class="info-row">
+            <div class="label">Nomor Faktur</div>
+            <div class="value">{{ penjualan.no_penjualan }}</div>
+          </div>
+          <div class="info-row">
+            <div class="label">Tanggal Terbit</div>
+            <div class="value">
+              {{ penjualan.sales_date.strftime('%d-%m-%Y') if
+              penjualan.sales_date else '-' }}
+            </div>
+          </div>
+          <div class="info-row">
+            <div class="label">Tanggal Jatuh Tempo</div>
+            <div class="value">
+              {{ penjualan.sales_due_date.strftime('%d-%m-%Y') if
+              penjualan.sales_due_date else '-' }}
+            </div>
+          </div>
+          <div class="info-row">
+            <div class="label">Kode Lambung Penjualan</div>
+            <div class="value">
+              {{ penjualan.kode_lambung_rel.name if penjualan.kode_lambung_rel
+              else '-' }}
+            </div>
           </div>
         </div>
-        <hr class="divider" />
-        <h1>Invoice</h1>
-        <div class="info-section">
-          <div class="info-block">
-            <div class="title">Informasi Invoice</div>
-            <div class="info-row">
-              <div class="label">Nomor Faktur</div>
-              <div class="value">{{ penjualan.no_penjualan }}</div>
-            </div>
-            <div class="info-row">
-              <div class="label">Tanggal Terbit</div>
-              <div class="value">
-                {{ penjualan.sales_date.strftime('%d-%m-%Y') if
-                penjualan.sales_date else '-' }}
-              </div>
-            </div>
-            <div class="info-row">
-              <div class="label">Tanggal Jatuh Tempo</div>
-              <div class="value">
-                {{ penjualan.sales_due_date.strftime('%d-%m-%Y') if
-                penjualan.sales_due_date else '-' }}
-              </div>
-            </div>
-            <div class="info-row">
-              <div class="label">Kode Lambung Penjualan</div>
-              <div class="value">
-                {{ penjualan.kode_lambung_rel.name if penjualan.kode_lambung_rel
-                else '-' }}
-              </div>
+
+        <div class="info-block">
+          <div class="title">Kpd Yth.</div>
+          <div class="info-row">
+            <div class="label">Nama Customer</div>
+            <div class="value">{{ penjualan.customer_display }}</div>
+          </div>
+          <div class="info-row">
+            <div class="label">Alamat</div>
+            <div class="value">
+              {{ penjualan.customer_address_display if
+              penjualan.customer_address_display else '-' }}
             </div>
           </div>
-          <div class="info-block">
-            <div class="title">Kpd Yth.</div>
-            <div class="info-row">
-              <div class="label">Nama Customer</div>
-              <div class="value">{{ penjualan.customer_display }}</div>
+          <div class="info-row">
+            <div class="label">Status</div>
+            <div class="value">
+              {{ penjualan.status_pembayaran.value if
+              penjualan.status_pembayaran else '-' }}
             </div>
-            <div class="info-row">
-              <div class="label">Alamat</div>
-              <div class="value">
-                {{ penjualan.customer_address_display if
-                penjualan.customer_address_display else '-' }}
-              </div>
-            </div>
-            <div class="info-row">
-              <div class="label">Status</div>
-              <div class="value">
-                {{ penjualan.status_pembayaran.value if
-                penjualan.status_pembayaran else '-' }}
-              </div>
-            </div>
-            <div class="info-row">
-              <div class="label">Kode Lambung Customer</div>
-              <div class="value">
-                {{ penjualan.customer_rel.kode_lambung if
-                penjualan.customer_rel.kode_lambung else '-' }}
-              </div>
+          </div>
+          <div class="info-row">
+            <div class="label">Kode Lambung Customer</div>
+            <div class="value">
+              {{ penjualan.customer_rel.kode_lambung if
+              penjualan.customer_rel.kode_lambung else '-' }}
             </div>
           </div>
         </div>
       </div>
-      <!-- BODY -->
-      <div class="body-section">
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>No</th>
-                <th>Nama Barang</th>
-                <th>QTY</th>
-                <th>Satuan</th>
-                <th>Pajak (%)</th>
-                <th>Harga Satuan (IDR)</th>
-                <th>Nominal (IDR)</th>
-              </tr>
-            </thead>
-            <tbody class="page-chunk">
-              {% for row in enhanced_items %} {% if loop.index0 != 0 and
-              loop.index0 % 3 == 0 %}
-            </tbody>
-          </table>
+
+      <!-- ITEMS TABLE -->
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Nama Barang</th>
+              <th>QTY</th>
+              <th>Satuan</th>
+              <th>Pajak (%)</th>
+              <th>Harga Satuan (IDR)</th>
+              <th>Nominal (IDR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in enhanced_items %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td style="display: flex; align-items: center; gap: 12px">
+                <img
+                  src="{{ row.image_url }}"
+                  alt="Product"
+                  style="width: 60px; height: 60px; object-fit: cover"
+                />
+                <span>{{ row.item_name }}</span>
+              </td>
+              <td style="text-align: center">{{ row.qty }}</td>
+              <td style="text-align: center">{{ row.satuan_name or '-' }}</td>
+              <td style="text-align: center">{{ row.tax_percentage or 0 }}</td>
+              <td style="text-align: right">{{ idr(row.unit_price) }}</td>
+              <td style="text-align: right">{{ idr(row.total_price) }}</td>
+            </tr>
+
+            {# PAGE BREAK LOGIC #} {% set should_break = false %} {% if
+            total_items < 4 %} {# No breaks #} {% elif total_items <= 12 %} {#
+            Break after item 6 #} {% if loop.index == 6 %} {% set should_break =
+            true %} {% endif %} {% elif total_items <= 15 %} {# Break after
+            items 6 and 12 #} {% if loop.index == 6 or loop.index == 12 %} {%
+            set should_break = true %} {% endif %} {% else %} {# Break after
+            item 6, then every 9 items #} {% if loop.index == 6 %} {% set
+            should_break = true %} {% elif loop.index > 6 and (loop.index - 6)
+            is divisibleby 9 %} {% set should_break = true %} {% endif %} {%
+            endif %} {% if should_break %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- PAGE BREAK SPACER -->
+      <div class="page-break-spacer"></div>
+
+      <!-- RESTART TABLE -->
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Nama Barang</th>
+              <th>QTY</th>
+              <th>Satuan</th>
+              <th>Pajak (%)</th>
+              <th>Harga Satuan (IDR)</th>
+              <th>Nominal (IDR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% endif %} {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- TOTALS -->
+      <div class="totals-section">
+        <div class="totals-title">Total Invoice</div>
+
+        <div class="totals-row">
+          <div class="label">Sub Total</div>
+          <div class="value">{{ idr(totals.subtotal) }}</div>
         </div>
-        <!-- SPACER BOX FOR PAGE BREAK -->
-        <div class="spacer-box"></div>
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>No</th>
-                <th>Nama Barang</th>
-                <th>QTY</th>
-                <th>Satuan</th>
-                <th>Pajak (%)</th>
-                <th>Harga Satuan (IDR)</th>
-                <th>Nominal (IDR)</th>
-              </tr>
-            </thead>
-            <tbody class="page-chunk">
-              {% endif %}
-              <tr>
-                <td>{{ loop.index }}</td>
-                <td style="display: flex; align-items: center; gap: 12px">
-                  <img
-                    src="{{ row.image_url }}"
-                    alt="Product"
-                    style="width: 60px; height: 60px; object-fit: cover"
-                  />
-                  <span>{{ row.item_name }}</span>
-                </td>
-                <td class="text-center">{{ row.qty }}</td>
-                <td class="text-center">{{ row.satuan_name or '-' }}</td>
-                <td class="text-center">{{ row.tax_percentage or 0 }}</td>
-                <td class="text-right">{{ idr(row.unit_price) }}</td>
-                <td class="text-right">{{ idr(row.total_price) }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+        <div class="totals-row">
+          <div class="label">Item Discounts</div>
+          <div class="value destructive">-{{ idr(totals.item_discounts) }}</div>
+        </div>
+        <div class="totals-row">
+          <div class="label">Additional Discount</div>
+          <div class="value destructive">
+            -{{ idr(totals.additional_discount) }}
+          </div>
+        </div>
+
+        <div style="height: 16px"></div>
+
+        <div class="summary-row">
+          <div>Total (Before Tax)</div>
+          <div>{{ idr(totals.final_total) }}</div>
+        </div>
+        <div class="summary-row" style="font-weight: 400; font-size: 14px">
+          <div>Pajak</div>
+          <div>{{ idr(totals.tax_amount) }}</div>
+        </div>
+        <div class="summary-row" style="font-weight: 400; font-size: 14px">
+          <div>Expense</div>
+          <div>{{ idr(penjualan.expense) }}</div>
+        </div>
+        <div class="summary-row" style="font-weight: 400; font-size: 14px">
+          <div>Remaining</div>
+          <div>{{ idr(penjualan.remaining) }}</div>
+        </div>
+        <div class="summary-row">
+          <div>Grand Total</div>
+          <div>{{ idr(totals.grand_total) }}</div>
         </div>
       </div>
-      <!-- FOOTER (ALWAYS AT BOTTOM) -->
-      <div class="footer-section">
-        <div class="totals-section">
-          <div class="totals-title">Total Invoice</div>
-          <div class="totals-row">
-            <div class="label">Sub Total</div>
-            <div class="value">{{ idr(totals.subtotal) }}</div>
-          </div>
-          <div class="totals-row">
-            <div class="label">Item Discounts</div>
-            <div class="value destructive">
-              -{{ idr(totals.item_discounts) }}
-            </div>
-          </div>
-          <div class="totals-row">
-            <div class="label">Additional Discount</div>
-            <div class="value destructive">
-              -{{ idr(totals.additional_discount) }}
-            </div>
-          </div>
-          <div style="height: 16px"></div>
-          <div class="summary-row">
-            <div>Total (Before Tax)</div>
-            <div>{{ idr(totals.final_total) }}</div>
-          </div>
-          <div class="summary-row" style="font-weight: 400; font-size: 14px">
-            <div>Pajak</div>
-            <div>{{ idr(totals.tax_amount) }}</div>
-          </div>
-          <div class="summary-row" style="font-weight: 400; font-size: 14px">
-            <div>Expense</div>
-            <div>{{ idr(penjualan.expense) }}</div>
-          </div>
-          <div class="summary-row" style="font-weight: 400; font-size: 14px">
-            <div>Remaining</div>
-            <div>{{ idr(penjualan.remaining) }}</div>
-          </div>
-          <div class="summary-row">
-            <div>Grand Total</div>
-            <div>{{ idr(totals.grand_total) }}</div>
-          </div>
+
+      <!-- PAYMENT INFO -->
+      <div class="payment">
+        Mohon melakukan pembayaran ke rekening berikut:<br />
+        • Nama Bank: {{ company.bank_name }}<br />
+        • Nama Penerima: {{ company.account_name }}<br />
+        • No. Rekening: {{ company.account_number }}
+      </div>
+
+      <!-- SIGNATURES PAGE (Tanda Terima + Perusahaan) -->
+      <div class="signature-container">
+        <!-- Tanda Terima (Customer) -->
+        <div class="customer-signature">
+          <div class="sign-title">Tanda Terima</div>
         </div>
-        <div class="payment">
-          Mohon melakukan pembayaran ke rekening berikut:<br />
-          • Nama Bank: {{ company.bank_name }}<br />
-          • Nama Penerima: {{ company.account_name }}<br />
-          • No. Rekening: {{ company.account_number }}
-        </div>
-        <div class="signature-container">
-          <div class="customer-signature">
-            <div class="sign-title">Tanda Terima</div>
-          </div>
-          <div class="signature-block">
-            <div class="line1">Hormat kami,</div>
-            <div class="line2">{{ company.name }}</div>
-            <br /><br />
-            <div class="line3">{{ company.representative }}</div>
-          </div>
+
+        <!-- Perusahaan -->
+        <div class="signature-block">
+          <div class="line1">Hormat kami,</div>
+          <div class="line2">{{ company.name }}</div>
+          <br /><br />
+          <div class="line3">{{ company.representative }}</div>
         </div>
       </div>
     </div>
