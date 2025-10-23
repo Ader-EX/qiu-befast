@@ -1226,10 +1226,10 @@ async def view_penjualan_invoice_html(penjualan_id: int, request: Request, db: S
                 "name": "PT. Jayagiri Indo Asia",
                 "logo_url": logo_data_url,  # Base64 data URL
                 "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
-                "website": "www.qiupart.com",
+                "website": "www.qiuparts.com",
                 "bank_name": "Bank Mandiri",
                 "account_name": "PT. JAYAGIRI INDO ASIA",
-                "account_number": "7285834627",
+                "account_number": "1670007971095",
                  "bank_name_bca": "Bank BCA",
                 "account_name_bca": "PT. JAYAGIRI INDO ASIA",
                 "account_number_bca": "7285834627",

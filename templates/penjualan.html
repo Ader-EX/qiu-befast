@@ -266,25 +266,30 @@
       .customer-signature {
         padding: 20px;
         min-width: 250px;
-        min-height: 140px;
-        border-radius: 8px;
+        min-height: 160px;
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
+        justify-content: flex-end;
+        text-align: center;
       }
+
       .customer-signature .sign-title {
         font-size: 14px;
         font-weight: 600;
-        text-align: center;
-        color: var(--muted);
-        border-bottom: 1px solid var(--ink);
-        padding-bottom: 70px;
+        margin-bottom: 160px; /* space above the line for a signature */
       }
+
+      .customer-signature .sign-line {
+        border-bottom: 1px solid var(--ink);
+        margin: 0 auto;
+        width: 80%;
+        height: 0;
+      }
+
       .customer-signature .name-line {
-        border-top: 1px solid var(--ink);
         padding-top: 8px;
-        font-size: 13px;
-        color: var(--muted);
+        font-size: 14px;
+        font-weight: 600;
         text-align: center;
       }
       .signature-block {
@@ -600,38 +605,37 @@
           <div>{{ idr(totals.grand_total) }}</div>
         </div>
       </div>
-      {% if total_items <= 3 and total_items >= 2 %}
-      <div style="height: 270px"></div>
+      {% if total_items == 4 %}
+      <div style="height: 170px"></div>
       {% endif %}
       <!-- PAYMENT INFO -->
       <div class="payment">
-        Mohon melakukan pembayaran ke rekening berikut:<br />
-        • Nama Bank: {{ company.bank_name }}<br />
-        • Nama Penerima: {{ company.account_name }}<br />
-        • No. Rekening: {{ company.account_number }}
-        <br />
-        ATAU
-        <br />
-        • Nama Bank: {{ company.bank_name_bca }}<br />
-        • Nama Penerima: {{ company.account_name_bca }}<br />
-        • No. Rekening: {{ company.account_number_bca }}
+        METODE PEMBAYARAN:<br />
+        - {{ company.bank_name }} {{ company.account_number }} a.n {{
+        company.account_name }} <br />
+
+        - {{ company.bank_name_bca }} {{ company.account_number_bca }} a.n {{
+        company.account_name_bca }} <br />
       </div>
+      {% if total_items <= 3 and total_items >= 2 %}
+      <div style="height: 270px"></div>
+      {% endif %}
 
       <!-- SIGNATURES PAGE (Tanda Terima + Perusahaan) -->
+
       <div class="signature-container">
-        <!-- Tanda Terima (Customer) -->
+        <!-- Tanda Terima -->
         <div class="customer-signature">
-          <div class="sign-title">Tanda Terima<br /><br /></div>
+          <div class="sign-title">Tanda Terima</div>
+          <div class="sign-line"></div>
+          <div class="name-line">&nbsp;</div>
         </div>
 
         <!-- Perusahaan -->
-        <div class="signature-block">
-          <div class="customer-signature">
-            <div class="sign-title">
-              Hormat Kami, <br />
-              {{ company.name }}
-            </div>
-          </div>
+        <div class="customer-signature">
+          <div class="sign-title">Hormat Kami,</div>
+          <div class="sign-line"></div>
+          <div class="name-line">{{ company.name }}</div>
         </div>
       </div>
     </div>

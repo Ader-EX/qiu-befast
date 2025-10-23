@@ -1161,7 +1161,7 @@ async def view_pembelian_invoice_html(pembelian_id: int, request: Request, db: S
                 "name": "PT. Jayagiri Indo Asia",
                 "logo_url": logo_data_url,
                 "address": "Jl. Telkom No.188, Kota Bekasi, Jawa Barat 16340",
-                "website": "www.qiupart.com",
+                "website": "www.qiuparts.com",
                 "bank_name": "Bank Mandiri",
                 "account_name": "PT. JAYAGIRI INDO ASIA",
                 "account_number": "1670007971095",
