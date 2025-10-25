@@ -28,7 +28,7 @@ from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PembelianSchema import TotalsResponse, PembelianListResponse, PembelianResponse, PembelianCreate, \
     PembelianUpdate, PembelianStatusUpdate, UploadResponse, SuccessResponse
 from services.audit_services import AuditService
-from services.inventoryledger_services import InventoryService
+from services.fifo_services import FifoService
 from utils import generate_unique_record_number, get_current_user_name
 
 router = APIRouter()
@@ -161,10 +161,9 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name: str, m
         "expense": expense,
         "total_price": total_price,
     }
-    
 def finalize_pembelian(db: Session, pembelian_id: int, user_name: str):
+    """Finalize pembelian using FIFO batches"""
     audit_service = AuditService(db)
-    inventory_service = InventoryService(db)
     
     pembelian = db.query(Pembelian).options(
         selectinload(Pembelian.warehouse_rel),
@@ -186,30 +185,32 @@ def finalize_pembelian(db: Session, pembelian_id: int, user_name: str):
     if not pembelian.pembelian_items:
         raise HTTPException(status_code=400, detail="At least one item is required for finalization")
 
-    # 1) Validate ALL items first (if you have validation logic for pembelian)
-    # For pembelian (purchases), you're adding stock, so validation might be different
-    # But if you need to validate anything, do it here for ALL items before making changes
+    # Get transaction date
+    trx_date = pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date
     
-    # 2) Snapshot names and update stock
+    # Create FIFO batches and update stock for each item
     for pembelian_item in pembelian.pembelian_items:
         if pembelian_item.item_rel:
             item = pembelian_item.item_rel
             if hasattr(item, 'satuan_rel') and item.satuan_rel:
                 pembelian_item.satuan_name = item.satuan_rel.name
 
+        # Update item stock
         update_item_stock(db, pembelian_item.item_id, pembelian_item.qty)
 
-        inventory_service.post_inventory_in(
-            item_id=pembelian_item.item_id,
+        # Create FIFO batch for this purchase
+        FifoService.create_batch_from_purchase(
+            source_id=pembelian.id,
             source_type=SourceTypeEnum.PEMBELIAN,
-            source_id=f"{pembelian.no_pembelian}",
-            qty=pembelian_item.qty,
-            unit_price=Decimal(str(pembelian_item.unit_price)),
-            trx_date=pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date,
-            reason_code=f"Pembelian {pembelian.no_pembelian}"
+            db=db,
+            item_id=pembelian_item.item_id,
+            warehouse_id=pembelian.warehouse_id,
+            tanggal_masuk=trx_date,
+            qty_masuk=pembelian_item.qty,
+            harga_beli=Decimal(str(pembelian_item.unit_price))
         )
 
-    # 3) Activate
+    # Activate
     pembelian.status_pembelian = StatusPembelianEnum.ACTIVE
 
     audit_service.default_log(
@@ -487,8 +488,7 @@ async def update_pembelian(
     db: Session = Depends(get_db),
     user_name: str = Depends(get_current_user_name)
 ):
-    inventory_service = InventoryService(db)
-    """Update pembelian - only updates stock if quantities change and pembelian is ACTIVE/PROCESSED"""
+  
     
     # Load pembelian with items
     pembelian: Pembelian = (
@@ -595,6 +595,8 @@ async def update_pembelian(
                 items_changed = True
 
         if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
+            from models.BatchStock import BatchStock
+            
             trx_date = pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date
             
             for item_id, qty_change in stock_adjustments:
@@ -602,30 +604,54 @@ async def update_pembelian(
                     update_item_stock(db, item_id, qty_change)
 
                 if qty_change > 0:
-                    # Increase stock
+                    # Increase stock - create new FIFO batch
                     pi = next((x for x in pembelian.pembelian_items if x.item_id == item_id), None)
                     
-                    # ✅ FIX: Use unique source_id per item
-                    inventory_service.post_inventory_in(
-                        item_id=item_id,
+                    FifoService.create_batch_from_purchase(
+                        source_id=pembelian.id,
                         source_type=SourceTypeEnum.PEMBELIAN,
-                        source_id=f"{pembelian.no_pembelian}",  # ✅ Unique identifier
-                        qty=qty_change,
-                        unit_price=Decimal(str(pi.unit_price)) if pi else Decimal("0"),
-                        trx_date=trx_date,
-                        reason_code=f"Pembelian {pembelian.no_pembelian} updated"
-                    )
-                else:
-                    # Decrease stock
-                    # ✅ FIX: Use unique source_id per item
-                    inventory_service.post_inventory_out(
+                        db=db,
                         item_id=item_id,
-                        source_type=SourceTypeEnum.OUT,
-                        source_id=f"{pembelian.no_pembelian}",  # ✅ Unique identifier
-                        qty=abs(qty_change),
-                        trx_date=trx_date,
-                        reason_code=f"Pembelian {pembelian.no_pembelian} quantity reduced"
+                        warehouse_id=pembelian.warehouse_id,
+                        tanggal_masuk=trx_date,
+                        qty_masuk=qty_change,
+                        harga_beli=Decimal(str(pi.unit_price)) if pi else Decimal("0")
                     )
+                    
+                elif qty_change < 0:
+                    # Decrease stock - need to find and reduce the specific batch
+                    # For pembelian updates, we need to reduce the batch that was created
+                    
+                    # Find the batch created by this pembelian for this item
+                    batch = db.query(BatchStock).filter(
+                        BatchStock.item_id == item_id,
+                        BatchStock.warehouse_id == pembelian.warehouse_id,
+                        BatchStock.tanggal_masuk == trx_date,
+                        BatchStock.source_id == f"PEMBELIAN_ITEM:{pembelian_id}",
+                    ).order_by(BatchStock.id_batch.desc()).first()
+                    
+                    if batch:
+                        qty_to_reduce = abs(qty_change)
+                        
+                        if batch.qty_keluar > 0:
+                            # Batch has been used in sales - cannot reduce
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Cannot reduce quantity - batch has been used in sales"
+                            )
+                        
+                        if batch.qty_masuk >= qty_to_reduce:
+                            # Reduce this specific batch
+                            batch.qty_masuk -= qty_to_reduce
+                            batch.sisa_qty -= qty_to_reduce
+                            
+                            if batch.sisa_qty == 0:
+                                db.delete(batch)
+                        else:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Cannot reduce quantity by {qty_to_reduce} - batch only has {batch.qty_masuk}"
+                            )
 
 
     # Commit and recalc totals if anything changed
@@ -638,16 +664,16 @@ async def update_pembelian(
 
     return await get_pembelian(pembelian_id, db)
 
-
 @router.patch("/{pembelian_id}", status_code=status.HTTP_200_OK)
-async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get_db), user_name : str  = Depends(get_current_user_name)):
+async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get_db), user_name: str = Depends(get_current_user_name)):
     """
     Rolls back the status of a purchase ('Pembelian') to 'DRAFT'
     if its current status is 'ACTIVE' or 'COMPLETED'.
-    Also reverses stock changes by subtracting the quantities.
+    Reverses stock by deleting the FIFO batches created during finalization.
     """
-    audit_service  = AuditService(db)
-    inventory_service = InventoryService(db)
+    from models.BatchStock import BatchStock
+    
+    audit_service = AuditService(db)
 
     pembelian = (
         db.query(Pembelian)
@@ -660,28 +686,43 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pembelian not found")
 
     if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
+        trx_date = pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date
+        
         for pembelian_item in pembelian.pembelian_items:
+            # Reduce item stock
             update_item_stock(db, pembelian_item.item_id, -pembelian_item.qty)
-            try :
-                inventory_service.post_inventory_out(
-                    item_id=pembelian_item.item_id,
-                    source_type=SourceTypeEnum.OUT,
-                    source_id=f"ROLLBACK_PEMBELIAN_ITEM:{pembelian_item.id}",
-                    qty=pembelian_item.qty,
-                    trx_date=date.today(),
-                    reason_code=f"Rollback Pembelian {pembelian.no_pembelian} to DRAFT"
-                )
-            except ValueError as e:
-                # Rollback the transaction and return error
+            
+            # Find and delete the batch created by this pembelian
+            batch = db.query(BatchStock).filter(
+                BatchStock.item_id == pembelian_item.item_id,
+                BatchStock.warehouse_id == pembelian.warehouse_id,
+                BatchStock.tanggal_masuk == trx_date,
+                BatchStock.qty_masuk == pembelian_item.qty,
+                BatchStock.harga_beli == pembelian_item.unit_price
+            ).first()
+            
+            if not batch:
                 db.rollback()
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"{str(e)}"
+                    detail=f"Batch not found for item {pembelian_item.item_id}. Cannot rollback."
                 )
-
+            
+            # Check if batch has been used
+            if batch.qty_keluar > 0:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot rollback - batch for item {pembelian_item.item_id} has been used in sales (qty_keluar: {batch.qty_keluar})"
+                )
+            
+            # Safe to delete batch
+            db.delete(batch)
         
+        # Update status back to DRAFT
         pembelian.status_pembelian = StatusPembelianEnum.DRAFT
 
+        # Clear snapshot fields
         pembelian.warehouse_name = None
         pembelian.vendor_name = None
         pembelian.vendor_address = None
@@ -700,6 +741,7 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
     return {
         "msg": "Pembelian status changed successfully"
     }
+
 
 @router.post("/{pembelian_id}/finalize", response_model=PembelianResponse)
 async def finalize_pembelian_endpoint(pembelian_id: int, db: Session = Depends(get_db), user_name : str  = Depends(get_current_user_name)):

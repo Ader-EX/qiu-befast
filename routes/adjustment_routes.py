@@ -22,11 +22,11 @@ from schemas.StockAdjustmentSchemas import (
     StockAdjustmentListResponse
 )
 from services.audit_services import AuditService
+from services.fifo_services import FifoService
 from services.inventoryledger_services import InventoryService
 from utils import generate_unique_record_number, get_current_user_name
 
 router = APIRouter()
-
 
 def adjust_item_stock(
         db: Session,
@@ -37,13 +37,13 @@ def adjust_item_stock(
         no_adj: str,
         trx_date: date,
         user_name: str,
-        adjustment_item_id: int  # ADD THIS PARAMETER
+        adjustment_item_id: int,
+        warehouse_id: Optional[int] = None
 ):
     """
-    Helper function to adjust item stock and post to inventory ledger
+    Helper function to adjust item stock using FIFO
     """
     audit_service = AuditService(db)
-    inventory_service = InventoryService(db)
 
     item = db.query(Item).filter(Item.id == item_id, Item.is_deleted == False).first()
     if not item:
@@ -52,35 +52,37 @@ def adjust_item_stock(
     old_stock = item.total_item
 
     if adjustment_type == AdjustmentTypeEnum.OUT:
-        source_type = SourceTypeEnum.OUT
-
-        if item.total_item < qty:
+        # Consume from FIFO batches
+        try:
+            total_hpp, fifo_logs = FifoService.process_sale_fifo(
+                db=db,
+                invoice_id=f"ADJ-{no_adj}-{adjustment_item_id}",
+                invoice_date=trx_date,
+                item_id=item_id,
+                qty_terjual=qty,
+                harga_jual_per_unit=Decimal("0"),  # No sale price for adjustments
+                warehouse_id=warehouse_id
+            )
+        except ValueError as e:
             raise HTTPException(
                 status_code=400,
-                detail=f"Insufficient stock for item {item.name}. Available: {item.total_item}, Required: {qty}"
+                detail=f"Insufficient stock for item {item.name}. {str(e)}"
             )
-
-        inventory_service.post_inventory_out(
-            item_id=item_id,
-            source_type=source_type,
-            source_id=f"{no_adj}",  # UNIQUE PER ITEM
-            qty=qty,
-            reason_code=f"Stock Adjustment OUT: {no_adj}"
-        )
 
         item.total_item -= qty
         action = "dikurangi"
 
     else:  # IN
-        source_type = SourceTypeEnum.IN
-
-        inventory_service.post_inventory_in(
+        # Create new FIFO batch
+        FifoService.create_batch_from_purchase(
+            source_id=item_id,
+            source_type=SourceTypeEnum.IN,
+            db=db,
             item_id=item_id,
-            source_type=source_type,
-            source_id=f"{no_adj}",  # UNIQUE PER ITEM
-            qty=qty,
-            unit_price=adjustment_price,
-            reason_code=f"Stock Adjustment IN: {no_adj}"
+            warehouse_id=warehouse_id,
+            tanggal_masuk=trx_date,
+            qty_masuk=qty,
+            harga_beli=adjustment_price
         )
 
         item.total_item += qty
@@ -92,77 +94,6 @@ def adjust_item_stock(
         entity_id=item.id,
         entity_type=AuditEntityEnum.ITEM,
         description=f"Stok item {item.name} {action} sebanyak {qty} (dari {old_stock} menjadi {new_stock}) - Adjustment: {no_adj}",
-        user_name=user_name
-    )
-
-    db.flush()
-
-
-def reverse_item_stock_adjustment(
-        db: Session,
-        item_id: int,
-        qty: int,
-        adjustment_type: AdjustmentTypeEnum,
-        adjustment_price: Decimal,
-        no_adj: str,
-        trx_date: date,
-        user_name: str
-):
-    """
-    Helper function to reverse stock adjustment in inventory ledger
-    """
-    audit_service = AuditService(db)
-    inventory_service = InventoryService(db)
-
-    item = db.query(Item).filter(Item.id == item_id, Item.is_deleted == False).first()
-    if not item:
-        raise HTTPException(status_code=404, detail=f"Item with ID {item_id} not found")
-
-    old_stock = item.total_item
-
-    # Reverse the adjustment
-    if adjustment_type == AdjustmentTypeEnum.OUT:
-        # Original was OUT, so reverse with IN
-        inventory_service.post_inventory_in(
-            item_id=item_id,
-            source_type=SourceTypeEnum.IN,
-            source_id=f"{no_adj}",
-            qty=qty,
-            unit_price=adjustment_price,
-            trx_date=trx_date,
-            reason_code=f"Reversal of Stock Adjustment OUT: {no_adj}"
-        )
-
-        item.total_item += qty
-        action = "ditambahkan kembali"
-
-    else:  # IN
-        # Original was IN, so reverse with OUT
-        if item.total_item < qty:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot reverse adjustment - insufficient stock for item {item.name}. Available: {item.total_item}, Required: {qty}"
-            )
-
-        inventory_service.post_inventory_out(
-            item_id=item_id,
-            source_type=SourceTypeEnum.OUT,
-            source_id=f"{no_adj}",
-            qty=qty,
-            trx_date=trx_date,
-            reason_code=f"Reversal of Stock Adjustment IN: {no_adj}"
-        )
-
-        item.total_item -= qty
-        action = "dikurangi kembali"
-
-    new_stock = item.total_item
-
-    # Log the reversal
-    audit_service.default_log(
-        entity_id=item.id,
-        entity_type=AuditEntityEnum.ITEM,
-        description=f"Stok item {item.name} {action} sebanyak {qty} (dari {old_stock} menjadi {new_stock}) - Reversal Adjustment: {no_adj}",
         user_name=user_name
     )
 
@@ -506,16 +437,16 @@ async def download_attachment(
         filename=attachment.filename,
         media_type=attachment.mime_type
     )
-
 @router.put("/{adjustment_id}/rollback", status_code=status.HTTP_200_OK)
 async def rollback_stock_adjustment(
         adjustment_id: int,
         db: Session = Depends(get_db),
         user_name: str = Depends(get_current_user_name)
 ):
-    """Rolls back a Stock Adjustment from ACTIVE → DRAFT"""
+    """Rolls back a Stock Adjustment from ACTIVE → DRAFT using FIFO rollback"""
+    from models.BatchStock import BatchStock, FifoLog
+    
     audit_service = AuditService(db)
-    inventory_service = InventoryService(db)
 
     adjustment = (
         db.query(StockAdjustment)
@@ -541,43 +472,58 @@ async def rollback_stock_adjustment(
 
     # Reverse stock changes for each item
     for adj_item in adjustment.stock_adjustment_items:
-        item = db.query(Item).filter(
-            Item.id == adj_item.item_id
-        ).first()
+        item = db.query(Item).filter(Item.id == adj_item.item_id).first()
 
         if not item:
-            raise HTTPException(status_code=404, detail=f"Item {adj_item.item_id} telah dihapus, tidak bisa di-rollback")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Item {adj_item.item_id} telah dihapus, tidak bisa di-rollback"
+            )
 
         old_stock = item.total_item
 
         if adjustment.adjustment_type == AdjustmentTypeEnum.OUT:
-            inventory_service.post_inventory_in(
-                item_id=adj_item.item_id,
-                source_type=SourceTypeEnum.IN,
-                source_id=f"{adjustment.no_adjustment}",
-                qty=adj_item.qty,
-                unit_price=Decimal(str(adj_item.adj_price)),
-                trx_date=date.today(),
-                reason_code=f"Rollback Adjustment {adjustment.no_adjustment} to DRAFT"
-            )
+            # Original was OUT (consumed from batches via FIFO)
+            # Reverse by rolling back the FifoLog entries
+            invoice_id = f"ADJ-{adjustment.no_adjustment}-{adj_item.id}"
+            
+            try:
+                FifoService.rollback_latest_sale(
+                    db=db,
+                    invoice_id=invoice_id,
+                    invoice_date=adjustment.adjustment_date
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
             item.total_item += adj_item.qty
             action = "ditambahkan kembali"
 
         else:  # IN
-            if item.total_item < adj_item.qty:
+            # Original was IN (created a batch)
+            # Delete the batch if it hasn't been used
+            batch = db.query(BatchStock).filter(
+                BatchStock.item_id == adj_item.item_id,
+                BatchStock.warehouse_id == adjustment.warehouse_id,
+                BatchStock.tanggal_masuk == adjustment.adjustment_date,
+                BatchStock.qty_masuk == adj_item.qty,
+                BatchStock.harga_beli == adj_item.adj_price
+            ).first()
+
+            if not batch:
                 raise HTTPException(
-                    status_code=400,
-                    detail=f"Cannot rollback - insufficient stock for {item.name}"
+                    status_code=404,
+                    detail=f"Batch not found for item {item.name}"
                 )
 
-            inventory_service.post_inventory_out(
-                item_id=adj_item.item_id,
-                source_type=SourceTypeEnum.OUT,
-                source_id=f"{adjustment.no_adjustment}",
-                qty=adj_item.qty,
-                trx_date=date.today(),
-                reason_code=f"Rollback Adjustment {adjustment.no_adjustment} to DRAFT"
-            )
+            if batch.qty_keluar > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot rollback - batch for {item.name} has been used in sales (qty_keluar: {batch.qty_keluar})"
+                )
+
+            # Safe to delete
+            db.delete(batch)
             item.total_item -= adj_item.qty
             action = "dikurangi kembali"
 
@@ -622,8 +568,7 @@ def delete_stock_adjustment(
     - ACTIVE: Must be rolled back first, then inventory entries are reversed
     """
     audit_service = AuditService(db)
-    inventory_service = InventoryService(db)
-
+    
     # Fetch adjustment with items
     adjustment = (
         db.query(StockAdjustment)
@@ -648,11 +593,11 @@ def delete_stock_adjustment(
     # Handle ACTIVE adjustments - must reverse stock changes first
     skipped_items = []
     if adjustment.status_adjustment == StatusStockAdjustmentEnum.ACTIVE:
+        from models.BatchStock import BatchStock, FifoLog
+        
         # Reverse stock changes for each item
         for adj_item in adjustment.stock_adjustment_items:
-            item = db.query(Item).filter(
-                Item.id == adj_item.item_id
-            ).first()
+            item = db.query(Item).filter(Item.id == adj_item.item_id).first()
 
             if not item:
                 # Item was deleted - skip reversal but log it
@@ -673,35 +618,49 @@ def delete_stock_adjustment(
 
             # Reverse the adjustment
             if adjustment.adjustment_type == AdjustmentTypeEnum.OUT:
-                # Original was OUT, reverse with IN
-                inventory_service.post_inventory_in(
-                    item_id=adj_item.item_id,
-                    source_type=SourceTypeEnum.IN,
-                    source_id=f"{adjustment.no_adjustment}",
-                    qty=adj_item.qty,
-                    unit_price=Decimal(str(adj_item.adj_price)),
-                    trx_date=date.today(),
-                    reason_code=f"Deletion Reversal of Adjustment {adjustment.no_adjustment}"
-                )
-                item.total_item += adj_item.qty
-                action = "dikembalikan"
-
-            else:  # IN
-                # Original was IN, reverse with OUT
-                if item.total_item < adj_item.qty:
+                # Original was OUT, reverse by rolling back FIFO
+                invoice_id = f"ADJ-{adjustment.no_adjustment}-{adj_item.id}"
+                
+                try:
+                    FifoService.rollback_latest_sale(
+                        db=db,
+                        invoice_id=invoice_id,
+                        invoice_date=adjustment.adjustment_date
+                    )
+                    item.total_item += adj_item.qty
+                    action = "dikembalikan"
+                except ValueError as e:
+                    # This sale wasn't the latest - can't rollback
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Cannot delete - insufficient stock for {item.name}. Available: {item.total_item}, Required: {adj_item.qty}"
+                        detail=f"Cannot delete - adjustment for {item.name} is not the latest transaction. Rollback newer transactions first."
                     )
 
-                inventory_service.post_inventory_out(
-                    item_id=adj_item.item_id,
-                    source_type=SourceTypeEnum.OUT,
-                    source_id=f"{adjustment.no_adjustment}",
-                    qty=adj_item.qty,
-                    trx_date=date.today(),
-                    reason_code=f"Deletion Reversal of Adjustment {adjustment.no_adjustment}"
-                )
+            else:  # IN
+                # Original was IN, delete the batch
+                batch = db.query(BatchStock).filter(
+                    BatchStock.item_id == adj_item.item_id,
+                    BatchStock.warehouse_id == adjustment.warehouse_id,
+                    BatchStock.tanggal_masuk == adjustment.adjustment_date,
+                    BatchStock.qty_masuk == adj_item.qty,
+                    BatchStock.harga_beli == adj_item.adj_price
+                ).first()
+
+                if not batch:
+                    skipped_items.append({
+                        "item_id": adj_item.item_id,
+                        "qty": adj_item.qty,
+                        "reason": "Batch not found"
+                    })
+                    continue
+
+                if batch.qty_keluar > 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot delete - batch for {item.name} has been used (qty_keluar: {batch.qty_keluar})"
+                    )
+
+                db.delete(batch)
                 item.total_item -= adj_item.qty
                 action = "dikurangi"
 
@@ -741,14 +700,17 @@ def delete_stock_adjustment(
         response["warning"] = f"{len(skipped_items)} item(s) sudah dihapus, stok tidak dapat dikembalikan"
     
     return response
- 
+
 @router.put("/{adjustment_id}/finalize")
 def finalize_stock_adjustment(
         adjustment_id: int,
         db: Session = Depends(get_db),
         user_name: str = Depends(get_current_user_name)
 ):
-    """Finalize stock adjustment and post to inventory ledger"""
+    """Finalize stock adjustment and post to FIFO batches"""
+    from models.BatchStock import BatchStock
+    from sqlalchemy import func, and_
+    
     audit_service = AuditService(db)
 
     adjustment = db.query(StockAdjustment).options(
@@ -771,23 +733,39 @@ def finalize_stock_adjustment(
     validation_errors = []
     for adj_item in adjustment.stock_adjustment_items:
         try:
-            # Pre-validate without making changes (you might need to add a validation function)
-            # For now, we'll check basic constraints
             if not adj_item.item_id:
                 item_name = adj_item.item_rel.name if adj_item.item_rel else "Unknown"
                 validation_errors.append(f"{item_name}: Item ID is missing")
+                continue
             
-            # If it's a reduction, check if stock is sufficient
-            if adjustment.adjustment_type == "REDUCTION":  # Adjust based on your enum
-                inventory_service = InventoryService(db)
-                last_entry = inventory_service._get_last_ledger_entry(adj_item.item_id)
-                available = last_entry.cumulative_qty if last_entry else 0
+            # If it's OUT, check if stock is sufficient using FIFO batches
+            if adjustment.adjustment_type == AdjustmentTypeEnum.OUT:
+                # Calculate total available stock from open batches
+                available_query = db.query(
+                    func.sum(BatchStock.sisa_qty).label('total_available')
+                ).filter(
+                    and_(
+                        BatchStock.item_id == adj_item.item_id,
+                        BatchStock.is_open == True,
+                        BatchStock.sisa_qty > 0
+                    )
+                )
+                
+                # Filter by warehouse if specified
+                if adjustment.warehouse_id:
+                    available_query = available_query.filter(
+                        BatchStock.warehouse_id == adjustment.warehouse_id
+                    )
+                
+                result = available_query.scalar()
+                available = result if result else 0
                 
                 if available < adj_item.qty:
                     item_name = adj_item.item_rel.name if adj_item.item_rel else f"ID {adj_item.item_id}"
                     validation_errors.append(
                         f"{item_name}: Stock tidak mencukupi. Tersedia: {available}, Dibutuhkan: {adj_item.qty}"
                     )
+                    
         except Exception as e:
             item_name = adj_item.item_rel.name if adj_item.item_rel else f"ID {adj_item.item_id}"
             validation_errors.append(f"{item_name}: {str(e)}")
@@ -810,15 +788,14 @@ def finalize_stock_adjustment(
             no_adj=adjustment.no_adjustment,
             trx_date=adjustment.adjustment_date,
             user_name=user_name,
-            adjustment_item_id=adj_item.id
+            adjustment_item_id=adj_item.id,
+            warehouse_id=adjustment.warehouse_id
         )
 
     # 3) Update status to ACTIVE
     adjustment.status_adjustment = StatusStockAdjustmentEnum.ACTIVE
     adjustment.updated_at = datetime.now()
 
-    # Log audit
-    total_qty = sum(item.qty for item in adjustment.stock_adjustment_items)
     audit_service.default_log(
         entity_id=adjustment.id,
         entity_type=AuditEntityEnum.STOCK_ADJUSTMENT,

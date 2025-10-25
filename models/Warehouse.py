@@ -20,4 +20,10 @@ class Warehouse(Base,SoftDeleteMixin):
     pembayarans  = relationship("Pembayaran",cascade="all, delete", back_populates="warehouse_rel")
     pengembalians  = relationship("Pengembalian",cascade="all, delete", back_populates="warehouse_rel")
     stock_adjustments = relationship("StockAdjustment", back_populates="warehouse_rel")
+    batch = relationship(
+    "BatchStock",
+    back_populates="warehouse_rel",
+    cascade="all, delete-orphan"
+)
+
 

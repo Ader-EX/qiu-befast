@@ -32,6 +32,7 @@ from routes.upload_routes import get_public_image_url, to_public_image_url, temp
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.PenjualanSchema import PenjualanCreate, PenjualanListResponse, PenjualanResponse, PenjualanStatusUpdate, PenjualanUpdate, SuccessResponse, TotalsResponse, UploadResponse
 from services.audit_services import AuditService
+from services.fifo_services import FifoService
 from services.inventoryledger_services import InventoryService
 from utils import generate_unique_record_number, get_current_user_name
 from decimal import Decimal, InvalidOperation  # add InvalidOperation
@@ -205,20 +206,35 @@ def validate_item_exists(db: Session, item_id: int) -> Item:
         raise HTTPException(status_code=404, detail=f"Item with ID {item_id} not found")
     return item
 
-
-def validate_item_stock(db: Session, item_id: int, requested_qty: int) -> None:
-    """Ensure stock is sufficient based on the inventory ledger."""
+def validate_item_stock(db: Session, item_id: int, requested_qty: int, warehouse_id: Optional[int] = None) -> None:
+    """Ensure stock is sufficient based on FIFO batches."""
+    from models.BatchStock import BatchStock
+    from sqlalchemy import func, and_
     
-    inventory_service = InventoryService(db)
-    item_data =  db.query(Item).filter(Item.id  == item_id).first()
+    item_data = db.query(Item).filter(Item.id == item_id).first()
     
-    last_entry = inventory_service._get_last_ledger_entry(item_id)
-
     if requested_qty < 1:
         raise HTTPException(status_code=400, detail="qty must be >= 1")
 
-    if not last_entry or last_entry.cumulative_qty < requested_qty:
-        available = last_entry.cumulative_qty if last_entry else 0
+    # Calculate total available stock from open FIFO batches
+    query = db.query(
+        func.sum(BatchStock.sisa_qty).label('total_available')
+    ).filter(
+        and_(
+            BatchStock.item_id == item_id,
+            BatchStock.is_open == True,
+            BatchStock.sisa_qty > 0
+        )
+    )
+    
+    # Filter by warehouse if specified
+    if warehouse_id:
+        query = query.filter(BatchStock.warehouse_id == warehouse_id)
+    
+    result = query.scalar()
+    available = result if result else 0
+
+    if available < requested_qty:
         raise HTTPException(
             status_code=400,
             detail=f"Stock untuk item {item_data.name} tidak tersedia. "
@@ -242,19 +258,17 @@ def update_item_stock(db: Session, item_id: int, qty_change: int) -> None:
                    f"Current: {item.total_item}, Change: {qty_change}"
         )
     item.total_item = new_total
-
-
-def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None:
+def finalize_penjualan(db: Session, penjualan_id: int, user_name: str) -> None:
     """
-    Finalize SALES:
+    Finalize SALES using FIFO:
       - Validate required fields
-      - Validate stock availability per line
-      - Subtract qty from stock for each line
+      - Validate stock availability per line using FIFO batches
+      - Process sale through FIFO (consumes oldest batches first)
       - Snapshot friendly names
       - Set status ACTIVE
     """
     audit_service = AuditService(db)
-    inventory_service = InventoryService(db)
+    
     penjualan = (
         db.query(Penjualan)
         .options(
@@ -283,7 +297,7 @@ def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None
     validation_errors = []
     for line in penjualan.penjualan_items:
         try:
-            validate_item_stock(db, line.item_id, line.qty)
+            validate_item_stock(db, line.item_id, line.qty, penjualan.warehouse_id)
         except HTTPException as e:
             item_name = line.item_rel.name if line.item_rel else f"ID {line.item_id}"
             validation_errors.append(f"{item_name}: {e.detail}")
@@ -295,7 +309,7 @@ def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None
             detail=f"Tidak dapat finalisasi - masalah stok: {'; '.join(validation_errors)}"
         )
 
-    # 2) Snapshot names / metadata (like your Pembelian)
+    # 2) Snapshot names / metadata
     if penjualan.warehouse_rel:
         penjualan.warehouse_name = penjualan.warehouse_rel.name
 
@@ -309,22 +323,38 @@ def finalize_penjualan(db: Session, penjualan_id: int, user_name : str ) -> None
     if penjualan.top_rel:
         penjualan.top_name = penjualan.top_rel.name
 
-    # 3) NOW safe to subtract stock - we know ALL items have sufficient stock
+    # Get transaction date
+    trx_date = penjualan.sales_date.date() if isinstance(penjualan.sales_date, datetime) else penjualan.sales_date
+
+    # 3) NOW safe to process sales through FIFO - we know ALL items have sufficient stock
     for line in penjualan.penjualan_items:
-        # Keep some item snapshots if needed (optional)
+        # Snapshot satuan name if needed
         if line.item_rel:
             item = line.item_rel
             if getattr(item, "satuan_rel", None):
                 line.satuan_name = item.satuan_rel.name
-        update_item_stock(db, line.item_id, -int(line.qty or 0))  # sales → subtract
-        inventory_service.post_inventory_out(
-            item_id=line.item_id,
-            source_type=SourceTypeEnum.PENJUALAN,
-            source_id=f"{penjualan.no_penjualan}",
-            qty=int(line.qty or 0),
-            trx_date=penjualan.sales_date.date(),
-            reason_code=f"Penjualan {penjualan.no_penjualan}"
-        )
+        
+        # Process sale using FIFO - this will consume from oldest batches
+        try:
+            total_hpp, fifo_logs = FifoService.process_sale_fifo(
+                db=db,
+                invoice_id=penjualan.no_penjualan,
+                invoice_date=trx_date,
+                item_id=line.item_id,
+                qty_terjual=line.qty,
+                harga_jual_per_unit=Decimal(str(line.unit_price)),
+                warehouse_id=penjualan.warehouse_id
+            )
+            
+            # Update item stock
+            update_item_stock(db, line.item_id, -int(line.qty or 0))
+            
+        except ValueError as e:
+            # This shouldn't happen since we validated, but handle it anyway
+            raise HTTPException(
+                status_code=400,
+                detail=f"FIFO processing failed for item {line.item_id}: {str(e)}"
+            )
 
     # 4) Activate
     penjualan.status_penjualan = StatusPembelianEnum.ACTIVE
@@ -596,7 +626,6 @@ async def update_penjualan(
     - If DRAFT: never touch inventory ledger
     - If ACTIVE/PROCESSED: void old ledger entries and post new ones for changed items
     """
-    inventory_service = InventoryService(db)
     fields_changed = None
 
     penjualan: Penjualan = (
@@ -761,49 +790,73 @@ async def update_penjualan(
 
         # Apply ledger operations if not DRAFT
         if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
+            trx_date = penjualan.sales_date.date() if isinstance(penjualan.sales_date, datetime) else penjualan.sales_date
+            
             for operation, item_id, old_qty, new_qty, line_id in ledger_operations:
-                source_id = f"{penjualan.no_penjualan}"
-
                 if operation == "delete":
-                    # Void the old OUT entry
+                    # Rollback the FIFO sale
                     try:
-                        inventory_service.void_ledger_entry_by_source(
-                            source_id=source_id,
-                            reason=f"Penjualan {penjualan.no_penjualan} item deleted"
+                        FifoService.rollback_latest_sale(
+                            db=db,
+                            invoice_id=penjualan.no_penjualan,
+                            invoice_date=trx_date
                         )
-                    except:
-                        pass  # Entry might not exist yet
+                        # Restore stock
+                        update_item_stock(db, item_id, old_qty)
+                    except ValueError as e:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cannot delete item - not the latest sale. Rollback newer sales first."
+                        )
 
                 elif operation == "update":
-                    # Void old entry and post new one
+                    # Rollback old quantity
                     try:
-                        inventory_service.void_ledger_entry_by_source(
-                            source_id=source_id,
-                            reason=f"Penjualan {penjualan.no_penjualan} item qty updated"
+                        FifoService.rollback_latest_sale(
+                            db=db,
+                            invoice_id=penjualan.no_penjualan,
+                            invoice_date=trx_date
                         )
-                    except:
-                        pass
-
-                    # Post new OUT movement
-                    inventory_service.post_inventory_out(
+                        # Restore old stock
+                        update_item_stock(db, item_id, old_qty)
+                    except ValueError as e:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cannot update item - not the latest sale. Rollback newer sales first."
+                        )
+                    
+                    # Validate new quantity is available
+                    validate_item_stock(db, item_id, new_qty, penjualan.warehouse_id)
+                    
+                    # Process new sale through FIFO
+                    total_hpp, fifo_logs = FifoService.process_sale_fifo(
+                        db=db,
+                        invoice_id=penjualan.no_penjualan,
+                        invoice_date=trx_date,
                         item_id=item_id,
-                        source_type=SourceTypeEnum.PENJUALAN,
-                        source_id=source_id,
-                        qty=new_qty,
-                        trx_date=penjualan.sales_date.date(),
-                        reason_code=f"Penjualan {penjualan.no_penjualan} (updated)"
+                        qty_terjual=new_qty,
+                        harga_jual_per_unit=Decimal(str(d["unit_price"])),
+                        warehouse_id=penjualan.warehouse_id
                     )
+                    # Reduce new stock
+                    update_item_stock(db, item_id, -new_qty)
 
                 elif operation == "add":
-                    # Post new OUT movement
-                    inventory_service.post_inventory_out(
+                    # Validate stock is available
+                    validate_item_stock(db, item_id, new_qty, penjualan.warehouse_id)
+                    
+                    # Process new sale through FIFO
+                    total_hpp, fifo_logs = FifoService.process_sale_fifo(
+                        db=db,
+                        invoice_id=penjualan.no_penjualan,
+                        invoice_date=trx_date,
                         item_id=item_id,
-                        source_type=SourceTypeEnum.PENJUALAN,
-                        source_id=source_id,
-                        qty=new_qty,
-                        trx_date=penjualan.sales_date.date(),
-                        reason_code=f"Penjualan {penjualan.no_penjualan} (new item)"
+                        qty_terjual=new_qty,
+                        harga_jual_per_unit=Decimal(str(d["unit_price"])),
+                        warehouse_id=penjualan.warehouse_id
                     )
+                    # Reduce stock
+                    update_item_stock(db, item_id, -new_qty)
 
     if fields_changed or items_changed:
         db.commit()
@@ -813,6 +866,7 @@ async def update_penjualan(
         db.rollback()
 
     return await get_penjualan(penjualan_id, db)
+
 @router.patch("/{penjualan_id}", status_code=status.HTTP_200_OK)
 async def rollback_penjualan_status(
         penjualan_id: int,
@@ -821,10 +875,9 @@ async def rollback_penjualan_status(
 ):
     """
     Roll back Penjualan to DRAFT from ACTIVE/COMPLETED.
-    Voids all inventory ledger entries associated with this penjualan.
+    Reverses FIFO sales by rolling back the FIFO logs and restoring batches.
     """
     audit_service = AuditService(db)
-    inventory_service = InventoryService(db)
 
     penjualan = (
         db.query(Penjualan)
@@ -836,18 +889,37 @@ async def rollback_penjualan_status(
         raise HTTPException(status_code=404, detail="Penjualan not found")
 
     if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
-        # Void all ledger entries for this penjualan
+        trx_date = penjualan.sales_date.date() if isinstance(penjualan.sales_date, datetime) else penjualan.sales_date
+        
+        # Rollback FIFO sale for each item
         for line in penjualan.penjualan_items:
-            source_id = f"{penjualan.no_penjualan}"
             try:
-                inventory_service.void_ledger_entry_by_source(
-                    source_id=source_id,
-                    reason=f"Penjualan {penjualan.no_penjualan} rolled back to DRAFT"
+                # Rollback the FIFO sale - this restores batches
+                FifoService.rollback_latest_sale(
+                    db=db,
+                    invoice_id=penjualan.no_penjualan,
+                    invoice_date=trx_date
+                )
+                
+                # Restore item stock
+                update_item_stock(db, line.item_id, line.qty)
+                
+            except ValueError as e:
+                # Sale is not the latest - cannot rollback
+                db.rollback()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot rollback penjualan {penjualan.no_penjualan} - {str(e)}. "
+                           f"This is not the latest sale. Rollback newer sales first."
                 )
             except Exception as e:
-                # Log but don't fail if ledger entry doesn't exist
-                print(f"Warning: Could not void ledger for {source_id}: {e}")
+                db.rollback()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error rolling back item {line.item_id}: {str(e)}"
+                )
 
+        # Clear status and snapshot fields
         penjualan.status_penjualan = StatusPembelianEnum.DRAFT
         penjualan.warehouse_name = None
         penjualan.customer_name = None

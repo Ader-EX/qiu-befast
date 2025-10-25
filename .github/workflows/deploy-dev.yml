@@ -1,0 +1,29 @@
+name: DEV -- CI/CD to VPS
+
+on:
+  push:
+    branches: [development]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy via SSH
+        run: |
+          ssh -o StrictHostKeyChecking=no root@${{ secrets.VPS_HOST }} << 'EOF'
+          cd /root/backend-dev
+          git pull
+          docker stop qiu-container-dev || true
+          docker rm qiu-container-dev || true
+          docker build -t qiu-backend-dev -f Dockerfile.dev .
+          docker run -d --env-file /root/backend-dev/config/.env --network host -v /root/backend-dev/uploads:/root/backend-dev/uploads --name qiu-container-dev qiu-backend-dev
+          EOF
