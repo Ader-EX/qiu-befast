@@ -5,7 +5,7 @@ from decimal import Decimal
 import enum
 
 from sqlalchemy import (
-    Column, Integer, BigInteger, Numeric, String, DateTime, Date, Boolean,
+    Column, Integer, Numeric, String, DateTime, Date, Boolean,
     Enum as SAEnum, Index, ForeignKey, func
 )
 from sqlalchemy.orm import relationship
