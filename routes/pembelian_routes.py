@@ -726,7 +726,7 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
             
             # Create reversal by "consuming" the batch (like a sale)
             # This reduces batch.sisa_qty and creates audit trail
-            invoice_id = f"PO-{pembelian.no_pembelian}-ROLLBACK"
+            invoice_id = f"{pembelian.no_pembelian}-ROLLBACK"
             
             try:
                 # Process as a "sale" to consume the batch (reversal)
