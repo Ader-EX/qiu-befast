@@ -131,6 +131,8 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
     )
     
 
+
+
 @router.get("/laba-rugi", status_code=status.HTTP_200_OK, response_model=LabaRugiResponse)
 async def get_laba_rugi(
     from_date: datetime = Query(..., description="Start datetime (ISO-8601)"),
@@ -143,7 +145,7 @@ async def get_laba_rugi(
     """
     Get Laba Rugi (Profit & Loss) report based on FIFO logs.
     Shows detailed breakdown by invoice with HPP calculation.
-    Shows ALL transactions including rollbacks.
+    Automatically nets out rollback transactions - if original + rollback = 0, both are hidden.
     """
     if to_date is None:
         to_date = datetime.now()
@@ -151,11 +153,14 @@ async def get_laba_rugi(
     from_date_only = from_date.date()
     to_date_only = to_date.date()
     
-    # Query FifoLog with item details - NO FILTERS, SHOW EVERYTHING
+    # Get base invoice_id by removing -ROLLBACK suffix
+    base_invoice_case = func.replace(FifoLog.invoice_id, '-ROLLBACK', '')
+    
+    # Query and GROUP BY base invoice to net out rollbacks with originals
     query = (
         db.query(
             FifoLog.invoice_date,
-            FifoLog.invoice_id,
+            base_invoice_case.label("base_invoice_id"),
             FifoLog.item_id,
             Item.code.label("item_code"),
             Item.name.label("item_name"),
@@ -172,13 +177,13 @@ async def get_laba_rugi(
         )
         .group_by(
             FifoLog.invoice_date,
-            FifoLog.invoice_id,
+            base_invoice_case,
             FifoLog.item_id,
             Item.code,
             Item.name,
             FifoLog.harga_jual,
         )
-        .order_by(FifoLog.invoice_date.asc(), FifoLog.invoice_id.asc())
+        .order_by(FifoLog.invoice_date.asc(), base_invoice_case.asc())
     )
 
     # Apply optional item filter
@@ -188,11 +193,21 @@ async def get_laba_rugi(
     # Get all results
     all_results = query.all()
     
-    # Get total count
-    total_count = len(all_results)
+    # Filter out entries where everything nets to zero (fully rolled back)
+    results = [
+        row for row in all_results
+        if not (
+            (row.qty_terjual == 0 or row.qty_terjual is None) and
+            (row.total_hpp == 0 or row.total_hpp is None) and
+            (row.total_penjualan == 0 or row.total_penjualan is None)
+        )
+    ]
+    
+    # Get total count after filtering
+    total_count = len(results)
     
     # Apply pagination
-    results = all_results[skip:skip + limit]
+    results = results[skip:skip + limit]
 
     # Format response
     detail_rows = []
@@ -212,7 +227,7 @@ async def get_laba_rugi(
 
         detail_rows.append(LabaRugiDetailRow(
             tanggal=datetime.combine(row.invoice_date, datetime.min.time()),
-            no_invoice=row.invoice_id,
+            no_invoice=row.base_invoice_id,
             item_code=row.item_code or "N/A",
             item_name=row.item_name or "N/A",
             qty_terjual=qty,
@@ -258,7 +273,7 @@ async def download_laba_rugi(
     """
     Download profit and loss report (Laba Rugi) as XLSX file with FIFO detail.
     Shows detailed breakdown by invoice with HPP calculation per batch.
-    Shows ALL transactions including rollbacks.
+    Automatically nets out rollback transactions.
     """
     if to_date is None:
         to_date = datetime.now()
@@ -266,11 +281,14 @@ async def download_laba_rugi(
     from_date_only = from_date.date()
     to_date_only = to_date.date()
 
-    # Query FifoLog with item details - NO FILTERS
+    # Get base invoice_id by removing -ROLLBACK suffix
+    base_invoice_case = func.replace(FifoLog.invoice_id, '-ROLLBACK', '')
+    
+    # Query and GROUP BY base invoice to net out rollbacks
     query = (
         db.query(
             FifoLog.invoice_date,
-            FifoLog.invoice_id,
+            base_invoice_case.label("base_invoice_id"),
             FifoLog.item_id,
             Item.code.label("item_code"),
             Item.name.label("item_name"),
@@ -287,19 +305,29 @@ async def download_laba_rugi(
         )
         .group_by(
             FifoLog.invoice_date,
-            FifoLog.invoice_id,
+            base_invoice_case,
             FifoLog.item_id,
             Item.code,
             Item.name,
             FifoLog.harga_jual,
         )
-        .order_by(FifoLog.invoice_date.asc(), FifoLog.invoice_id.asc())
+        .order_by(FifoLog.invoice_date.asc(), base_invoice_case.asc())
     )
 
     if item_id is not None:
         query = query.filter(FifoLog.item_id == item_id)
 
-    results = query.all()
+    all_results = query.all()
+    
+    # Filter out fully rolled back transactions
+    results = [
+        row for row in all_results
+        if not (
+            (row.qty_terjual == 0 or row.qty_terjual is None) and
+            (row.total_hpp == 0 or row.total_hpp is None) and
+            (row.total_penjualan == 0 or row.total_penjualan is None)
+        )
+    ]
 
     # Get detailed batch usage for notes section
     fifo_logs_query = (
@@ -316,7 +344,27 @@ async def download_laba_rugi(
     if item_id is not None:
         fifo_logs_query = fifo_logs_query.filter(FifoLog.item_id == item_id)
 
-    fifo_logs = fifo_logs_query.all()
+    all_fifo_logs = fifo_logs_query.all()
+    
+    # Group fifo logs by base invoice and net them out
+    invoice_batches = {}
+    for fifo_log, batch, item in all_fifo_logs:
+        base_inv = fifo_log.invoice_id.replace('-ROLLBACK', '')
+        key = (fifo_log.invoice_date, base_inv, item.name)
+        if key not in invoice_batches:
+            invoice_batches[key] = []
+        invoice_batches[key].append({
+            'batch_id': batch.id_batch,
+            'qty': fifo_log.qty_terpakai,
+            'harga_beli': batch.harga_beli,
+            'hpp': fifo_log.total_hpp,
+        })
+    
+    # Remove fully cancelled invoices from notes
+    invoice_batches = {
+        key: batches for key, batches in invoice_batches.items()
+        if sum(b['qty'] for b in batches) != 0
+    }
 
     # Create workbook
     wb = Workbook()
@@ -363,7 +411,7 @@ async def download_laba_rugi(
 
         ws.append([
             row.invoice_date.strftime("%d/%m/%Y"),
-            row.invoice_id,
+            row.base_invoice_id,
             row.item_code or "N/A",
             row.item_name or "N/A",
             int(qty),
@@ -405,20 +453,7 @@ async def download_laba_rugi(
     ws[ws.max_row]["A"].font = Font(bold=True)
     ws.append([])
 
-    # Group fifo logs by invoice
-    invoice_batches = {}
-    for fifo_log, batch, item in fifo_logs:
-        key = (fifo_log.invoice_date, fifo_log.invoice_id, item.name)
-        if key not in invoice_batches:
-            invoice_batches[key] = []
-        invoice_batches[key].append({
-            'batch_id': batch.id_batch,
-            'qty': fifo_log.qty_terpakai,
-            'harga_beli': batch.harga_beli,
-            'hpp': fifo_log.total_hpp,
-        })
-
-    # Write batch detail notes
+    # Write batch detail notes (only for non-cancelled invoices)
     for (inv_date, inv_id, item_name), batches in invoice_batches.items():
         ws.append([f"Perhitungan HPP pada tanggal {inv_date.strftime('%d/%m/%Y')} - {inv_id} ({item_name}):"])
         ws[ws.max_row]["A"].font = Font(bold=True)
@@ -426,14 +461,16 @@ async def download_laba_rugi(
         # Build formula string
         formula_parts = []
         for b in batches:
-            formula_parts.append(f"(Batch-{b['batch_id']}: {b['qty']}qty × Rp {b['harga_beli']:,.2f})")
+            if b['qty'] != 0:  # Only show non-zero quantities
+                formula_parts.append(f"(Batch-{b['batch_id']}: {b['qty']}qty × Rp {b['harga_beli']:,.2f})")
         
-        formula_str = " + ".join(formula_parts)
-        total_hpp = sum(b['hpp'] for b in batches)
-        
-        ws.append([f"Rumus FIFO = {formula_str}"])
-        ws.append([f"Total HPP = Rp {total_hpp:,.2f}"])
-        ws.append([])
+        if formula_parts:  # Only add if there are non-zero parts
+            formula_str = " + ".join(formula_parts)
+            total_hpp = sum(b['hpp'] for b in batches)
+            
+            ws.append([f"Rumus FIFO = {formula_str}"])
+            ws.append([f"Total HPP = Rp {total_hpp:,.2f}"])
+            ws.append([])
 
     # Format columns
     ws.column_dimensions['A'].width = 12
@@ -478,8 +515,8 @@ async def download_laba_rugi(
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"'
         },
-    )    
-    
+    )
+      
 @router.get(
     "/penjualan",
     status_code=status.HTTP_200_OK,
