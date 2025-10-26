@@ -16,8 +16,9 @@ from starlette import status
 
 from starlette.exceptions import HTTPException
 
+from models.AuditTrail import AuditEntityEnum
 from models.BatchStock import BatchStock, FifoLog
-from models.InventoryLedger import InventoryLedger
+from models.InventoryLedger import InventoryLedger, SourceTypeEnum
 from models.KodeLambung import KodeLambung
 from models.Customer import Customer
 from models.Item import Item
@@ -28,6 +29,7 @@ from schemas.PaginatedResponseSchemas import PaginatedResponse
 from database import  get_db
 from schemas.UtilsSchemas import DashboardStatistics, ItemStockAdjustmentReportRow, LabaRugiDetailRow, LabaRugiResponse, PurchaseReportResponse, PurchaseReportRow, \
     SalesReportRow, SalesReportResponse, SalesTrendResponse, SalesTrendDataPoint, StockAdjustmentReportResponse, StockAdjustmentReportRow
+from services.audit_services import AuditService
 
 router =APIRouter()
 
@@ -1476,3 +1478,133 @@ async def download_stock_adjustment_report(
             "Content-Disposition": f'attachment; filename="{filename}"'
         },
     )
+    
+    
+
+# Add this endpoint to your item_routes.py file
+
+from datetime import datetime
+import pytz
+
+@router.post("/migrate-batch-stocks")
+async def migrate_batch_stocks_for_all_items(
+    db: Session = Depends(get_db),
+):
+    """
+    ONE-TIME MIGRATION: Create initial BatchStock records for all existing items.
+    
+    This endpoint:
+    - Processes ALL items (including deleted, zero stock, and service items)
+    - Creates one BatchStock per item using current stock as qty_masuk
+    - Uses current price (not modal_price) as harga_beli
+    - Sets source_type = ITEM, source_id = item.id
+    - Uses current JKT time as tanggal_masuk
+    - Creates audit log for each item
+    
+    Returns summary of migration results.
+    """
+    
+    try:
+        # Get JKT timezone
+        jkt_tz = pytz.timezone('Asia/Jakarta')
+        current_jkt_date = datetime.now(jkt_tz).date()
+        
+        audit_service = AuditService(db)
+        
+        # Get ALL items (no filters)
+        all_items = db.query(Item).all()
+        
+        if not all_items:
+            return {
+                "success": False,
+                "message": "No items found in database",
+                "total_items": 0,
+                "batches_created": 0,
+                "errors": []
+            }
+        
+        total_items = len(all_items)
+        batches_created = 0
+        errors = []
+        
+        print(f"\n{'='*60}")
+        print(f"Starting Batch Stock Migration")
+        print(f"Total items to process: {total_items}")
+        print(f"Current JKT Date: {current_jkt_date}")
+        print(f"{'='*60}\n")
+        
+        for idx, item in enumerate(all_items, 1):
+            try:
+                # Use current price (not modal_price) as harga_beli
+                harga_beli = Decimal(str(item.price)) if item.price else Decimal('0')
+                qty_masuk = item.total_item if item.total_item else 0
+                nilai_total = Decimal(qty_masuk) * harga_beli
+                
+                # Create batch with source_type = ITEM (from SourceTypeEnum)
+                batch = BatchStock(
+                    source_id=str(item.id),  # Use item.id as source_id
+                    source_type=SourceTypeEnum.ITEM,  # Use ITEM enum value
+                    item_id=item.id,
+                    warehouse_id=None,  # No warehouse
+                    tanggal_masuk=current_jkt_date,
+                    qty_masuk=qty_masuk,
+                    qty_keluar=0,
+                    sisa_qty=qty_masuk,
+                    harga_beli=harga_beli,
+                    nilai_total=nilai_total,
+                    is_open=True
+                )
+                
+                db.add(batch)
+                batches_created += 1
+                
+                # Create audit log
+                audit_service.default_log(
+                    entity_id=item.id,
+                    entity_type=AuditEntityEnum.ITEM,
+                    description=f"Initial batch stock created for item {item.name} (qty: {qty_masuk}, price: {harga_beli})",
+                    user_name="ADMIN"
+                )
+                
+                # Print progress every 10 items
+                if idx % 10 == 0 or idx == total_items:
+                    print(f"Progress: {idx}/{total_items} items processed...")
+                
+            except Exception as e:
+                error_msg = f"Failed to create batch for item {item.id} ({item.name}): {str(e)}"
+                errors.append({
+                    "item_id": item.id,
+                    "item_name": item.name,
+                    "sku": item.sku,
+                    "error": str(e)
+                })
+                print(f"ERROR: {error_msg}")
+                continue
+        
+        # Commit all changes
+        db.commit()
+        
+        print(f"\n{'='*60}")
+        print(f"Migration Complete!")
+        print(f"Total items: {total_items}")
+        print(f"Batches created: {batches_created}")
+        print(f"Errors: {len(errors)}")
+        print(f"{'='*60}\n")
+        
+        return {
+            "success": True,
+            "message": "Batch stock migration completed successfully",
+            "total_items": total_items,
+            "batches_created": batches_created,
+            "failed_items": len(errors),
+            "errors": errors if errors else None,
+            "migration_date": current_jkt_date.isoformat()
+        }
+        
+    except Exception as e:
+        db.rollback()
+        print(f"\nFATAL ERROR: {str(e)}\n")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Migration failed: {str(e)}"
+        )
