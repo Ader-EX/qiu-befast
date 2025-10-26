@@ -1,5 +1,5 @@
 import csv
-from datetime import time, timedelta, datetime
+from datetime import date, time, timedelta, datetime
 from decimal import Decimal
 import io
 from openpyxl.styles import Font
@@ -1160,18 +1160,6 @@ def calculate_hpp(prev_balance: Decimal, prev_hpp: Decimal, qty_in: int, price_i
     
     return total_value / total_qty
 
-# --- STOCK ADJUSTMENT (BatchStock + FifoLog) ---------------------------------
-from datetime import datetime, date, time, timedelta
-from decimal import Decimal
-from typing import Dict, List, Optional, Tuple
-from fastapi import APIRouter, Depends, Query, status
-from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
-from openpyxl import Workbook
-import io
-
-router = APIRouter()
 
 def _dt_bounds(from_date: datetime, to_date: Optional[datetime]) -> tuple[datetime, datetime, datetime]:
     """Inclusive start, exclusive end. Returns (start_dt, end_dt_excl, effective_to)."""
