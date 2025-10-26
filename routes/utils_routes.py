@@ -10,7 +10,7 @@ from fastapi import FastAPI,  APIRouter
 from fastapi.params import Depends, Query
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from sqlalchemy import String, and_, extract, func, literal, or_, union_all
+from sqlalchemy import String, and_, cast, extract, func, literal, or_, union_all
 from sqlalchemy.orm import Session, aliased
 from starlette import status
 
@@ -1695,7 +1695,7 @@ async def check_migration_status(
             and_(
                 BatchStock.item_id == Item.id,
                 BatchStock.source_type == SourceTypeEnum.ITEM,
-                BatchStock.source_id == db.cast(Item.id, String)
+                BatchStock.source_id == cast(Item.id, String)
             )
         ).distinct().count()
         
@@ -1707,7 +1707,7 @@ async def check_migration_status(
             and_(
                 BatchStock.item_id == Item.id,
                 BatchStock.source_type == SourceTypeEnum.ITEM,
-                BatchStock.source_id == db.cast(Item.id, String)
+                BatchStock.source_id == cast(Item.id, String)
             )
         ).filter(BatchStock.id_batch.is_(None)).limit(10).all()
         
