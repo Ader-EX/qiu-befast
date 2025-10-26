@@ -130,7 +130,6 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
         status_month_penjualan=status_month_penjualan
     )
     
-    
 @router.get("/laba-rugi", status_code=status.HTTP_200_OK, response_model=LabaRugiResponse)
 async def get_laba_rugi(
     from_date: datetime = Query(..., description="Start datetime (ISO-8601)"),
@@ -143,6 +142,7 @@ async def get_laba_rugi(
     """
     Get Laba Rugi (Profit & Loss) report based on FIFO logs.
     Shows detailed breakdown by invoice with HPP calculation.
+    Filters out draft and rolled-back transactions.
     """
     if to_date is None:
         to_date = datetime.now()
@@ -150,6 +150,18 @@ async def get_laba_rugi(
     from_date_only = from_date.date()
     to_date_only = to_date.date()
 
+    # Get all rolled back invoice IDs (those that have a -ROLLBACK entry)
+    rolled_back_invoices = (
+        db.query(FifoLog.invoice_id)
+        .filter(FifoLog.invoice_id.like("%-ROLLBACK"))
+        .distinct()
+        .all()
+    )
+    
+    # Extract original invoice IDs from rollback entries
+    # e.g., "QP/SI/0001/10/2025-ROLLBACK" -> "QP/SI/0001/10/2025"
+    excluded_invoice_ids = [inv_id[0].replace("-ROLLBACK", "") for inv_id in rolled_back_invoices]
+    
     # Query FifoLog with item details
     query = (
         db.query(
@@ -168,6 +180,10 @@ async def get_laba_rugi(
         .filter(
             FifoLog.invoice_date >= from_date_only,
             FifoLog.invoice_date <= to_date_only,
+            # Exclude rollback entries (they have -ROLLBACK suffix)
+            ~FifoLog.invoice_id.like("%-ROLLBACK"),
+            # Exclude original invoices that have been rolled back
+            ~FifoLog.invoice_id.in_(excluded_invoice_ids) if excluded_invoice_ids else True,
         )
         .group_by(
             FifoLog.invoice_date,
@@ -254,6 +270,7 @@ async def download_laba_rugi(
     """
     Download profit and loss report (Laba Rugi) as XLSX file with FIFO detail.
     Shows detailed breakdown by invoice with HPP calculation per batch.
+    Filters out draft and rolled-back transactions.
     """
     if to_date is None:
         to_date = datetime.now()
@@ -279,6 +296,8 @@ async def download_laba_rugi(
         .filter(
             FifoLog.invoice_date >= from_date_only,
             FifoLog.invoice_date <= to_date_only,
+            # Exclude rollback entries (they have -ROLLBACK suffix)
+            ~FifoLog.invoice_id.like("%-ROLLBACK"),
         )
         .group_by(
             FifoLog.invoice_date,
@@ -304,6 +323,8 @@ async def download_laba_rugi(
         .filter(
             FifoLog.invoice_date >= from_date_only,
             FifoLog.invoice_date <= to_date_only,
+            # Exclude rollback entries
+            ~FifoLog.invoice_id.like("%-ROLLBACK"),
         )
         .order_by(FifoLog.invoice_date.asc(), FifoLog.invoice_id.asc())
     )
