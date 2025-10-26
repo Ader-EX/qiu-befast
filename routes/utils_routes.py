@@ -130,6 +130,7 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
         status_month_penjualan=status_month_penjualan
     )
     
+
 @router.get("/laba-rugi", status_code=status.HTTP_200_OK, response_model=LabaRugiResponse)
 async def get_laba_rugi(
     from_date: datetime = Query(..., description="Start datetime (ISO-8601)"),
@@ -142,29 +143,15 @@ async def get_laba_rugi(
     """
     Get Laba Rugi (Profit & Loss) report based on FIFO logs.
     Shows detailed breakdown by invoice with HPP calculation.
-    Filters out rolled-back transactions.
+    Shows ALL transactions including rollbacks.
     """
     if to_date is None:
         to_date = datetime.now()
 
     from_date_only = from_date.date()
     to_date_only = to_date.date()
-
-    # Get all rollback entries with their timestamps
-    rollback_entries = (
-        db.query(FifoLog.invoice_id, FifoLog.created_at)
-        .filter(FifoLog.invoice_id.like("%-ROLLBACK"))
-        .all()
-    )
     
-    # Map original invoice_id to latest rollback timestamp
-    rollback_timestamps = {}
-    for rollback_id, created_at in rollback_entries:
-        original_id = rollback_id.replace("-ROLLBACK", "")
-        if original_id not in rollback_timestamps or created_at > rollback_timestamps[original_id]:
-            rollback_timestamps[original_id] = created_at
-    
-    # Query FifoLog with item details
+    # Query FifoLog with item details - NO FILTERS, SHOW EVERYTHING
     query = (
         db.query(
             FifoLog.invoice_date,
@@ -182,8 +169,6 @@ async def get_laba_rugi(
         .filter(
             FifoLog.invoice_date >= from_date_only,
             FifoLog.invoice_date <= to_date_only,
-            # Exclude ANY invoice_id that contains -ROLLBACK
-            ~FifoLog.invoice_id.like("%-ROLLBACK"),
         )
         .group_by(
             FifoLog.invoice_date,
@@ -200,15 +185,14 @@ async def get_laba_rugi(
     if item_id is not None:
         query = query.filter(FifoLog.item_id == item_id)
 
-    # Get results and filter out rolled back invoices
+    # Get all results
     all_results = query.all()
-    results = all_results
     
-    # Get total count after filtering
-    total_count = len(results)
+    # Get total count
+    total_count = len(all_results)
     
-    # Apply pagination manually
-    results = results[skip:skip + limit]
+    # Apply pagination
+    results = all_results[skip:skip + limit]
 
     # Format response
     detail_rows = []
@@ -224,7 +208,7 @@ async def get_laba_rugi(
         laba_kotor = row.laba_kotor or Decimal("0")
         
         # Calculate HPP per unit
-        hpp_per_unit = total_hpp / qty if qty > 0 else Decimal("0")
+        hpp_per_unit = total_hpp / qty if qty != 0 else Decimal("0")
 
         detail_rows.append(LabaRugiDetailRow(
             tanggal=datetime.combine(row.invoice_date, datetime.min.time()),
@@ -274,7 +258,7 @@ async def download_laba_rugi(
     """
     Download profit and loss report (Laba Rugi) as XLSX file with FIFO detail.
     Shows detailed breakdown by invoice with HPP calculation per batch.
-    Filters out rolled-back transactions.
+    Shows ALL transactions including rollbacks.
     """
     if to_date is None:
         to_date = datetime.now()
@@ -282,7 +266,7 @@ async def download_laba_rugi(
     from_date_only = from_date.date()
     to_date_only = to_date.date()
 
-    # Query FifoLog with item details
+    # Query FifoLog with item details - NO FILTERS
     query = (
         db.query(
             FifoLog.invoice_date,
@@ -315,8 +299,7 @@ async def download_laba_rugi(
     if item_id is not None:
         query = query.filter(FifoLog.item_id == item_id)
 
-    all_results = query.all()
-    results = all_results
+    results = query.all()
 
     # Get detailed batch usage for notes section
     fifo_logs_query = (
@@ -333,8 +316,7 @@ async def download_laba_rugi(
     if item_id is not None:
         fifo_logs_query = fifo_logs_query.filter(FifoLog.item_id == item_id)
 
-    all_fifo_logs = fifo_logs_query.all()
-    fifo_logs = all_fifo_logs
+    fifo_logs = fifo_logs_query.all()
 
     # Create workbook
     wb = Workbook()
@@ -377,7 +359,7 @@ async def download_laba_rugi(
         total_penjualan = row.total_penjualan or Decimal("0")
         laba_kotor = row.laba_kotor or Decimal("0")
         
-        hpp_per_unit = total_hpp / qty if qty > 0 else Decimal("0")
+        hpp_per_unit = total_hpp / qty if qty != 0 else Decimal("0")
 
         ws.append([
             row.invoice_date.strftime("%d/%m/%Y"),
@@ -496,7 +478,7 @@ async def download_laba_rugi(
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"'
         },
-    )
+    )    
     
 @router.get(
     "/penjualan",
