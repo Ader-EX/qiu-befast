@@ -1070,8 +1070,9 @@ async def get_totals(penjualan_id: int, db: Session = Depends(get_db)):
 async def recalc_totals(penjualan_id: int, db: Session = Depends(get_db)):
     data = calculate_penjualan_totals(db, penjualan_id)
     return TotalsResponse(**data)
+
 @router.delete("/{penjualan_id}", response_model=SuccessResponse)
-async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
+async def delete_penjualan(penjualan_id: int, db: Session = Depends(get_db)):
     """
     Delete Penjualan:
       - If DRAFT and no payments -> HARD DELETE (doc + lines + files + kode_lambung).
@@ -1083,7 +1084,7 @@ async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
             selectinload(Penjualan.penjualan_items),
             selectinload(Penjualan.attachments),
             selectinload(Penjualan.pembayaran_detail_rel),
-            selectinload(Penjualan.kode_lambung_rel),  # <-- load the 1-1 partner
+            selectinload(Penjualan.kode_lambung_rel),  
         )
         .filter(Penjualan.id == penjualan_id)
         .first()

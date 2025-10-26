@@ -6,7 +6,6 @@ from sqlalchemy import and_, desc
 
 from models.BatchStock import BatchStock, FifoLog, SourceTypeEnum
 
-
 class FifoService:
     """Service untuk handle FIFO logic"""
     
