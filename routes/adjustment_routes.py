@@ -437,6 +437,8 @@ async def download_attachment(
         filename=attachment.filename,
         media_type=attachment.mime_type
     )
+    
+    
 @router.put("/{adjustment_id}/rollback", status_code=status.HTTP_200_OK)
 async def rollback_stock_adjustment(
         adjustment_id: int,
@@ -488,7 +490,7 @@ async def rollback_stock_adjustment(
             invoice_id = f"ADJ-{adjustment.no_adjustment}-{adj_item.id}"
             
             try:
-                FifoService.rollback_latest_sale(
+                FifoService.rollback_sale(
                     db=db,
                     invoice_id=invoice_id,
                     invoice_date=adjustment.adjustment_date
@@ -556,6 +558,8 @@ async def rollback_stock_adjustment(
         "adjustment": adjustment
     }
 
+
+
 @router.delete("/{adjustment_id}", status_code=status.HTTP_200_OK)
 def delete_stock_adjustment(
     adjustment_id: int,
@@ -622,7 +626,7 @@ def delete_stock_adjustment(
                 invoice_id = f"ADJ-{adjustment.no_adjustment}-{adj_item.id}"
                 
                 try:
-                    FifoService.rollback_latest_sale(
+                    FifoService.rollback_sale(
                         db=db,
                         invoice_id=invoice_id,
                         invoice_date=adjustment.adjustment_date

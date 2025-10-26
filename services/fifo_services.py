@@ -6,41 +6,182 @@ from sqlalchemy import and_, desc
 
 from models.BatchStock import BatchStock, FifoLog, SourceTypeEnum
 
-
 class FifoService:
     """Service untuk handle FIFO logic"""
     
     @staticmethod
-    def rollback_latest_sale(
+    def rollback_sale(
         db: Session,
         invoice_id: str,
-        invoice_date: date,
-    ):
-        """Rollback the most recent sale"""
-        # 1. Check if this is the latest sale
-        latest_sale = db.query(FifoLog).order_by(
-            desc(FifoLog.invoice_date), 
-            desc(FifoLog.id)
+        rollback_date: Optional[date] = None
+    ) -> dict:
+        """
+        Rollback sale by creating REVERSAL entries (not deleting).
+        Checks if sufficient qty available in batches before rollback.
+        
+        Args:
+            invoice_id: Invoice to rollback
+            rollback_date: Date of rollback (default: today)
+        
+        Returns:
+            {
+                'success': bool,
+                'invoice_id': str,
+                'reversal_id': str,
+                'items_rolled_back': int,
+                'message': str
+            }
+        """
+        if rollback_date is None:
+            rollback_date = date.today()
+        
+        # 1. Get original sale logs
+        original_logs = db.query(FifoLog).filter(
+            FifoLog.invoice_id == invoice_id
+        ).all()
+        
+        if not original_logs:
+            raise ValueError(f"Sale {invoice_id} not found or already rolled back")
+        
+        # 2. Check if already rolled back
+        existing_rollback = db.query(FifoLog).filter(
+            and_(
+                FifoLog.invoice_id == f"{invoice_id}-ROLLBACK",
+                FifoLog.qty_terpakai > 0  # Rollback entries have POSITIVE qty
+            )
         ).first()
         
-        if not latest_sale or latest_sale.invoice_id != invoice_id:
-            raise ValueError("Can only rollback the most recent sale!")
+        if existing_rollback:
+            raise ValueError(f"Sale {invoice_id} has already been rolled back")
         
-        # 2. Get all FifoLog entries for this invoice
-        logs = db.query(FifoLog).filter(FifoLog.invoice_id == invoice_id).all()
+        # 3. PRE-CHECK: Verify each batch has sufficient qty to rollback
+        insufficient_batches = []
         
-        # 3. Restore each batch
-        for log in logs:
-            batch = db.query(BatchStock).get(log.id_batch)
-            if batch:
-                batch.qty_keluar -= log.qty_terpakai
-                batch.sisa_qty += log.qty_terpakai
-                batch.is_open = True  # Reopen if was closed
+        for log in original_logs:
+            batch = db.query(BatchStock).filter(
+                BatchStock.id_batch == log.id_batch
+            ).first()
+            
+            if not batch:
+                raise ValueError(f"Batch {log.id_batch} not found")
+            
+            # Check if batch has enough qty_keluar to reverse
+            # (We need to have at least log.qty_terpakai in qty_keluar)
+            if batch.qty_keluar < log.qty_terpakai:
+                insufficient_batches.append({
+                    'batch_id': batch.id_batch,
+                    'needed': log.qty_terpakai,
+                    'available': batch.qty_keluar
+                })
         
-        # 4. Delete the FifoLog entries
-        db.query(FifoLog).filter(FifoLog.invoice_id == invoice_id).delete()
+        # If any batch is insufficient, raise error with details
+        if insufficient_batches:
+            error_details = ", ".join([
+                f"Batch {b['batch_id']}: need {b['needed']} but only {b['available']} available"
+                for b in insufficient_batches
+            ])
+            raise ValueError(
+                f"INSUFFICIENT QTY, CANNOT ROLLBACK. {error_details}. "
+                f"This means another transaction has used stock from these batches."
+            )
+        
+        # 4. All checks passed - create reversal entries
+        reversal_id = f"{invoice_id}-ROLLBACK"
+        reversal_logs = []
+        
+        for log in original_logs:
+            batch = db.query(BatchStock).filter(
+                BatchStock.id_batch == log.id_batch
+            ).first()
+            
+            # Restore batch quantities
+            batch.qty_keluar -= log.qty_terpakai
+            batch.sisa_qty += log.qty_terpakai
+            batch.is_open = True  # Reopen if was closed
+            
+            # Create REVERSAL log entry (POSITIVE qty to offset negative sale)
+            reversal_log = FifoLog(
+                invoice_id=reversal_id,
+                invoice_date=rollback_date,
+                item_id=log.item_id,
+                id_batch=log.id_batch,
+                qty_terpakai=log.qty_terpakai,  # POSITIVE (not negative!)
+                harga_modal=log.harga_modal,
+                total_hpp=-log.total_hpp,  # Negative HPP (reversal)
+                harga_jual=log.harga_jual,
+                total_penjualan=-log.total_penjualan,  # Negative sales (reversal)
+                laba_kotor=-log.laba_kotor  # Negative profit (reversal)
+            )
+            
+            db.add(reversal_log)
+            reversal_logs.append(reversal_log)
         
         db.commit()
+        
+        return {
+            'success': True,
+            'invoice_id': invoice_id,
+            'reversal_id': reversal_id,
+            'items_rolled_back': len(reversal_logs),
+            'message': f"Successfully created rollback entry for {invoice_id}. "
+                      f"Original entries preserved for audit trail."
+        }
+    
+    @staticmethod
+    def get_net_fifo_logs(
+        db: Session,
+        invoice_id: str
+    ) -> List[dict]:
+        """
+        Get net effect of sale + rollback entries.
+        Useful for reports to show actual impact.
+        
+        Returns list of net effects per batch.
+        """
+        # Get original sale
+        sale_logs = db.query(FifoLog).filter(
+            FifoLog.invoice_id == invoice_id
+        ).all()
+        
+        # Get rollback (if exists)
+        rollback_logs = db.query(FifoLog).filter(
+            FifoLog.invoice_id == f"{invoice_id}-ROLLBACK"
+        ).all()
+        
+        # Group by batch
+        batch_summary = {}
+        
+        for log in sale_logs:
+            if log.id_batch not in batch_summary:
+                batch_summary[log.id_batch] = {
+                    'batch_id': log.id_batch,
+                    'item_id': log.item_id,
+                    'qty_sold': 0,
+                    'qty_rolled_back': 0,
+                    'net_qty': 0,
+                    'total_hpp': Decimal('0'),
+                    'total_sales': Decimal('0'),
+                    'net_profit': Decimal('0')
+                }
+            
+            batch_summary[log.id_batch]['qty_sold'] += log.qty_terpakai
+            batch_summary[log.id_batch]['total_hpp'] += log.total_hpp
+            batch_summary[log.id_batch]['total_sales'] += log.total_penjualan
+            batch_summary[log.id_batch]['net_profit'] += log.laba_kotor
+        
+        for log in rollback_logs:
+            if log.id_batch in batch_summary:
+                batch_summary[log.id_batch]['qty_rolled_back'] += log.qty_terpakai
+                batch_summary[log.id_batch]['total_hpp'] += log.total_hpp  # Already negative
+                batch_summary[log.id_batch]['total_sales'] += log.total_penjualan  # Already negative
+                batch_summary[log.id_batch]['net_profit'] += log.laba_kotor  # Already negative
+        
+        # Calculate net qty
+        for batch_id in batch_summary:
+            summary = batch_summary[batch_id]
+            summary['net_qty'] = summary['qty_sold'] - summary['qty_rolled_back']
+        
+        return list(batch_summary.values())
     
     @staticmethod
     def create_batch_from_purchase(
@@ -56,27 +197,6 @@ class FifoService:
         """
         Buat batch baru dari transaksi pembelian.
         id_batch akan auto-increment.
-        
-        Args:
-            source_id: ID dari source document (PO number, transfer number, etc)
-            source_type: Type dari source (PURCHASE_ORDER, STOCK_TRANSFER, etc)
-            item_id: ID dari item
-            warehouse_id: ID warehouse (optional)
-            tanggal_masuk: Tanggal batch masuk
-            qty_masuk: Quantity masuk
-            harga_beli: Harga beli per unit
-        
-        Example:
-            create_batch_from_purchase(
-                db, 
-                source_id="PO-001",
-                source_type=SourceTypeEnum.PURCHASE_ORDER,
-                item_id=123, 
-                warehouse_id=1,
-                tanggal_masuk=date(2025,10,12), 
-                qty_masuk=100, 
-                harga_beli=Decimal("10000")
-            )
         """
         nilai_total = Decimal(qty_masuk) * harga_beli
         
@@ -137,23 +257,7 @@ class FifoService:
     ) -> Tuple[Decimal, List[FifoLog]]:
         """
         Process penjualan menggunakan FIFO.
-        
-        Args:
-            invoice_id: ID invoice (e.g., "INV001")
-            invoice_date: Tanggal invoice
-            item_id: ID item yang dijual
-            qty_terjual: Quantity yang dijual
-            harga_jual_per_unit: Harga jual per unit
-            warehouse_id: ID warehouse (optional)
-        
-        Returns:
-            (total_hpp, list_of_fifo_logs)
-        
-        Example:
-            total_hpp, logs = process_sale_fifo(
-                db, "INV001", date(2025,10,12), item_id=123, qty_terjual=120, 
-                harga_jual_per_unit=Decimal("13000")
-            )
+        Creates NEGATIVE qty entries for sales.
         """
         sisa_qty_keluar = qty_terjual
         total_hpp = Decimal("0")
@@ -188,13 +292,13 @@ class FifoService:
             penjualan_batch = qty_dipakai * harga_jual_per_unit
             laba_batch = penjualan_batch - hpp_batch
             
-            # Create FIFO log
+            # Create FIFO log (SALE = negative impact on stock)
             fifo_log = FifoLog(
                 invoice_id=invoice_id,
                 invoice_date=invoice_date,
                 item_id=item_id,
                 id_batch=batch.id_batch,
-                qty_terpakai=qty_dipakai,
+                qty_terpakai=qty_dipakai,  # Positive number
                 harga_modal=batch.harga_beli,
                 total_hpp=hpp_batch,
                 harga_jual=harga_jual_per_unit,
@@ -227,23 +331,14 @@ class FifoService:
         db: Session,
         start_date: date,
         end_date: date,
-        item_id: Optional[int] = None
+        item_id: Optional[int] = None,
+        include_rollbacks: bool = False
     ) -> List[dict]:
         """
         Generate Laporan Laba Rugi dari FIFO logs.
         
-        Returns list of dicts dengan format:
-        {
-            'tanggal': date,
-            'no_invoice': str,
-            'item_id': int,
-            'qty_terjual': int,
-            'hpp': Decimal,
-            'total_hpp': Decimal,
-            'harga_jual': Decimal,
-            'total_penjualan': Decimal,
-            'laba_kotor': Decimal
-        }
+        Args:
+            include_rollbacks: If False, excludes rollback entries from report
         """
         query = db.query(FifoLog).filter(
             and_(
@@ -254,6 +349,10 @@ class FifoService:
         
         if item_id is not None:
             query = query.filter(FifoLog.item_id == item_id)
+        
+        if not include_rollbacks:
+            # Exclude rollback entries
+            query = query.filter(~FifoLog.invoice_id.like("%-ROLLBACK"))
         
         query = query.order_by(FifoLog.invoice_date.asc(), FifoLog.invoice_id.asc())
         
@@ -272,7 +371,8 @@ class FifoService:
                     'total_hpp': Decimal("0"),
                     'total_penjualan': Decimal("0"),
                     'laba_kotor': Decimal("0"),
-                    'harga_jual': log.harga_jual  # Assume same for all
+                    'harga_jual': log.harga_jual,
+                    'is_rollback': '-ROLLBACK' in log.invoice_id
                 }
             
             invoice_groups[key]['qty_terjual'] += log.qty_terpakai
@@ -283,7 +383,10 @@ class FifoService:
         # Convert to list and add HPP per unit
         result = []
         for data in invoice_groups.values():
-            data['hpp'] = data['total_hpp'] / data['qty_terjual'] if data['qty_terjual'] > 0 else Decimal("0")
+            if data['qty_terjual'] > 0:
+                data['hpp'] = data['total_hpp'] / data['qty_terjual']
+            else:
+                data['hpp'] = Decimal("0")
             result.append(data)
         
         return result
@@ -295,23 +398,7 @@ class FifoService:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None
     ) -> List[dict]:
-        """
-        Generate Stock Card report.
-        
-        Returns list of dicts dengan format:
-        {
-            'tanggal': date,
-            'batch': str,
-            'source_id': str,
-            'source_type': str,
-            'item_id': int,
-            'qty_masuk': int,
-            'harga_beli': Decimal,
-            'qty_keluar': int,
-            'sisa_qty': int,
-            'hpp_sisa': Decimal
-        }
-        """
+        """Generate Stock Card report."""
         query = db.query(BatchStock).filter(BatchStock.item_id == item_id)
         
         if start_date:
@@ -345,32 +432,13 @@ class FifoService:
         db: Session,
         id_batch: int
     ) -> Optional[dict]:
-        """
-        Get detailed information about a specific batch.
-        
-        Returns dict dengan format:
-        {
-            'id_batch': int,
-            'source_id': str,
-            'source_type': str,
-            'item_id': int,
-            'warehouse_id': int,
-            'tanggal_masuk': date,
-            'qty_masuk': int,
-            'qty_keluar': int,
-            'sisa_qty': int,
-            'harga_beli': Decimal,
-            'nilai_total': Decimal,
-            'is_open': bool,
-            'fifo_logs': List[dict]
-        }
-        """
+        """Get detailed information about a specific batch including rollbacks."""
         batch = db.query(BatchStock).filter(BatchStock.id_batch == id_batch).first()
         
         if not batch:
             return None
         
-        # Get FIFO logs for this batch
+        # Get FIFO logs for this batch (including rollbacks)
         logs = db.query(FifoLog).filter(FifoLog.id_batch == id_batch).all()
         
         fifo_logs = []
@@ -382,7 +450,8 @@ class FifoService:
                 'total_hpp': log.total_hpp,
                 'harga_jual': log.harga_jual,
                 'total_penjualan': log.total_penjualan,
-                'laba_kotor': log.laba_kotor
+                'laba_kotor': log.laba_kotor,
+                'is_rollback': '-ROLLBACK' in log.invoice_id
             })
         
         return {
@@ -407,16 +476,7 @@ class FifoService:
         source_id: str,
         source_type: Optional[SourceTypeEnum] = None
     ) -> List[dict]:
-        """
-        Get all batches from a specific source document.
-        
-        Useful untuk tracking semua batches yang dibuat dari:
-        - Purchase Order tertentu
-        - Stock Transfer tertentu
-        - etc.
-        
-        Returns list of batch details
-        """
+        """Get all batches from a specific source document."""
         query = db.query(BatchStock).filter(BatchStock.source_id == source_id)
         
         if source_type:

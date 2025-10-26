@@ -796,7 +796,7 @@ async def update_penjualan(
                 if operation == "delete":
                     # Rollback the FIFO sale
                     try:
-                        FifoService.rollback_latest_sale(
+                        FifoService.rollback_sale(
                             db=db,
                             invoice_id=penjualan.no_penjualan,
                             invoice_date=trx_date
@@ -812,7 +812,7 @@ async def update_penjualan(
                 elif operation == "update":
                     # Rollback old quantity
                     try:
-                        FifoService.rollback_latest_sale(
+                        FifoService.rollback_sale(
                             db=db,
                             invoice_id=penjualan.no_penjualan,
                             invoice_date=trx_date
@@ -875,7 +875,7 @@ async def rollback_penjualan_status(
 ):
     """
     Roll back Penjualan to DRAFT from ACTIVE/COMPLETED.
-    Reverses FIFO sales by rolling back the FIFO logs and restoring batches.
+    Creates reversal FIFO entries instead of deleting (maintains audit trail).
     """
     audit_service = AuditService(db)
 
@@ -891,33 +891,31 @@ async def rollback_penjualan_status(
     if penjualan.status_penjualan in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
         trx_date = penjualan.sales_date.date() if isinstance(penjualan.sales_date, datetime) else penjualan.sales_date
         
-        # Rollback FIFO sale for each item
-        for line in penjualan.penjualan_items:
-            try:
-                # Rollback the FIFO sale - this restores batches
-                FifoService.rollback_latest_sale(
-                    db=db,
-                    invoice_id=penjualan.no_penjualan,
-                    invoice_date=trx_date
-                )
-                
-                # Restore item stock
+        try:
+            # Rollback the FIFO sale - creates reversal entries
+            result = FifoService.rollback_sale(
+                db=db,
+                invoice_id=penjualan.no_penjualan,
+                rollback_date=trx_date
+            )
+            
+            # Restore item stock for each line
+            for line in penjualan.penjualan_items:
                 update_item_stock(db, line.item_id, line.qty)
-                
-            except ValueError as e:
-                # Sale is not the latest - cannot rollback
-                db.rollback()
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Cannot rollback penjualan {penjualan.no_penjualan} - {str(e)}. "
-                           f"This is not the latest sale. Rollback newer sales first."
-                )
-            except Exception as e:
-                db.rollback()
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Error rolling back item {line.item_id}: {str(e)}"
-                )
+            
+        except ValueError as e:
+            # Insufficient qty error or already rolled back
+            db.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail=str(e)  # This will show "INSUFFICIENT QTY, CANNOT ROLLBACK"
+            )
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error rolling back penjualan: {str(e)}"
+            )
 
         # Clear status and snapshot fields
         penjualan.status_penjualan = StatusPembelianEnum.DRAFT
@@ -927,16 +925,20 @@ async def rollback_penjualan_status(
         penjualan.top_name = None
         penjualan.currency_name = None
 
-    audit_service.default_log(
-        entity_id=penjualan.id,
-        entity_type=AuditEntityEnum.PENJUALAN,
-        description=f"Penjualan {penjualan.no_penjualan} status transaksi diubah: Aktif → Draft",
-        user_name=user_name
-    )
+        audit_service.default_log(
+            entity_id=penjualan.id,
+            entity_type=AuditEntityEnum.PENJUALAN,
+            description=f"Penjualan {penjualan.no_penjualan} rolled back: {result.get('reversal_id', 'N/A')}",
+            user_name=user_name
+        )
 
     db.commit()
-    return {"msg": "Penjualan status changed successfully"}
-
+    return {
+        "msg": "Penjualan rolled back successfully", 
+        "reversal_id": result.get('reversal_id'),
+        "items_rolled_back": result.get('items_rolled_back')
+    }
+    
 @router.post("/{penjualan_id}/finalize", response_model=PenjualanResponse)
 async def finalize_penjualan_endpoint(penjualan_id: int, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):
     finalize_penjualan(db, penjualan_id, user_name)
@@ -1070,8 +1072,9 @@ async def get_totals(penjualan_id: int, db: Session = Depends(get_db)):
 async def recalc_totals(penjualan_id: int, db: Session = Depends(get_db)):
     data = calculate_penjualan_totals(db, penjualan_id)
     return TotalsResponse(**data)
+
 @router.delete("/{penjualan_id}", response_model=SuccessResponse)
-async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
+async def delete_penjualan(penjualan_id: int, db: Session = Depends(get_db)):
     """
     Delete Penjualan:
       - If DRAFT and no payments -> HARD DELETE (doc + lines + files + kode_lambung).
@@ -1083,7 +1086,7 @@ async def delete_penjualan(penjualan_id: str, db: Session = Depends(get_db)):
             selectinload(Penjualan.penjualan_items),
             selectinload(Penjualan.attachments),
             selectinload(Penjualan.pembayaran_detail_rel),
-            selectinload(Penjualan.kode_lambung_rel),  # <-- load the 1-1 partner
+            selectinload(Penjualan.kode_lambung_rel),  
         )
         .filter(Penjualan.id == penjualan_id)
         .first()
