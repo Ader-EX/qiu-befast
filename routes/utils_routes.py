@@ -2,7 +2,7 @@ import csv
 from datetime import timedelta, datetime
 from decimal import Decimal
 import io
-from tkinter.font import Font
+from openpyxl.styles import Font
 from typing import List, Optional
 
 from fastapi import FastAPI,  APIRouter
