@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DashboardStatistics(BaseModel):
@@ -22,12 +22,50 @@ class DashboardStatistics(BaseModel):
     percentage_month_penjualan: float
     status_month_penjualan: str
 
+class LabaRugiDetailRow(BaseModel):
+    """
+    Represents a detailed transaction row for the Profit and Loss calculation.
+    All financial fields use Decimal for guaranteed precision.
+    """
+    # Key Identifiers and Date
+    tanggal: datetime = Field(description="The date of the invoice (timestamp is typically ignored).")
+    no_invoice: str = Field(description="The unique invoice identifier.")
 
+    # Item Information
+    item_code: str = Field(default="N/A", description="The code for the sold item.")
+    item_name: str = Field(default="N/A", description="The name of the sold item.")
+
+    # Quantity and Cost (HPP)
+    qty_terjual: Decimal = Field(description="The quantity of the item sold. Uses Decimal for precision.")
+
+    # HPP values (Cost of Goods Sold)
+    hpp: Decimal = Field(default=Decimal("0"), description="The HPP (Cost of Goods Sold) per unit, derived from total_hpp / qty_terjual.")
+    total_hpp: Decimal = Field(default=Decimal("0"), description="The total HPP for this line item.")
+
+    # Sales/Revenue
+    harga_jual: Decimal = Field(default=Decimal("0"), description="The unit selling price.")
+    total_penjualan: Decimal = Field(default=Decimal("0"), description="The total revenue from this line item.")
+
+    # Profit
+    laba_kotor: Decimal = Field(default=Decimal("0"), description="The gross profit (total_penjualan - total_hpp).")
 class LabaRugiResponse(BaseModel):
-    total_penjualan: Decimal
-    total_pembelian: Decimal
-    profit_or_loss: Decimal
+    """
+    The final response model aggregating the Profit/Loss details and providing
+    grand totals for a specified period.
+    """
+    title: str = Field(description="The title of the report.")
+    date_from: datetime = Field(description="The starting date of the report period.")
+    date_to: datetime = Field(description="The ending date of the report period.")
+    total: int = Field(description="The total number of detail rows included in the report.")
 
+    # Grand Totals (Financial fields use Decimal for precision)
+    total_qty: Decimal = Field(default=Decimal("0"), description="The grand total quantity of items sold.")
+    total_hpp: Decimal = Field(default=Decimal("0"), description="The grand total HPP (Cost of Goods Sold) for the period.")
+    total_penjualan: Decimal = Field(default=Decimal("0"), description="The grand total revenue for the period.")
+    total_laba_kotor: Decimal = Field(default=Decimal("0"), description="The grand total gross profit for the period.")
+
+    # Details
+    details: List[LabaRugiDetailRow] = Field(description="A list of all transaction detail rows.")
 
 
 class SalesReportRow(BaseModel):
@@ -132,6 +170,7 @@ class StockAdjustmentReportRow(BaseModel):
     """Single row in stock adjustment report"""
     date: datetime
     no_transaksi: str
+    batch :str
     item_code: str
     item_name: str
     qty_masuk: int

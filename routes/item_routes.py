@@ -33,11 +33,12 @@ from starlette.responses import StreamingResponse
 
 # Local/Application-Specific Imports
 from database import get_db
+from models.InventoryLedger import SourceTypeEnum
 from models.Satuan import  Satuan
 from models.Category import Category
 from models.AllAttachment import AllAttachment, ParentType
 from models.AuditTrail import AuditEntityEnum
-from models.InventoryLedger import SourceTypeEnum
+
 from models.Item import Item
 from models.Vendor import Vendor
 from routes.category_routes import _build_categories_lookup
@@ -49,7 +50,8 @@ from schemas.PaginatedResponseSchemas import PaginatedResponse
 from schemas.SatuanSchemas import SatuanOut
 from schemas.VendorSchemas import VendorOut
 from services.audit_services import AuditService
-from services.inventoryledger_services import InventoryService
+from services.fifo_services import FifoService
+
 from utils import (
     generate_unique_record_code,
     get_current_user_name,
@@ -448,7 +450,7 @@ def get_items(
 
 def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_id: int, audit_service: AuditService, user_name: str):
     """Update an existing item without changing its code."""
-    inventory_service = InventoryService(db)
+   
 
     item = db.query(Item).filter(Item.id == existing_item_id).first()
     if not item:
@@ -471,24 +473,32 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
         unique_source_id = f"IMPORT-{item.sku}"
         
         if difference > 0:
-            inventory_service.post_inventory_in(
+            # Stock increase - create FIFO batch
+            FifoService.create_batch_from_purchase(
+                source_id=item.id,
+                source_type=SourceTypeEnum.ITEM,
+                db=db,
                 item_id=item.id,
-                source_type=SourceTypeEnum.IN,
-                source_id=unique_source_id,  # Use unique ID
-                qty=difference,
-                unit_price=item_data.get('price', Decimal('0')),
-                trx_date=date.today(),
-                reason_code="Import update - stock increase"
+                warehouse_id=None,  # No warehouse for import
+                tanggal_masuk=date.today(),
+                qty_masuk=difference,
+                harga_beli=item_data.get('price', Decimal('0'))
             )
+            
         elif difference < 0:
-            inventory_service.post_inventory_out(
-                item_id=item.id,
-                source_type=SourceTypeEnum.OUT,
-                source_id=unique_source_id,  # Use unique ID
-                qty=abs(difference),
-                trx_date=date.today(),
-                reason_code="Import update - stock decrease"
-            )
+            # Stock decrease - consume from FIFO batches
+            try:
+                FifoService.process_sale_fifo(
+                    db=db,
+                    invoice_id=unique_source_id,
+                    invoice_date=date.today(),
+                    item_id=item.id,
+                    qty_terjual=abs(difference),
+                    harga_jual_per_unit=Decimal("0"),  # No sale price for import adjustments
+                    warehouse_id=None
+                )
+            except ValueError as e:
+                raise ValueError(f"Cannot reduce stock for {item.name}: {str(e)}")
 
     audit_service.default_log(
         entity_id=item.id,
@@ -502,29 +512,27 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
 
     return item
 
-
 def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: AuditService, user_name: str):
-    """Create a new item and post initial inventory."""
-    inventory_service = InventoryService(db)
-
+    """Create a new item and post initial inventory using FIFO."""
+    
     new_item = Item(**item_data)
     db.add(new_item)
     db.flush()
 
+    # Create initial FIFO batch if there's stock
     if item_data.get('total_item', 0) > 0:
         unit_price = item_data.get('price', Decimal('0'))
         qty = item_data['total_item']
         
-        unique_source_id = f"IMPORT-{new_item.sku}"
-
-        inventory_service.post_inventory_in(
-            item_id=new_item.id,
+        FifoService.create_batch_from_purchase(
+            source_id=new_item.id,
             source_type=SourceTypeEnum.ITEM,
-            source_id=unique_source_id,
-            qty=qty,
-            unit_price=unit_price,
-            trx_date=date.today(),
-            reason_code="Initial import"
+            db=db,
+            item_id=new_item.id,
+            warehouse_id=None,  # No warehouse for initial import
+            tanggal_masuk=date.today(),
+            qty_masuk=qty,
+            harga_beli=unit_price
         )
 
     audit_service.default_log(
@@ -534,6 +542,7 @@ def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: Audi
         user_name=user_name,
     )
     return new_item
+
 @router.get("/template/download")
 async def download_item_template(format: str = "xlsx"):
     """

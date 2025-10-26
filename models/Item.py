@@ -35,6 +35,7 @@ class Item(Base, SoftDeleteMixin):
     category_two = Column(Integer, ForeignKey("categories.id"), nullable=True)
     satuan_id = Column(Integer, ForeignKey("satuans.id"), nullable=False)
     vendor_id = Column(String(50), ForeignKey("vendors.id"), nullable=True)
+  
 
 
     category_one_rel = relationship("Category", foreign_keys=[category_one])
@@ -43,6 +44,12 @@ class Item(Base, SoftDeleteMixin):
     satuan_rel = relationship("Satuan", back_populates="items")
     vendor_rel = relationship("Vendor", back_populates="item_rel")
     attachments = relationship("AllAttachment", back_populates="item_rel", cascade="all, delete-orphan",   primaryjoin="and_(Item.id==foreign(AllAttachment.item_id), AllAttachment.parent_type=='ITEMS')")
+    batch = relationship(
+    "BatchStock",
+    back_populates="item_rel",
+    cascade="all, delete-orphan"
+)
+
     pembelian_items  = relationship("PembelianItem", back_populates="item_rel")
     penjualan_items  = relationship("PenjualanItem", back_populates="item_rel")
     stock_adjustment_items = relationship("StockAdjustmentItem", back_populates="item_rel")

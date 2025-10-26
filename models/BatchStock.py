@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,36 +5,37 @@ from decimal import Decimal
 import enum
 
 from sqlalchemy import (
-    Column, Integer, BigInteger, Numeric, String, DateTime, Date, Boolean,
+    Column, Integer, Numeric, String, DateTime, Date, Boolean,
     Enum as SAEnum, Index, ForeignKey, func
 )
 from sqlalchemy.orm import relationship
 
 from database import Base
-
-
-class BatchStatusEnum(str, enum.Enum):
-    """Status untuk batch stock"""
-    OPEN = "OPEN"
-    CLOSED = "CLOSED"
+from models.InventoryLedger import SourceTypeEnum
 
 
 class BatchStock(Base):
     """
     Table untuk tracking FIFO batch stock.
-    Setiap pembelian membuat 1 batch baru.
+    Setiap pembelian membuat 1 batch baru dengan auto-increment ID.
     
     Contoh:
-    - BATCH001: 100 unit @ 10,000 (tanggal: 2025-10-12)
-    - BATCH002: 50 unit @ 10,500 (tanggal: 2025-10-15)
-    - BATCH003: 80 unit @ 11,000 (tanggal: 2025-10-18)
-    """
-    __tablename__ = "batch_stock"
-
-    id_batch = Column(String(64), primary_key=True)  # PK: BATCH001, BATCH002, etc.
+    - id_batch=1: TV 100 unit @ 10,000 (tanggal: 2025-10-12)
+    - id_batch=2: TV 50 unit @ 10,500 (tanggal: 2025-10-15)
+    - id_batch=3: Handphone 80 unit @ 5,000 (tanggal: 2025-10-16)
+    - id_batch=4: TV 80 unit @ 11,000 (tanggal: 2025-10-18)
     
-    item_id = Column(Integer, nullable=False, index=True)
-    warehouse_id = Column(Integer, nullable=True, index=True)
+    Setiap item punya multiple batches dengan id berbeda.
+    """
+    __tablename__ = "batch_stocks"
+
+    id_batch = Column(Integer, primary_key=True, autoincrement=True) 
+
+    source_id = Column(String(64), nullable=False)
+    source_type = Column(SAEnum(SourceTypeEnum), nullable=False, index=True)
+    
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False, index=True)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True, index=True)
     
     tanggal_masuk = Column(Date, nullable=False, index=True)
     
@@ -48,22 +48,19 @@ class BatchStock(Base):
     harga_beli = Column(Numeric(24, 7), nullable=False)  # Harga beli per unit (fixed!)
     nilai_total = Column(Numeric(24, 7), nullable=False)  # qty_masuk * harga_beli
     
-    # Status
-    status_batch = Column(
-        SAEnum(BatchStatusEnum), 
-        nullable=False, 
-        default=BatchStatusEnum.OPEN,
-        index=True
-    )
+
+    is_open = Column(Boolean, nullable=False, default=True, index=True)
     
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=func.now())
 
     # Relationships
-    fifo_logs = relationship("FifoLog", back_populates="batch")
+    fifo_logs = relationship("FifoLog", back_populates="batch", cascade="all, delete-orphan")
+    item_rel = relationship("Item", back_populates="batch")
+    warehouse_rel = relationship("Warehouse", back_populates="batch")
 
     __table_args__ = (
-        Index("ix_batch_item_status_date", "item_id", "status_batch", "tanggal_masuk"),
+        Index("ix_batch_item_open_date", "item_id", "is_open", "tanggal_masuk"),
         Index("ix_batch_item_warehouse", "item_id", "warehouse_id"),
     )
 
@@ -73,9 +70,9 @@ class FifoLog(Base):
     Table untuk tracking penggunaan batch pada setiap penjualan.
     Satu penjualan bisa pakai multiple batches.
     
-    Contoh INV001 jual 120 unit:
-    - Row 1: INV001 pakai 100 unit dari BATCH001 @ 10,000
-    - Row 2: INV001 pakai 20 unit dari BATCH002 @ 10,500
+    Contoh INV001 jual 120 unit TV:
+    - Row 1: INV001 pakai 100 unit dari id_batch=1 @ 10,000
+    - Row 2: INV001 pakai 20 unit dari id_batch=2 @ 10,500
     """
     __tablename__ = "fifo_log"
 
@@ -88,8 +85,8 @@ class FifoLog(Base):
     # Item yang dijual
     item_id = Column(Integer, nullable=False, index=True)
     
-    # Batch yang dipakai
-    id_batch = Column(String(64), ForeignKey("batch_stock.id_batch"), nullable=False, index=True)
+    # Batch yang dipakai (FK to BatchStock.id_batch)
+    id_batch = Column(Integer, ForeignKey("batch_stocks.id_batch"), nullable=False, index=True)
     qty_terpakai = Column(Integer, nullable=False)  # Berapa unit diambil dari batch ini
     
     # HPP (Cost of Goods Sold)
