@@ -1,9 +1,9 @@
 import csv
-from datetime import timedelta, datetime
+from datetime import time, timedelta, datetime
 from decimal import Decimal
 import io
 from openpyxl.styles import Font
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI,  APIRouter
 
@@ -129,6 +129,8 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
         percentage_month_penjualan=percentage_month_penjualan,
         status_month_penjualan=status_month_penjualan
     )
+    
+    
 @router.get("/laba-rugi", status_code=status.HTTP_200_OK, response_model=LabaRugiResponse)
 async def get_laba_rugi(
     from_date: datetime = Query(..., description="Start datetime (ISO-8601)"),
@@ -1158,6 +1160,17 @@ def calculate_hpp(prev_balance: Decimal, prev_hpp: Decimal, qty_in: int, price_i
     
     return total_value / total_qty
 
+def _dt_bounds(from_date: datetime, to_date: Optional[datetime]) -> tuple[datetime, datetime]:
+    """Return inclusive start (>=) and exclusive end (<) datetimes covering whole days."""
+    if to_date is None:
+        to_date = datetime.now()
+    start_dt = datetime.combine(from_date.date(), time.min)  # 00:00:00 on from_date
+    end_dt_excl = datetime.combine(to_date.date() + timedelta(days=1), time.min)  # 00:00:00 next day
+    return start_dt, end_dt_excl
+
+def _to_decimal(value) -> Decimal:
+    return value if isinstance(value, Decimal) else Decimal(str(value or "0"))
+
 @router.get(
     "/stock-adjustment",
     status_code=status.HTTP_200_OK,
@@ -1173,17 +1186,13 @@ async def get_stock_adjustment_report(
 ):
     """
     Get stock adjustment report with HPP calculation from InventoryLedger.
-    Returns grouped data by item name with batch counter and purchase price.
+    Uses an inclusive start and exclusive end bound to avoid dropping same-day data.
+    Groups data by item name with batch counter and purchase price (harga_beli).
     """
+    start_dt, end_dt_excl = _dt_bounds(from_date, to_date)
 
-    if to_date is None:
-        to_date = datetime.now()
-
-    from_date_only = from_date.date()
-    to_date_only = to_date.date()
-
-    # Base query - join with BatchStock to get harga_beli
-    query = (
+    # Base query
+    base_q = (
         db.query(
             InventoryLedger.trx_date,
             InventoryLedger.source_type,
@@ -1200,115 +1209,125 @@ async def get_stock_adjustment_report(
         .join(Item, Item.id == InventoryLedger.item_id)
         .filter(
             InventoryLedger.voided.is_(False),
-            InventoryLedger.trx_date >= from_date_only,
-            InventoryLedger.trx_date <= to_date_only,
+            InventoryLedger.trx_date >= start_dt,
+            InventoryLedger.trx_date < end_dt_excl,  # NOTE: half-open interval
         )
-        .order_by(Item.name.asc(), InventoryLedger.trx_date.asc(), InventoryLedger.id.asc())
     )
 
-    # Apply optional filter
     if item_id is not None:
-        query = query.filter(InventoryLedger.item_id == item_id)
+        base_q = base_q.filter(InventoryLedger.item_id == item_id)
 
-    # Total before pagination
-    total_count = query.count()
+    base_q = base_q.order_by(Item.name.asc(), InventoryLedger.trx_date.asc(), InventoryLedger.id.asc())
 
-    # Paginate
-    ledger_entries = query.offset(skip).limit(limit).all()
+    # Total BEFORE pagination
+    total_count = base_q.count()
 
-    # ----------------------------
-    # Get batch data for harga_beli lookup
-    # ----------------------------
-    # Get all relevant batches for items in this date range
-    item_ids = list(set(entry.item_id for entry in ledger_entries))
-    batches_query = (
-        db.query(BatchStock)
-        .filter(
-            BatchStock.item_id.in_(item_ids),
-            BatchStock.tanggal_masuk <= to_date_only
+    # Page it
+    ledger_entries = base_q.offset(skip).limit(limit).all()
+
+    # If nothing, return empty payload early
+    if not ledger_entries:
+        title = f"Laporan Stock Adjustment {from_date:%d/%m/%Y} - {(to_date or datetime.now()):%d/%m/%Y}"
+        return StockAdjustmentReportResponse(
+            title=title,
+            date_from=from_date,
+            date_to=to_date or datetime.now(),
+            data=[],
+            total=total_count,
         )
-        .order_by(BatchStock.item_id, BatchStock.tanggal_masuk.asc())
-        .all()
-    )
-
-    # Create lookup: item_id -> list of batches (FIFO order)
-    batch_lookup: dict[int, List[BatchStock]] = {}
-    for batch in batches_query:
-        batch_lookup.setdefault(batch.item_id, []).append(batch)
 
     # ----------------------------
-    # Group by item_name with batch counter and harga_beli
+    # Batch lookup (FIFO) for harga_beli on OUT rows
     # ----------------------------
-    grouped_data: dict[str, List[StockAdjustmentReportRow]] = {}
-    batch_counters: dict[int, int] = {}  # item_id -> current batch number
-    current_batch_index: dict[int, int] = {}  # item_id -> current batch index for FIFO
+    item_ids = list({entry.item_id for entry in ledger_entries})
+    batches_query: List[BatchStock] = []
+    if item_ids:
+        batches_query = (
+            db.query(BatchStock)
+            .filter(
+                BatchStock.item_id.in_(item_ids),
+                BatchStock.tanggal_masuk < end_dt_excl,  # match ledger time window
+            )
+            .order_by(BatchStock.item_id.asc(), BatchStock.tanggal_masuk.asc())
+            .all()
+        )
 
-    for entry in ledger_entries:
-        trans_no = entry.source_id or ""
-        price_in = entry.unit_price if entry.qty_in > 0 else Decimal("0")
-        price_out = entry.unit_price if entry.qty_out > 0 else Decimal("0")
+    batch_lookup: Dict[int, List[BatchStock]] = {}
+    for b in batches_query:
+        batch_lookup.setdefault(b.item_id, []).append(b)
 
-        # Determine harga_beli (purchase price from batch)
+    # Grouping & counters
+    grouped_data: Dict[str, List[StockAdjustmentReportRow]] = {}
+    batch_counters: Dict[int, int] = {}       # item_id -> batch number for IN rows
+    current_batch_index: Dict[int, int] = {}  # item_id -> index in FIFO list
+
+    for e in ledger_entries:
+        trans_no = e.source_id or ""
+        qty_in = _to_decimal(e.qty_in)
+        qty_out = _to_decimal(e.qty_out)
+        unit_price = _to_decimal(e.unit_price)
+        cumulative_qty = _to_decimal(e.cumulative_qty)
+        moving_avg = _to_decimal(e.moving_avg_cost)
+
+        price_in = unit_price if qty_in > 0 else Decimal("0")
+        price_out = unit_price if qty_out > 0 else Decimal("0")
+
+        # Determine harga_beli
         harga_beli = Decimal("0")
-        
-        if entry.qty_in > 0:
-            # Incoming: use the unit_price as harga_beli
-            harga_beli = entry.unit_price
-            batch_counters[entry.item_id] = batch_counters.get(entry.item_id, 0) + 1
-        elif entry.qty_out > 0:
-            # Outgoing: get harga_beli from current FIFO batch
-            batches = batch_lookup.get(entry.item_id, [])
-            batch_idx = current_batch_index.get(entry.item_id, 0)
-            
-            if batch_idx < len(batches):
-                current_batch = batches[batch_idx]
-                harga_beli = current_batch.harga_beli
-                
-                # Move to next batch if current is exhausted
-                # (This is simplified - in real scenario you'd track remaining qty)
-                if current_batch.sisa_qty <= 0:
-                    current_batch_index[entry.item_id] = batch_idx + 1
+        if qty_in > 0:
+            # For incoming, use the unit price as purchase price and advance batch counter
+            harga_beli = unit_price
+            batch_counters[e.item_id] = batch_counters.get(e.item_id, 0) + 1
+        elif qty_out > 0:
+            batches = batch_lookup.get(e.item_id, [])
+            idx = current_batch_index.get(e.item_id, 0)
+            if idx < len(batches):
+                cur_batch = batches[idx]
+                harga_beli = _to_decimal(cur_batch.harga_beli)
+                # naive exhaustion check; adapt if you track remaining qty precisely
+                if getattr(cur_batch, "sisa_qty", None) is not None:
+                    if _to_decimal(cur_batch.sisa_qty) <= 0:
+                        current_batch_index[e.item_id] = idx + 1
             else:
-                # Fallback to moving_avg_cost if no batch found
-                harga_beli = entry.moving_avg_cost
+                # Fallback to moving average if no batch is available
+                harga_beli = moving_avg
 
-        # Get current batch number for this item
-        current_batch = batch_counters.get(entry.item_id, 0)
-        batch_label = f"BATCH-{current_batch}" if current_batch > 0 else "N/A"
+        # Current batch label for this item
+        current_batch_no = batch_counters.get(e.item_id, 0)
+        batch_label = f"BATCH-{current_batch_no}" if current_batch_no > 0 else "N/A"
 
-        # Calculate nilai_persediaan (inventory value at this point)
-        nilai_persediaan = entry.cumulative_qty * harga_beli
+        nilai_persediaan = cumulative_qty * harga_beli
 
         row = StockAdjustmentReportRow(
-            date=datetime.combine(entry.trx_date, datetime.min.time()),
+            date=datetime.combine(e.trx_date, datetime.min.time()),
             no_transaksi=trans_no,
             batch=batch_label,
-            item_code=entry.item_code or "N/A",
-            item_name=entry.item_name or "N/A",
-            qty_masuk=entry.qty_in,
-            qty_keluar=entry.qty_out,
-            qty_balance=entry.cumulative_qty,
+            item_code=e.item_code or "N/A",
+            item_name=e.item_name or "N/A",
+            qty_masuk=qty_in,
+            qty_keluar=qty_out,
+            qty_balance=cumulative_qty,
             harga_masuk=price_in,
             harga_keluar=price_out,
             harga_beli=harga_beli,
             nilai_persediaan=nilai_persediaan,
-            hpp=entry.moving_avg_cost,
+            hpp=moving_avg,
         )
 
-        grouped_data.setdefault(entry.item_name or "N/A", []).append(row)
+        grouped_data.setdefault(e.item_name or "N/A", []).append(row)
 
-    # Convert to list of ItemStockAdjustmentReportRow
     grouped_rows: List[ItemStockAdjustmentReportRow] = [
         ItemStockAdjustmentReportRow(item_name=item, data=rows)
         for item, rows in grouped_data.items()
     ]
 
-    title = f"Laporan Stock Adjustment {from_date:%d/%m/%Y} - {to_date:%d/%m/%Y}"
+    effective_to = to_date or datetime.now()
+    title = f"Laporan Stock Adjustment {from_date:%d/%m/%Y} - {effective_to:%d/%m/%Y}"
 
     return StockAdjustmentReportResponse(
         title=title,
         date_from=from_date,
-        date_to=to_date,
+        date_to=effective_to,
         data=grouped_rows,
         total=total_count,
     )
@@ -1326,19 +1345,13 @@ async def download_stock_adjustment_report(
     db: Session = Depends(get_db),
 ):
     """
-    Download complete stock adjustment report as XLSX without pagination.
-    Includes batch counter, purchase price, and inventory value.
+    Download complete stock adjustment report as XLSX, no pagination.
+    Uses inclusive start / exclusive end bounds and the same FIFO logic.
     """
+    start_dt, end_dt_excl = _dt_bounds(from_date, to_date)
+    effective_to = to_date or datetime.now()
 
-    if to_date is None:
-        to_date = datetime.now()
-
-    # Convert datetime to date for querying
-    from_date_only = from_date.date()
-    to_date_only = to_date.date()
-
-    # Base query
-    query = (
+    q = (
         db.query(
             InventoryLedger.trx_date,
             InventoryLedger.source_type,
@@ -1355,41 +1368,39 @@ async def download_stock_adjustment_report(
         .join(Item, Item.id == InventoryLedger.item_id)
         .filter(
             InventoryLedger.voided.is_(False),
-            InventoryLedger.trx_date >= from_date_only,
-            InventoryLedger.trx_date <= to_date_only,
+            InventoryLedger.trx_date >= start_dt,
+            InventoryLedger.trx_date < end_dt_excl,
         )
         .order_by(Item.name.asc(), InventoryLedger.trx_date.asc(), InventoryLedger.id.asc())
     )
 
-    # Apply filter
     if item_id is not None:
-        query = query.filter(InventoryLedger.item_id == item_id)
+        q = q.filter(InventoryLedger.item_id == item_id)
 
-    ledger_entries = query.all()
+    ledger_entries = q.all()
 
-    # Get batch data for harga_beli lookup
-    item_ids = list(set(entry.item_id for entry in ledger_entries))
-    batches_query = (
-        db.query(BatchStock)
-        .filter(
-            BatchStock.item_id.in_(item_ids),
-            BatchStock.tanggal_masuk <= to_date_only
+    # Early empty file (still a valid sheet with headers)
+    item_ids = list({e.item_id for e in ledger_entries})
+    batches_query: List[BatchStock] = []
+    if item_ids:
+        batches_query = (
+            db.query(BatchStock)
+            .filter(
+                BatchStock.item_id.in_(item_ids),
+                BatchStock.tanggal_masuk < end_dt_excl,
+            )
+            .order_by(BatchStock.item_id.asc(), BatchStock.tanggal_masuk.asc())
+            .all()
         )
-        .order_by(BatchStock.item_id, BatchStock.tanggal_masuk.asc())
-        .all()
-    )
 
-    # Create lookup: item_id -> list of batches (FIFO order)
-    batch_lookup: dict[int, List[BatchStock]] = {}
-    for batch in batches_query:
-        batch_lookup.setdefault(batch.item_id, []).append(batch)
+    batch_lookup: Dict[int, List[BatchStock]] = {}
+    for b in batches_query:
+        batch_lookup.setdefault(b.item_id, []).append(b)
 
-    # Create workbook
     wb = Workbook()
     ws = wb.active
     ws.title = "Stock Adjustment"
 
-    # Write header row
     headers = [
         "Date",
         "No Transaksi",
@@ -1407,80 +1418,72 @@ async def download_stock_adjustment_report(
     ]
     ws.append(headers)
 
-    # Track batch counter per item
-    batch_counters: dict[int, int] = {}
-    current_batch_index: dict[int, int] = {}
+    batch_counters: Dict[int, int] = {}
+    current_batch_index: Dict[int, int] = {}
 
-    # Write rows
-    for entry in ledger_entries:
-        trans_no = entry.source_id or ""
-        price_in = entry.unit_price if entry.qty_in > 0 else Decimal("0")
-        price_out = entry.unit_price if entry.qty_out > 0 else Decimal("0")
-        date_str = entry.trx_date.strftime("%d/%m/%Y")
+    for e in ledger_entries:
+        qty_in = _to_decimal(e.qty_in)
+        qty_out = _to_decimal(e.qty_out)
+        unit_price = _to_decimal(e.unit_price)
+        cumulative_qty = _to_decimal(e.cumulative_qty)
+        moving_avg = _to_decimal(e.moving_avg_cost)
 
-        # Determine harga_beli
+        price_in = unit_price if qty_in > 0 else Decimal("0")
+        price_out = unit_price if qty_out > 0 else Decimal("0")
+        date_str = e.trx_date.strftime("%d/%m/%Y")
+
+        # harga_beli
         harga_beli = Decimal("0")
-        
-        if entry.qty_in > 0:
-            harga_beli = entry.unit_price
-            batch_counters[entry.item_id] = batch_counters.get(entry.item_id, 0) + 1
-        elif entry.qty_out > 0:
-            batches = batch_lookup.get(entry.item_id, [])
-            batch_idx = current_batch_index.get(entry.item_id, 0)
-            
-            if batch_idx < len(batches):
-                current_batch = batches[batch_idx]
-                harga_beli = current_batch.harga_beli
-                
-                if current_batch.sisa_qty <= 0:
-                    current_batch_index[entry.item_id] = batch_idx + 1
+        if qty_in > 0:
+            harga_beli = unit_price
+            batch_counters[e.item_id] = batch_counters.get(e.item_id, 0) + 1
+        elif qty_out > 0:
+            batches = batch_lookup.get(e.item_id, [])
+            idx = current_batch_index.get(e.item_id, 0)
+            if idx < len(batches):
+                cur_batch = batches[idx]
+                harga_beli = _to_decimal(cur_batch.harga_beli)
+                if getattr(cur_batch, "sisa_qty", None) is not None:
+                    if _to_decimal(cur_batch.sisa_qty) <= 0:
+                        current_batch_index[e.item_id] = idx + 1
             else:
-                harga_beli = entry.moving_avg_cost
-        
-        current_batch = batch_counters.get(entry.item_id, 0)
-        batch_label = f"BATCH-{current_batch}" if current_batch > 0 else "N/A"
+                harga_beli = moving_avg
 
-        # Calculate inventory value
-        nilai_persediaan = entry.cumulative_qty * harga_beli
+        current_batch_no = batch_counters.get(e.item_id, 0)
+        batch_label = f"BATCH-{current_batch_no}" if current_batch_no > 0 else "N/A"
+        nilai_persediaan = cumulative_qty * harga_beli
 
         ws.append([
             date_str,
-            trans_no,
+            e.source_id or "",
             batch_label,
-            entry.item_code or "N/A",
-            entry.item_name or "N/A",
-            float(entry.qty_in or 0),
-            float(entry.qty_out or 0),
-            float(entry.cumulative_qty or 0),
+            e.item_code or "N/A",
+            e.item_name or "N/A",
+            float(qty_in),
+            float(qty_out),
+            float(cumulative_qty),
             float(price_in),
             float(price_out),
             float(harga_beli),
             float(nilai_persediaan),
-            float(entry.moving_avg_cost or 0),
+            float(moving_avg),
         ])
 
-    # Auto-adjust column widths
+    # Auto-fit columns (soft)
     for col in ws.columns:
-        max_length = max(len(str(cell.value or "")) for cell in col)
-        ws.column_dimensions[col[0].column_letter].width = min(max_length + 2, 40)
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 40)
 
-    # Save workbook in-memory
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
 
-    filename = f"laporan_stock_adjustment_{from_date:%Y%m%d}_{to_date:%Y%m%d}.xlsx"
-
+    filename = f"laporan_stock_adjustment_{from_date:%Y%m%d}_{effective_to:%Y%m%d}.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-    
-    
-
 # Add this endpoint to your item_routes.py file
 
 from datetime import datetime
