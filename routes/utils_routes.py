@@ -10,7 +10,7 @@ from fastapi import FastAPI,  APIRouter
 from fastapi.params import Depends, Query
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from sqlalchemy import extract, func, literal, or_, union_all
+from sqlalchemy import String, and_, extract, func, literal, or_, union_all
 from sqlalchemy.orm import Session, aliased
 from starlette import status
 
@@ -1480,7 +1480,6 @@ async def download_stock_adjustment_report(
     )
     
     
-
 # Add this endpoint to your item_routes.py file
 
 from datetime import datetime
@@ -1489,9 +1488,22 @@ import pytz
 @router.post("/migrate-batch-stocks")
 async def migrate_batch_stocks_for_all_items(
     db: Session = Depends(get_db),
+    batch_size: int = Query(100, description="Number of items to process per batch (default: 100)"),
+    dry_run: bool = Query(False, description="Preview migration without committing changes"),
 ):
     """
     ONE-TIME MIGRATION: Create initial BatchStock records for all existing items.
+    
+    SAFETY FEATURES:
+    - Processes items in batches (default 100 items per commit)
+    - Skips items that already have BatchStock records
+    - Dry-run mode to preview without changes
+    - Detailed error tracking per item
+    - Can be run multiple times safely (idempotent)
+    
+    Query Parameters:
+    - batch_size: Number of items to process before committing (default: 100)
+    - dry_run: Set to true to preview without making changes (default: false)
     
     This endpoint:
     - Processes ALL items (including deleted, zero stock, and service items)
@@ -1520,91 +1532,210 @@ async def migrate_batch_stocks_for_all_items(
                 "message": "No items found in database",
                 "total_items": 0,
                 "batches_created": 0,
+                "skipped": 0,
                 "errors": []
             }
         
         total_items = len(all_items)
         batches_created = 0
+        skipped_items = 0
         errors = []
         
         print(f"\n{'='*60}")
         print(f"Starting Batch Stock Migration")
+        print(f"Mode: {'DRY RUN (no changes)' if dry_run else 'LIVE MIGRATION'}")
         print(f"Total items to process: {total_items}")
+        print(f"Batch size: {batch_size} items per commit")
         print(f"Current JKT Date: {current_jkt_date}")
         print(f"{'='*60}\n")
         
-        for idx, item in enumerate(all_items, 1):
-            try:
-                # Use current price (not modal_price) as harga_beli
-                harga_beli = Decimal(str(item.price)) if item.price else Decimal('0')
-                qty_masuk = item.total_item if item.total_item else 0
-                nilai_total = Decimal(qty_masuk) * harga_beli
-                
-                # Create batch with source_type = ITEM (from SourceTypeEnum)
-                batch = BatchStock(
-                    source_id=str(item.id),  # Use item.id as source_id
-                    source_type=SourceTypeEnum.ITEM,  # Use ITEM enum value
-                    item_id=item.id,
-                    warehouse_id=None,  # No warehouse
-                    tanggal_masuk=current_jkt_date,
-                    qty_masuk=qty_masuk,
-                    qty_keluar=0,
-                    sisa_qty=qty_masuk,
-                    harga_beli=harga_beli,
-                    nilai_total=nilai_total,
-                    is_open=True
-                )
-                
-                db.add(batch)
-                batches_created += 1
-                
-                # Create audit log
-                audit_service.default_log(
-                    entity_id=item.id,
-                    entity_type=AuditEntityEnum.ITEM,
-                    description=f"Initial batch stock created for item {item.name} (qty: {qty_masuk}, price: {harga_beli})",
-                    user_name="ADMIN"
-                )
-                
-                # Print progress every 10 items
-                if idx % 10 == 0 or idx == total_items:
-                    print(f"Progress: {idx}/{total_items} items processed...")
-                
-            except Exception as e:
-                error_msg = f"Failed to create batch for item {item.id} ({item.name}): {str(e)}"
-                errors.append({
-                    "item_id": item.id,
-                    "item_name": item.name,
-                    "sku": item.sku,
-                    "error": str(e)
-                })
-                print(f"ERROR: {error_msg}")
-                continue
-        
-        # Commit all changes
-        db.commit()
+        # Process items in batches
+        for batch_start in range(0, total_items, batch_size):
+            batch_end = min(batch_start + batch_size, total_items)
+            current_batch = all_items[batch_start:batch_end]
+            
+            print(f"\n--- Processing Batch: Items {batch_start + 1} to {batch_end} ---")
+            
+            batch_success = 0
+            batch_errors = 0
+            batch_skipped = 0
+            
+            for item in current_batch:
+                try:
+                    # SAFETY CHECK: Skip if item already has BatchStock with source_type=ITEM
+                    existing_batch = db.query(BatchStock).filter(
+                        BatchStock.item_id == item.id,
+                        BatchStock.source_type == SourceTypeEnum.ITEM,
+                        BatchStock.source_id == str(item.id)
+                    ).first()
+                    
+                    if existing_batch:
+                        skipped_items += 1
+                        batch_skipped += 1
+                        print(f"  ⏭️  SKIP: Item {item.id} ({item.name}) - Already has initial batch")
+                        continue
+                    
+                    # Use current price (not modal_price) as harga_beli
+                    harga_beli = Decimal(str(item.price)) if item.price else Decimal('0')
+                    qty_masuk = item.total_item if item.total_item else 0
+                    nilai_total = Decimal(qty_masuk) * harga_beli
+                    
+                    if not dry_run:
+                        # Create batch with source_type = ITEM (from SourceTypeEnum)
+                        batch = BatchStock(
+                            source_id=str(item.id),  # Use item.id as source_id
+                            source_type=SourceTypeEnum.ITEM,  # Use ITEM enum value
+                            item_id=item.id,
+                            warehouse_id=None,  # No warehouse
+                            tanggal_masuk=current_jkt_date,
+                            qty_masuk=qty_masuk,
+                            qty_keluar=0,
+                            sisa_qty=qty_masuk,
+                            harga_beli=harga_beli,
+                            nilai_total=nilai_total,
+                            is_open=True
+                        )
+                        
+                        db.add(batch)
+                        
+                        # Create audit log
+                        audit_service.default_log(
+                            entity_id=item.id,
+                            entity_type=AuditEntityEnum.ITEM,
+                            description=f"Initial batch stock created for item {item.name} (qty: {qty_masuk}, price: {harga_beli})",
+                            user_name="ADMIN"
+                        )
+                    
+                    batches_created += 1
+                    batch_success += 1
+                    print(f"  ✅ SUCCESS: Item {item.id} ({item.name}) - Qty: {qty_masuk}, Price: {harga_beli}")
+                    
+                except Exception as e:
+                    error_msg = f"Failed to create batch for item {item.id} ({item.name}): {str(e)}"
+                    errors.append({
+                        "item_id": item.id,
+                        "item_name": item.name,
+                        "sku": item.sku,
+                        "error": str(e)
+                    })
+                    batch_errors += 1
+                    print(f"  ❌ ERROR: {error_msg}")
+                    continue
+            
+            # Commit this batch
+            if not dry_run:
+                try:
+                    db.commit()
+                    print(f"\n✅ Batch committed: {batch_success} created, {batch_skipped} skipped, {batch_errors} errors")
+                except Exception as e:
+                    db.rollback()
+                    error_msg = f"CRITICAL: Failed to commit batch {batch_start}-{batch_end}: {str(e)}"
+                    print(f"\n❌ {error_msg}")
+                    errors.append({
+                        "batch_range": f"{batch_start}-{batch_end}",
+                        "error": str(e),
+                        "message": "This batch was rolled back. Items in this batch need to be retried."
+                    })
+                    # Continue to next batch instead of failing completely
+                    continue
+            else:
+                print(f"\n🔍 DRY RUN: Would create {batch_success}, skip {batch_skipped}, errors {batch_errors}")
         
         print(f"\n{'='*60}")
-        print(f"Migration Complete!")
+        print(f"Migration {'Preview' if dry_run else 'Complete'}!")
         print(f"Total items: {total_items}")
-        print(f"Batches created: {batches_created}")
+        print(f"Batches {'would be' if dry_run else ''} created: {batches_created}")
+        print(f"Skipped (already exists): {skipped_items}")
         print(f"Errors: {len(errors)}")
         print(f"{'='*60}\n")
         
         return {
             "success": True,
-            "message": "Batch stock migration completed successfully",
+            "dry_run": dry_run,
+            "message": f"Batch stock migration {'preview' if dry_run else 'completed successfully'}",
             "total_items": total_items,
             "batches_created": batches_created,
+            "skipped_items": skipped_items,
             "failed_items": len(errors),
             "errors": errors if errors else None,
-            "migration_date": current_jkt_date.isoformat()
+            "migration_date": current_jkt_date.isoformat(),
+            "batch_size_used": batch_size
         }
         
     except Exception as e:
         db.rollback()
-        print(f"\nFATAL ERROR: {str(e)}\n")
+        print(f"\n💥 FATAL ERROR: {str(e)}\n")
         raise HTTPException(
             status_code=500,
             detail=f"Migration failed: {str(e)}"
+        )
+
+
+@router.get("/migration-status")
+async def check_migration_status(
+    db: Session = Depends(get_db),
+):
+    """
+    Check the current status of batch stock migration.
+    
+    Returns:
+    - Total items in database
+    - Items with initial batch stocks
+    - Items without batch stocks
+    - Sample items without batches
+    """
+    
+    try:
+        # Count total items
+        total_items = db.query(Item).count()
+        
+        # Count items with initial batch (source_type=ITEM, source_id=item.id)
+        items_with_batch = db.query(Item).join(
+            BatchStock,
+            and_(
+                BatchStock.item_id == Item.id,
+                BatchStock.source_type == SourceTypeEnum.ITEM,
+                BatchStock.source_id == db.cast(Item.id, String)
+            )
+        ).distinct().count()
+        
+        items_without_batch = total_items - items_with_batch
+        
+        # Get sample items without batch (first 10)
+        items_needing_migration = db.query(Item).outerjoin(
+            BatchStock,
+            and_(
+                BatchStock.item_id == Item.id,
+                BatchStock.source_type == SourceTypeEnum.ITEM,
+                BatchStock.source_id == db.cast(Item.id, String)
+            )
+        ).filter(BatchStock.id_batch.is_(None)).limit(10).all()
+        
+        sample_items = [
+            {
+                "id": item.id,
+                "name": item.name,
+                "sku": item.sku,
+                "total_item": item.total_item,
+                "price": float(item.price) if item.price else 0
+            }
+            for item in items_needing_migration
+        ]
+        
+        migration_complete = items_without_batch == 0
+        
+        return {
+            "migration_complete": migration_complete,
+            "total_items": total_items,
+            "items_with_batch": items_with_batch,
+            "items_without_batch": items_without_batch,
+            "completion_percentage": round((items_with_batch / total_items * 100), 2) if total_items > 0 else 0,
+            "sample_items_needing_migration": sample_items if sample_items else None,
+            "message": "Migration complete! All items have batch stocks." if migration_complete else f"Migration needed for {items_without_batch} items"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error checking migration status: {str(e)}"
         )
