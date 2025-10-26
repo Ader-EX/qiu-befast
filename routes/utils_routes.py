@@ -142,7 +142,7 @@ async def get_laba_rugi(
     """
     Get Laba Rugi (Profit & Loss) report based on FIFO logs.
     Shows detailed breakdown by invoice with HPP calculation.
-    Filters out draft and rolled-back transactions.
+    Filters out rolled-back transactions.
     """
     if to_date is None:
         to_date = datetime.now()
@@ -150,17 +150,13 @@ async def get_laba_rugi(
     from_date_only = from_date.date()
     to_date_only = to_date.date()
 
-    # Get all rolled back invoice IDs (those that have a -ROLLBACK entry)
-    rolled_back_invoices = (
+    # Get all invoice_ids that have been rolled back (have -ROLLBACK suffix)
+    rollback_subquery = (
         db.query(FifoLog.invoice_id)
         .filter(FifoLog.invoice_id.like("%-ROLLBACK"))
         .distinct()
-        .all()
     )
-    
-    # Extract original invoice IDs from rollback entries
-    # e.g., "QP/SI/0001/10/2025-ROLLBACK" -> "QP/SI/0001/10/2025"
-    excluded_invoice_ids = [inv_id[0].replace("-ROLLBACK", "") for inv_id in rolled_back_invoices]
+    rolled_back_invoice_ids = {inv_id[0].replace("-ROLLBACK", "") for inv_id in rollback_subquery.all()}
     
     # Query FifoLog with item details
     query = (
@@ -174,16 +170,14 @@ async def get_laba_rugi(
             func.sum(FifoLog.total_hpp).label("total_hpp"),
             func.sum(FifoLog.total_penjualan).label("total_penjualan"),
             func.sum(FifoLog.laba_kotor).label("laba_kotor"),
-            FifoLog.harga_jual,  # Assume same price per invoice
+            FifoLog.harga_jual,
         )
         .join(Item, Item.id == FifoLog.item_id)
         .filter(
             FifoLog.invoice_date >= from_date_only,
             FifoLog.invoice_date <= to_date_only,
-            # Exclude rollback entries (they have -ROLLBACK suffix)
+            # Exclude ANY invoice_id that contains -ROLLBACK
             ~FifoLog.invoice_id.like("%-ROLLBACK"),
-            # Exclude original invoices that have been rolled back
-            ~FifoLog.invoice_id.in_(excluded_invoice_ids) if excluded_invoice_ids else True,
         )
         .group_by(
             FifoLog.invoice_date,
@@ -200,11 +194,15 @@ async def get_laba_rugi(
     if item_id is not None:
         query = query.filter(FifoLog.item_id == item_id)
 
-    # Get total count before pagination
-    total_count = query.count()
-
-    # Apply pagination
-    results = query.offset(skip).limit(limit).all()
+    # Get results and filter out rolled back invoices
+    all_results = query.all()
+    results = [row for row in all_results if row.invoice_id not in rolled_back_invoice_ids]
+    
+    # Get total count after filtering
+    total_count = len(results)
+    
+    # Apply pagination manually
+    results = results[skip:skip + limit]
 
     # Format response
     detail_rows = []
@@ -270,13 +268,21 @@ async def download_laba_rugi(
     """
     Download profit and loss report (Laba Rugi) as XLSX file with FIFO detail.
     Shows detailed breakdown by invoice with HPP calculation per batch.
-    Filters out draft and rolled-back transactions.
+    Filters out rolled-back transactions.
     """
     if to_date is None:
         to_date = datetime.now()
 
     from_date_only = from_date.date()
     to_date_only = to_date.date()
+
+    # Get all invoice_ids that have been rolled back
+    rollback_subquery = (
+        db.query(FifoLog.invoice_id)
+        .filter(FifoLog.invoice_id.like("%-ROLLBACK"))
+        .distinct()
+    )
+    rolled_back_invoice_ids = {inv_id[0].replace("-ROLLBACK", "") for inv_id in rollback_subquery.all()}
 
     # Query FifoLog with item details
     query = (
@@ -296,7 +302,6 @@ async def download_laba_rugi(
         .filter(
             FifoLog.invoice_date >= from_date_only,
             FifoLog.invoice_date <= to_date_only,
-            # Exclude rollback entries (they have -ROLLBACK suffix)
             ~FifoLog.invoice_id.like("%-ROLLBACK"),
         )
         .group_by(
@@ -313,7 +318,8 @@ async def download_laba_rugi(
     if item_id is not None:
         query = query.filter(FifoLog.item_id == item_id)
 
-    results = query.all()
+    all_results = query.all()
+    results = [row for row in all_results if row.invoice_id not in rolled_back_invoice_ids]
 
     # Get detailed batch usage for notes section
     fifo_logs_query = (
@@ -323,7 +329,6 @@ async def download_laba_rugi(
         .filter(
             FifoLog.invoice_date >= from_date_only,
             FifoLog.invoice_date <= to_date_only,
-            # Exclude rollback entries
             ~FifoLog.invoice_id.like("%-ROLLBACK"),
         )
         .order_by(FifoLog.invoice_date.asc(), FifoLog.invoice_id.asc())
@@ -332,7 +337,8 @@ async def download_laba_rugi(
     if item_id is not None:
         fifo_logs_query = fifo_logs_query.filter(FifoLog.item_id == item_id)
 
-    fifo_logs = fifo_logs_query.all()
+    all_fifo_logs = fifo_logs_query.all()
+    fifo_logs = [log for log in all_fifo_logs if log[0].invoice_id not in rolled_back_invoice_ids]
 
     # Create workbook
     wb = Workbook()
@@ -495,7 +501,6 @@ async def download_laba_rugi(
             "Content-Disposition": f'attachment; filename="{filename}"'
         },
     )
-
 @router.get(
     "/penjualan",
     status_code=status.HTTP_200_OK,
