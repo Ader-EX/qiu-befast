@@ -129,378 +129,470 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
         percentage_month_penjualan=percentage_month_penjualan,
         status_month_penjualan=status_month_penjualan
     )
-    
-@router.get("/laba-rugi", status_code=status.HTTP_200_OK, response_model=LabaRugiResponse)
-async def get_laba_rugi(
-    from_date: datetime = Query(..., description="Start datetime (ISO-8601)"),
+  
+def _dt_bounds(from_date: datetime, to_date: Optional[datetime]) -> tuple[datetime, datetime, datetime]:
+    """Inclusive start, exclusive end. Returns (start_dt, end_dt_excl, effective_to)."""
+    if to_date is None:
+        to_date = datetime.now()
+    start_dt = datetime.combine(from_date.date(), time.min)
+    end_dt_excl = datetime.combine(to_date.date() + timedelta(days=1), time.min)
+    return start_dt, end_dt_excl, to_date
+
+def _D(x) -> Decimal:
+    if isinstance(x, Decimal): return x
+    if x is None: return Decimal("0")
+    return Decimal(str(x))
+
+# ---------- JSON endpoint
+
+@router.get(
+    "/stock-adjustment",
+    status_code=status.HTTP_200_OK,
+    response_model=StockAdjustmentReportResponse,
+)
+async def get_stock_adjustment_report(
+    from_date: datetime = Query(..., description="Start datetime (inclusive)"),
     to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
     item_id: Optional[int] = Query(None, description="Filter by specific item"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
     """
-    Get Laba Rugi (Profit & Loss) report based on FIFO logs.
-    Shows detailed breakdown by invoice with HPP calculation.
-    Filters out rolled-back transactions.
+    Build stock adjustment from BatchStock (IN) + FifoLog (OUT).
+    Shows per-item merged movements with running balance and prices.
     """
-    if to_date is None:
-        to_date = datetime.now()
+    start_dt, end_dt_excl, effective_to = _dt_bounds(from_date, to_date)
+    start_date: date = start_dt.date()
+    end_date_excl: date = end_dt_excl.date()
 
-    from_date_only = from_date.date()
-    to_date_only = to_date.date()
+    # Filter set (optional single item)
+    item_filter = []
+    if item_id is not None:
+        item_filter.append(Item.id == item_id)
 
-    # Get all invoice_ids that have been rolled back (have -ROLLBACK suffix)
-    rollback_subquery = (
-        db.query(FifoLog.invoice_id)
-        .filter(FifoLog.invoice_id.like("%-ROLLBACK"))
-        .distinct()
+    # 1) Determine which items have activity in the window (for pagination/count)
+    items_in = (
+        db.query(BatchStock.item_id)
+        .join(Item, Item.id == BatchStock.item_id)
+        .filter(
+            BatchStock.tanggal_masuk >= start_date,
+            BatchStock.tanggal_masuk < end_date_excl,
+            *item_filter,
+        )
     )
-    rolled_back_invoice_ids = {inv_id[0].replace("-ROLLBACK", "") for inv_id in rollback_subquery.all()}
-    
-    # Query FifoLog with item details
-    query = (
+    items_out = (
+        db.query(FifoLog.item_id)
+        .join(Item, Item.id == FifoLog.item_id)
+        .filter(
+            FifoLog.invoice_date >= start_date,
+            FifoLog.invoice_date < end_date_excl,
+            *item_filter,
+        )
+    )
+    active_item_ids = {rid[0] for rid in items_in.union(items_out).distinct().all()}
+
+    total_count = len(active_item_ids)  # total items with activity
+    if total_count == 0:
+        title = f"Laporan Stock Adjustment {from_date:%d/%m/%Y} - {effective_to:%d/%m/%Y}"
+        return StockAdjustmentReportResponse(
+            title=title,
+            date_from=from_date,
+            date_to=effective_to,
+            data=[],
+            total=0,
+        )
+
+    # Pagination over item ids (deterministic order by item name)
+    ordered_items = (
+        db.query(Item.id, Item.name)
+        .filter(Item.id.in_(active_item_ids))
+        .order_by(Item.name.asc(), Item.id.asc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    paged_item_ids = [row.id for row in ordered_items]
+
+    # 2) Opening balance per item (before start_date)
+    #    opening = sum(batches before) - sum(fifo before)
+    pre_in_rows = (
+        db.query(BatchStock.item_id, func.coalesce(func.sum(BatchStock.qty_masuk), 0))
+        .filter(
+            BatchStock.item_id.in_(paged_item_ids),
+            BatchStock.tanggal_masuk < start_date,
+        )
+        .group_by(BatchStock.item_id)
+        .all()
+    )
+    pre_out_rows = (
+        db.query(FifoLog.item_id, func.coalesce(func.sum(FifoLog.qty_terpakai), 0))
+        .filter(
+            FifoLog.item_id.in_(paged_item_ids),
+            FifoLog.invoice_date < start_date,
+        )
+        .group_by(FifoLog.item_id)
+        .all()
+    )
+    pre_in_map = {r[0]: int(r[1]) for r in pre_in_rows}
+    pre_out_map = {r[0]: int(r[1]) for r in pre_out_rows}
+
+    opening_qty: Dict[int, int] = {
+        iid: pre_in_map.get(iid, 0) - pre_out_map.get(iid, 0)
+        for iid in paged_item_ids
+    }
+
+    # 3) Pull IN/OUT events inside window for paged items
+    in_events = (
         db.query(
-            FifoLog.invoice_date,
-            FifoLog.invoice_id,
+            BatchStock.item_id,
+            Item.code.label("item_code"),
+            Item.name.label("item_name"),
+            BatchStock.id_batch,
+            BatchStock.tanggal_masuk.label("event_date"),
+            BatchStock.qty_masuk,
+            BatchStock.harga_beli,
+        )
+        .join(Item, Item.id == BatchStock.item_id)
+        .filter(
+            BatchStock.item_id.in_(paged_item_ids),
+            BatchStock.tanggal_masuk >= start_date,
+            BatchStock.tanggal_masuk < end_date_excl,
+        )
+        .all()
+    )
+
+    out_events = (
+        db.query(
             FifoLog.item_id,
             Item.code.label("item_code"),
             Item.name.label("item_name"),
-            func.sum(FifoLog.qty_terpakai).label("qty_terjual"),
-            func.sum(FifoLog.total_hpp).label("total_hpp"),
-            func.sum(FifoLog.total_penjualan).label("total_penjualan"),
-            func.sum(FifoLog.laba_kotor).label("laba_kotor"),
-            FifoLog.harga_jual,
+            FifoLog.id_batch,
+            FifoLog.invoice_date.label("event_date"),
+            FifoLog.qty_terpakai,
+            FifoLog.harga_modal,  # HPP per unit for that batch usage
+            FifoLog.invoice_id,
         )
         .join(Item, Item.id == FifoLog.item_id)
         .filter(
-            FifoLog.invoice_date >= from_date_only,
-            FifoLog.invoice_date <= to_date_only,
-            # Exclude ANY invoice_id that contains -ROLLBACK
-            ~FifoLog.invoice_id.like("%-ROLLBACK"),
+            FifoLog.item_id.in_(paged_item_ids),
+            FifoLog.invoice_date >= start_date,
+            FifoLog.invoice_date < end_date_excl,
         )
-        .group_by(
-            FifoLog.invoice_date,
-            FifoLog.invoice_id,
-            FifoLog.item_id,
-            Item.code,
-            Item.name,
-            FifoLog.harga_jual,
-        )
-        .order_by(FifoLog.invoice_date.asc(), FifoLog.invoice_id.asc())
+        .all()
     )
 
-    # Apply optional item filter
-    if item_id is not None:
-        query = query.filter(FifoLog.item_id == item_id)
+    # 4) Build per-item timeline and running balance
+    grouped_rows: Dict[str, List[StockAdjustmentReportRow]] = {}
+    last_cost_per_item: Dict[int, Decimal] = {}
 
-    # Get results and filter out rolled back invoices
-    all_results = query.all()
-    results = [row for row in all_results if row.invoice_id not in rolled_back_invoice_ids]
-    
-    # Get total count after filtering
-    total_count = len(results)
-    
-    # Apply pagination manually
-    results = results[skip:skip + limit]
+    # Seed last cost with last IN price before start (if any)
+    seed_cost_rows = (
+        db.query(BatchStock.item_id, BatchStock.harga_beli, BatchStock.tanggal_masuk)
+        .filter(
+            BatchStock.item_id.in_(paged_item_ids),
+            BatchStock.tanggal_masuk < start_date,
+        )
+        .order_by(BatchStock.item_id.asc(), BatchStock.tanggal_masuk.desc(), BatchStock.id_batch.desc())
+        .all()
+    )
+    for iid, harga_beli, _ in seed_cost_rows:
+        if iid not in last_cost_per_item:
+            last_cost_per_item[iid] = _D(harga_beli)
 
-    # Format response
-    detail_rows = []
-    grand_total_hpp = Decimal("0")
-    grand_total_penjualan = Decimal("0")
-    grand_total_laba = Decimal("0")
-    total_qty = 0
+    # Compose events: IN and OUT
+    per_item_events: Dict[int, List[dict]] = {iid: [] for iid in paged_item_ids}
 
-    for row in results:
-        qty = row.qty_terjual or 0
-        total_hpp = row.total_hpp or Decimal("0")
-        total_penjualan = row.total_penjualan or Decimal("0")
-        laba_kotor = row.laba_kotor or Decimal("0")
-        
-        # Calculate HPP per unit
-        hpp_per_unit = total_hpp / qty if qty > 0 else Decimal("0")
+    for ev in in_events:
+        per_item_events[ev.item_id].append({
+            "kind": "IN",
+            "date": ev.event_date,
+            "item_code": ev.item_code,
+            "item_name": ev.item_name,
+            "id_batch": ev.id_batch,
+            "qty": int(ev.qty_masuk),
+            "unit_cost": _D(ev.harga_beli),
+            "ref": ev.id_batch,  # use batch as transaction no surrogate
+            "no": f"BATCH-{ev.id_batch}",
+        })
 
-        detail_rows.append(LabaRugiDetailRow(
-            tanggal=datetime.combine(row.invoice_date, datetime.min.time()),
-            no_invoice=row.invoice_id,
-            item_code=row.item_code or "N/A",
-            item_name=row.item_name or "N/A",
-            qty_terjual=qty,
-            hpp=hpp_per_unit,
-            total_hpp=total_hpp,
-            harga_jual=row.harga_jual or Decimal("0"),
-            total_penjualan=total_penjualan,
-            laba_kotor=laba_kotor,
-        ))
+    for ev in out_events:
+        per_item_events[ev.item_id].append({
+            "kind": "OUT",
+            "date": ev.event_date,
+            "item_code": ev.item_code,
+            "item_name": ev.item_name,
+            "id_batch": ev.id_batch,
+            "qty": int(ev.qty_terpakai),
+            "unit_cost": _D(ev.harga_modal),  # HPP per unit actually used
+            "ref": ev.invoice_id,
+            "no": ev.invoice_id,
+        })
 
-        # Accumulate totals
-        grand_total_hpp += total_hpp
-        grand_total_penjualan += total_penjualan
-        grand_total_laba += laba_kotor
-        total_qty += qty
+    # Sort events per item (date, then IN before OUT to reflect stock arrival first)
+    for iid in per_item_events:
+        per_item_events[iid].sort(key=lambda x: (x["date"], 0 if x["kind"] == "IN" else 1, x.get("id_batch", 0)))
 
-    title = f"Laporan Laba Rugi {from_date:%d/%m/%Y} - {to_date:%d/%m/%Y}"
+    # Build rows
+    for iid in paged_item_ids:
+        events = per_item_events[iid]
+        if not events:
+            # No rows in the window for this item (rare if active set correct)
+            continue
 
-    return LabaRugiResponse(
+        # Fetch item identity
+        item_meta = next((e for e in events if e.get("item_name")), None)
+        item_name = item_meta["item_name"] if item_meta else f"ITEM-{iid}"
+
+        running = opening_qty.get(iid, 0)
+        last_cost = last_cost_per_item.get(iid, Decimal("0"))
+
+        for ev in events:
+            if ev["kind"] == "IN":
+                qty_in = ev["qty"]
+                qty_out = 0
+                harga_masuk = ev["unit_cost"]
+                harga_keluar = Decimal("0")
+                last_cost = harga_masuk  # update last known cost on purchase
+                running += qty_in
+                harga_beli = harga_masuk
+                hpp = Decimal("0")
+            else:
+                qty_in = 0
+                qty_out = ev["qty"]
+                harga_masuk = Decimal("0")
+                harga_keluar = ev["unit_cost"]  # actual HPP used for the OUT
+                running -= qty_out
+                # If we never saw an IN, fallback cost = this HPP
+                if last_cost == 0:
+                    last_cost = harga_keluar
+                harga_beli = harga_keluar
+                hpp = harga_keluar
+
+            nilai_persediaan = _D(running) * _D(last_cost)
+
+            row = StockAdjustmentReportRow(
+                date=datetime.combine(ev["date"], time.min),
+                no_transaksi=str(ev["no"]),
+                batch=f"BATCH-{ev.get('id_batch')}" if ev.get("id_batch") else "N/A",
+                item_code=ev["item_code"] or "N/A",
+                item_name=ev["item_name"] or "N/A",
+                qty_masuk=_D(qty_in),
+                qty_keluar=_D(qty_out),
+                qty_balance=_D(running),
+                harga_masuk=_D(harga_masuk),
+                harga_keluar=_D(harga_keluar),
+                harga_beli=_D(harga_beli),
+                nilai_persediaan=_D(nilai_persediaan),
+                hpp=_D(hpp),
+            )
+            grouped_rows.setdefault(item_name, []).append(row)
+
+    # Transform to response model
+    items_payload: List[ItemStockAdjustmentReportRow] = [
+        ItemStockAdjustmentReportRow(item_name=name, data=rows)
+        for name, rows in grouped_rows.items()
+    ]
+
+    title = f"Laporan Stock Adjustment {from_date:%d/%m/%Y} - {effective_to:%d/%m/%Y}"
+    return StockAdjustmentReportResponse(
         title=title,
         date_from=from_date,
-        date_to=to_date,
-        details=detail_rows,
-        total_qty=total_qty,
-        total_hpp=grand_total_hpp,
-        total_penjualan=grand_total_penjualan,
-        total_laba_kotor=grand_total_laba,
+        date_to=effective_to,
+        data=items_payload,
         total=total_count,
     )
 
+# ---------- XLSX download
 
 @router.get(
-    "/laba-rugi/download",
+    "/stock-adjustment/download",
     status_code=status.HTTP_200_OK,
-    summary="Download Laporan Laba Rugi as XLSX",
+    summary="Download Stock Adjustment Report as XLSX (from BatchStock + FifoLog)",
 )
-async def download_laba_rugi(
-    from_date: datetime = Query(..., description="Start datetime (ISO-8601)"),
+async def download_stock_adjustment_report(
+    from_date: datetime = Query(..., description="Start datetime (inclusive)"),
     to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
     item_id: Optional[int] = Query(None, description="Filter by specific item"),
     db: Session = Depends(get_db),
 ):
-    """
-    Download profit and loss report (Laba Rugi) as XLSX file with FIFO detail.
-    Shows detailed breakdown by invoice with HPP calculation per batch.
-    Filters out rolled-back transactions.
-    """
-    if to_date is None:
-        to_date = datetime.now()
+    start_dt, end_dt_excl, effective_to = _dt_bounds(from_date, to_date)
+    start_date: date = start_dt.date()
+    end_date_excl: date = end_dt_excl.date()
 
-    from_date_only = from_date.date()
-    to_date_only = to_date.date()
+    item_filter = []
+    if item_id is not None:
+        item_filter.append(Item.id == item_id)
 
-    # Get all invoice_ids that have been rolled back
-    rollback_subquery = (
-        db.query(FifoLog.invoice_id)
-        .filter(FifoLog.invoice_id.like("%-ROLLBACK"))
-        .distinct()
+    # Gather ALL items with activity (no pagination in export)
+    items_in = (
+        db.query(BatchStock.item_id)
+        .join(Item, Item.id == BatchStock.item_id)
+        .filter(
+            BatchStock.tanggal_masuk >= start_date,
+            BatchStock.tanggal_masuk < end_date_excl,
+            *item_filter,
+        )
     )
-    rolled_back_invoice_ids = {inv_id[0].replace("-ROLLBACK", "") for inv_id in rollback_subquery.all()}
+    items_out = (
+        db.query(FifoLog.item_id)
+        .join(Item, Item.id == FifoLog.item_id)
+        .filter(
+            FifoLog.invoice_date >= start_date,
+            FifoLog.invoice_date < end_date_excl,
+            *item_filter,
+        )
+    )
+    item_ids = {rid[0] for rid in items_in.union(items_out).distinct().all()}
+    if not item_ids:
+        # produce empty sheet with headers
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Stock Adjustment"
+        ws.append(["No data for the selected period."])
+        out = io.BytesIO(); wb.save(out); out.seek(0)
+        filename = f"laporan_stock_adjustment_{from_date:%Y%m%d}_{effective_to:%Y%m%d}.xlsx"
+        return StreamingResponse(
+            out,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
-    # Query FifoLog with item details
-    query = (
+    # Opening balances
+    pre_in_rows = (
+        db.query(BatchStock.item_id, func.coalesce(func.sum(BatchStock.qty_masuk), 0))
+        .filter(BatchStock.item_id.in_(item_ids), BatchStock.tanggal_masuk < start_date)
+        .group_by(BatchStock.item_id)
+        .all()
+    )
+    pre_out_rows = (
+        db.query(FifoLog.item_id, func.coalesce(func.sum(FifoLog.qty_terpakai), 0))
+        .filter(FifoLog.item_id.in_(item_ids), FifoLog.invoice_date < start_date)
+        .group_by(FifoLog.item_id)
+        .all()
+    )
+    pre_in_map = {r[0]: int(r[1]) for r in pre_in_rows}
+    pre_out_map = {r[0]: int(r[1]) for r in pre_out_rows}
+    opening_qty = {iid: pre_in_map.get(iid, 0) - pre_out_map.get(iid, 0) for iid in item_ids}
+
+    # Seed last cost with most recent prior purchase per item
+    seed_cost_rows = (
+        db.query(BatchStock.item_id, BatchStock.harga_beli, BatchStock.tanggal_masuk)
+        .filter(BatchStock.item_id.in_(item_ids), BatchStock.tanggal_masuk < start_date)
+        .order_by(BatchStock.item_id.asc(), BatchStock.tanggal_masuk.desc(), BatchStock.id_batch.desc())
+        .all()
+    )
+    last_cost = {}
+    for iid, harga_beli, _ in seed_cost_rows:
+        if iid not in last_cost:
+            last_cost[iid] = _D(harga_beli)
+
+    # Pull events
+    in_events = (
         db.query(
-            FifoLog.invoice_date,
-            FifoLog.invoice_id,
-            FifoLog.item_id,
-            Item.code.label("item_code"),
-            Item.name.label("item_name"),
-            func.sum(FifoLog.qty_terpakai).label("qty_terjual"),
-            func.sum(FifoLog.total_hpp).label("total_hpp"),
-            func.sum(FifoLog.total_penjualan).label("total_penjualan"),
-            func.sum(FifoLog.laba_kotor).label("laba_kotor"),
-            FifoLog.harga_jual,
+            BatchStock.item_id, Item.code, Item.name,
+            BatchStock.id_batch, BatchStock.tanggal_masuk.label("d"),
+            BatchStock.qty_masuk, BatchStock.harga_beli
+        )
+        .join(Item, Item.id == BatchStock.item_id)
+        .filter(
+            BatchStock.item_id.in_(item_ids),
+            BatchStock.tanggal_masuk >= start_date,
+            BatchStock.tanggal_masuk < end_date_excl,
+        ).all()
+    )
+    out_events = (
+        db.query(
+            FifoLog.item_id, Item.code, Item.name,
+            FifoLog.id_batch, FifoLog.invoice_date.label("d"),
+            FifoLog.qty_terpakai, FifoLog.harga_modal, FifoLog.invoice_id
         )
         .join(Item, Item.id == FifoLog.item_id)
         .filter(
-            FifoLog.invoice_date >= from_date_only,
-            FifoLog.invoice_date <= to_date_only,
-            ~FifoLog.invoice_id.like("%-ROLLBACK"),
-        )
-        .group_by(
-            FifoLog.invoice_date,
-            FifoLog.invoice_id,
-            FifoLog.item_id,
-            Item.code,
-            Item.name,
-            FifoLog.harga_jual,
-        )
-        .order_by(FifoLog.invoice_date.asc(), FifoLog.invoice_id.asc())
+            FifoLog.item_id.in_(item_ids),
+            FifoLog.invoice_date >= start_date,
+            FifoLog.invoice_date < end_date_excl,
+        ).all()
     )
 
-    if item_id is not None:
-        query = query.filter(FifoLog.item_id == item_id)
+    per_item = {iid: [] for iid in item_ids}
+    for ev in in_events:
+        per_item[ev.item_id].append(("IN", ev.d, ev.code, ev.name, ev.id_batch, int(ev.qty_masuk), _D(ev.harga_beli), f"BATCH-{ev.id_batch}"))
+    for ev in out_events:
+        per_item[ev.item_id].append(("OUT", ev.d, ev.code, ev.name, ev.id_batch, int(ev.qty_terpakai), _D(ev.harga_modal), ev.invoice_id))
 
-    all_results = query.all()
-    results = [row for row in all_results if row.invoice_id not in rolled_back_invoice_ids]
+    for iid in per_item:
+        per_item[iid].sort(key=lambda x: (x[1], 0 if x[0] == "IN" else 1, x[4] or 0))
 
-    # Get detailed batch usage for notes section
-    fifo_logs_query = (
-        db.query(FifoLog, BatchStock, Item)
-        .join(BatchStock, BatchStock.id_batch == FifoLog.id_batch)
-        .join(Item, Item.id == FifoLog.item_id)
-        .filter(
-            FifoLog.invoice_date >= from_date_only,
-            FifoLog.invoice_date <= to_date_only,
-            ~FifoLog.invoice_id.like("%-ROLLBACK"),
-        )
-        .order_by(FifoLog.invoice_date.asc(), FifoLog.invoice_id.asc())
-    )
-
-    if item_id is not None:
-        fifo_logs_query = fifo_logs_query.filter(FifoLog.item_id == item_id)
-
-    all_fifo_logs = fifo_logs_query.all()
-    fifo_logs = [log for log in all_fifo_logs if log[0].invoice_id not in rolled_back_invoice_ids]
-
-    # Create workbook
     wb = Workbook()
     ws = wb.active
-    ws.title = "Laba Rugi"
-
-    # Title
-    ws.append([f"Laporan Laba Rugi"])
-    ws.append([f"Periode: {from_date:%d/%m/%Y} - {to_date:%d/%m/%Y}"])
-    ws.append([])
-
-    # Headers
+    ws.title = "Stock Adjustment"
     headers = [
-        "Tanggal",
-        "No. Invoice",
-        "Item Code",
-        "Item",
-        "Qty Terjual",
-        "HPP (per unit)",
-        "Total HPP",
-        "Harga Jual (per unit)",
-        "Total Penjualan",
-        "Laba Kotor",
+        "Date","No Transaksi","Batch","Item Code","Item Name",
+        "Qty Masuk","Qty Keluar","Qty Balance",
+        "Harga Masuk","Harga Keluar","Harga Beli","Nilai Persediaan","HPP (OUT)"
     ]
     ws.append(headers)
 
-    # Make headers bold
-    for cell in ws[4]:
-        cell.font = Font(bold=True)
-
-    # Data rows
-    grand_total_qty = 0
-    grand_total_hpp = Decimal("0")
-    grand_total_penjualan = Decimal("0")
-    grand_total_laba = Decimal("0")
-
-    for row in results:
-        qty = row.qty_terjual or 0
-        total_hpp = row.total_hpp or Decimal("0")
-        total_penjualan = row.total_penjualan or Decimal("0")
-        laba_kotor = row.laba_kotor or Decimal("0")
-        
-        hpp_per_unit = total_hpp / qty if qty > 0 else Decimal("0")
-
-        ws.append([
-            row.invoice_date.strftime("%d/%m/%Y"),
-            row.invoice_id,
-            row.item_code or "N/A",
-            row.item_name or "N/A",
-            int(qty),
-            float(hpp_per_unit),
-            float(total_hpp),
-            float(row.harga_jual or 0),
-            float(total_penjualan),
-            float(laba_kotor),
-        ])
-
-        grand_total_qty += qty
-        grand_total_hpp += total_hpp
-        grand_total_penjualan += total_penjualan
-        grand_total_laba += laba_kotor
-
-    # Grand total row
-    ws.append([
-        "TOTAL",
-        "",
-        "",
-        "",
-        int(grand_total_qty),
-        "",
-        float(grand_total_hpp),
-        "",
-        float(grand_total_penjualan),
-        float(grand_total_laba),
-    ])
-    
-    # Make total row bold
-    total_row = ws.max_row
-    for cell in ws[total_row]:
-        cell.font = Font(bold=True)
-
-    # Add notes section with detailed batch calculations
-    ws.append([])
-    ws.append([])
-    ws.append(["Notes:"])
-    ws[ws.max_row]["A"].font = Font(bold=True)
-    ws.append([])
-
-    # Group fifo logs by invoice
-    invoice_batches = {}
-    for fifo_log, batch, item in fifo_logs:
-        key = (fifo_log.invoice_date, fifo_log.invoice_id, item.name)
-        if key not in invoice_batches:
-            invoice_batches[key] = []
-        invoice_batches[key].append({
-            'batch_id': batch.id_batch,
-            'qty': fifo_log.qty_terpakai,
-            'harga_beli': batch.harga_beli,
-            'hpp': fifo_log.total_hpp,
-        })
-
-    # Write batch detail notes
-    for (inv_date, inv_id, item_name), batches in invoice_batches.items():
-        ws.append([f"Perhitungan HPP pada tanggal {inv_date.strftime('%d/%m/%Y')} - {inv_id} ({item_name}):"])
-        ws[ws.max_row]["A"].font = Font(bold=True)
-        
-        # Build formula string
-        formula_parts = []
-        for b in batches:
-            formula_parts.append(f"(Batch-{b['batch_id']}: {b['qty']}qty × Rp {b['harga_beli']:,.2f})")
-        
-        formula_str = " + ".join(formula_parts)
-        total_hpp = sum(b['hpp'] for b in batches)
-        
-        ws.append([f"Rumus FIFO = {formula_str}"])
-        ws.append([f"Total HPP = Rp {total_hpp:,.2f}"])
-        ws.append([])
-
-    # Format columns
-    ws.column_dimensions['A'].width = 12
-    ws.column_dimensions['B'].width = 15
-    ws.column_dimensions['C'].width = 12
-    ws.column_dimensions['D'].width = 25
-    ws.column_dimensions['E'].width = 12
-    ws.column_dimensions['F'].width = 15
-    ws.column_dimensions['G'].width = 15
-    ws.column_dimensions['H'].width = 18
-    ws.column_dimensions['I'].width = 18
-    ws.column_dimensions['J'].width = 15
-
-    # Apply number formatting for currency columns
-    for row in ws.iter_rows(min_row=5, max_row=total_row):
-        # HPP per unit (F)
-        if row[5].value and isinstance(row[5].value, (int, float)):
-            row[5].number_format = '#,##0.00'
-        # Total HPP (G)
-        if row[6].value and isinstance(row[6].value, (int, float)):
-            row[6].number_format = '#,##0.00'
-        # Harga Jual (H)
-        if row[7].value and isinstance(row[7].value, (int, float)):
-            row[7].number_format = '#,##0.00'
-        # Total Penjualan (I)
-        if row[8].value and isinstance(row[8].value, (int, float)):
-            row[8].number_format = '#,##0.00'
-        # Laba Kotor (J)
-        if row[9].value and isinstance(row[9].value, (int, float)):
-            row[9].number_format = '#,##0.00'
-
-    # Save to buffer
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-
-    filename = f"laba_rugi_{from_date:%Y%m%d}_{to_date:%Y%m%d}.xlsx"
-
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        },
+    # For deterministic order
+    item_order = (
+        db.query(Item.id, Item.name).filter(Item.id.in_(item_ids)).order_by(Item.name.asc(), Item.id.asc()).all()
     )
+
+    for iid, iname in item_order:
+        running = opening_qty.get(iid, 0)
+        cost = last_cost.get(iid, Decimal("0"))
+        events = per_item[iid]
+
+        for kind, d, code, name, id_batch, qty, unit_cost, ref in events:
+            if kind == "IN":
+                qty_in, qty_out = qty, 0
+                harga_masuk, harga_keluar = unit_cost, Decimal("0")
+                cost = unit_cost
+                running += qty_in
+                hpp_out = Decimal("0")
+                harga_beli = unit_cost
+            else:
+                qty_in, qty_out = 0, qty
+                harga_masuk, harga_keluar = Decimal("0"), unit_cost
+                running -= qty_out
+                if cost == 0:
+                    cost = unit_cost
+                hpp_out = unit_cost
+                harga_beli = unit_cost
+
+            nilai_persediaan = _D(running) * _D(cost)
+            ws.append([
+                d.strftime("%d/%m/%Y"),
+                str(ref),
+                f"BATCH-{id_batch}" if id_batch else "N/A",
+                code or "N/A",
+                name or "N/A",
+                float(_D(qty_in)),
+                float(_D(qty_out)),
+                float(_D(running)),
+                float(_D(harga_masuk)),
+                float(_D(harga_keluar)),
+                float(_D(harga_beli)),
+                float(_D(nilai_persediaan)),
+                float(_D(hpp_out)),
+            ])
+
+    # Autofit-ish
+    for col in ws.columns:
+        max_len = max(len(str(c.value or "")) for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 40)
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    filename = f"laporan_stock_adjustment_{from_date:%Y%m%d}_{effective_to:%Y%m%d}.xlsx"
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+    
 @router.get(
     "/penjualan",
     status_code=status.HTTP_200_OK,
