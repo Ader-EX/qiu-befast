@@ -210,10 +210,9 @@ async def get_laba_rugi(
     # This happens when original sale + rollback cancel each other out
     results = [
         row for row in all_results
-        if not (
-            (row.qty_terjual == 0 or row.qty_terjual is None) and
-            (row.total_hpp == 0 or row.total_hpp is None) and
-            (row.total_penjualan == 0 or row.total_penjualan is None)
+                if not (
+            (abs(float(row.total_hpp or 0)) < 0.01) and
+            (abs(float(row.total_penjualan or 0)) < 0.01)
         )
     ]
     
@@ -343,13 +342,12 @@ async def download_laba_rugi(
     
     # Filter out fully rolled back transactions
     results = [
-        row for row in all_results
-        if not (
-            (row.qty_terjual == 0 or row.qty_terjual is None) and
-            (row.total_hpp == 0 or row.total_hpp is None) and
-            (row.total_penjualan == 0 or row.total_penjualan is None)
-        )
-    ]
+    row for row in all_results
+    if not (
+        (abs(float(row.total_hpp or 0)) < 0.01) and
+        (abs(float(row.total_penjualan or 0)) < 0.01)
+    )
+]
 
     # Get detailed batch usage for notes section
     fifo_logs_query = (
