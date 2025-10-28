@@ -161,6 +161,7 @@ def calculate_pembelian_totals(db: Session, pembelian_id: int, user_name: str, m
         "expense": expense,
         "total_price": total_price,
     }
+    
 def finalize_pembelian(db: Session, pembelian_id: int, user_name: str):
     """Finalize pembelian using FIFO batches"""
     audit_service = AuditService(db)
@@ -200,7 +201,7 @@ def finalize_pembelian(db: Session, pembelian_id: int, user_name: str):
 
         # Create FIFO batch for this purchase
         FifoService.create_batch_from_purchase(
-            source_id=pembelian.id,
+            source_id=str(pembelian.id),
             source_type=SourceTypeEnum.PEMBELIAN,
             db=db,
             item_id=pembelian_item.item_id,
@@ -488,7 +489,12 @@ async def update_pembelian(
     db: Session = Depends(get_db),
     user_name: str = Depends(get_current_user_name)
 ):
-  
+    """
+    Update pembelian (purchase order).
+    
+    DRAFT status: Can modify freely, no stock impact
+    ACTIVE/PROCESSED status: Stock and batch adjustments applied
+    """
     
     # Load pembelian with items
     pembelian: Pembelian = (
@@ -523,7 +529,7 @@ async def update_pembelian(
 
     # Items diff/update (only if payload provided)
     items_changed = False
-    stock_adjustments = []  # Track stock changes: [(item_id, qty_change), ...]
+    stock_adjustments = []  # Track stock changes: [(item_id, qty_change, unit_price), ...]
     
     if items_data is not None:
         _validate_items_payload(items_data)
@@ -549,7 +555,7 @@ async def update_pembelian(
                 # Track quantity changes for stock adjustment
                 if old_qty != new_qty:
                     qty_change = new_qty - old_qty
-                    stock_adjustments.append((item_id, qty_change))
+                    stock_adjustments.append((item_id, qty_change, d["unit_price"]))
                 
                 # Update item if anything changed
                 if (
@@ -568,12 +574,11 @@ async def update_pembelian(
                     items_changed = True
             else:
                 # New item - track as addition
-                stock_adjustments.append((item_id, d["qty"]))  # New item = full quantity added
+                stock_adjustments.append((item_id, d["qty"], d["unit_price"]))
                 
                 new_item = PembelianItem(
                     pembelian_id=pembelian_id,
                     item_id=item.id,
-
                     qty=d["qty"],
                     unit_price=d["unit_price"],
                     tax_percentage=d["tax_percentage"],
@@ -590,46 +595,47 @@ async def update_pembelian(
         for item_id, pi in list(current.items()):
             if item_id not in incoming_ids:
                 # Track as removal (negative quantity change)
-                stock_adjustments.append((item_id, -pi.qty))
+                stock_adjustments.append((item_id, -pi.qty, pi.unit_price))
                 db.delete(pi)
                 items_changed = True
 
+        # Apply stock adjustments ONLY if pembelian is ACTIVE or PROCESSED
         if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.PROCESSED):
-            from models.BatchStock import BatchStock
+            from models.BatchStock import BatchStock, FifoLog
             
             trx_date = pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date
             
-            for item_id, qty_change in stock_adjustments:
-                if qty_change != 0:
-                    update_item_stock(db, item_id, qty_change)
+            for item_id, qty_change, unit_price in stock_adjustments:
+                if qty_change == 0:
+                    continue
+                
+                # Update item stock level
+                update_item_stock(db, item_id, qty_change)
 
                 if qty_change > 0:
-                    # Increase stock - create new FIFO batch
-                    pi = next((x for x in pembelian.pembelian_items if x.item_id == item_id), None)
-                    
+                    # ✅ INCREASE STOCK: Create new batch
                     FifoService.create_batch_from_purchase(
-                        source_id=pembelian.id,
+                        source_id=str(pembelian.id),  # ✅ Use pembelian.id (not no_pembelian!)
                         source_type=SourceTypeEnum.PEMBELIAN,
                         db=db,
                         item_id=item_id,
                         warehouse_id=pembelian.warehouse_id,
                         tanggal_masuk=trx_date,
                         qty_masuk=qty_change,
-                        harga_beli=Decimal(str(pi.unit_price)) if pi else Decimal("0")
+                        harga_beli=Decimal(str(unit_price))
                     )
                     
                 elif qty_change < 0:
-    # Decrease stock - consume from batch using FIFO (creates reversal log)
+                    # ✅ DECREASE STOCK: Directly reduce batch (NO FifoLog!)
                     qty_to_reduce = abs(qty_change)
                     
-                    # Find the batch created by this pembelian for this item
+                    # Find the batch created by this pembelian
                     batch = db.query(BatchStock).filter(
+                        BatchStock.source_id == str(pembelian.id),  # ✅ Correct lookup!
+                        BatchStock.source_type == SourceTypeEnum.PEMBELIAN,
                         BatchStock.item_id == item_id,
-                        BatchStock.warehouse_id == pembelian.warehouse_id,
-                        BatchStock.tanggal_masuk == trx_date,
-                        BatchStock.source_id == str(pembelian.no_pembelian),
-                        BatchStock.source_type == SourceTypeEnum.PEMBELIAN
-                    ).order_by(BatchStock.id_batch.desc()).first()
+                        BatchStock.warehouse_id == pembelian.warehouse_id
+                    ).order_by(BatchStock.tanggal_masuk.desc()).first()
                     
                     if not batch:
                         raise HTTPException(
@@ -637,44 +643,44 @@ async def update_pembelian(
                             detail=f"Batch not found for item {item_id}. Cannot reduce quantity."
                         )
                     
-                    # Check if we can reduce (has it been used?)
+                    # Check if batch has been used in any sales
+                    fifo_usage = db.query(FifoLog).filter(
+                        FifoLog.id_batch == batch.id_batch
+                    ).first()
+                    
+                    if fifo_usage:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"CANNOT REDUCE: Batch {batch.id_batch} has been used in sales "
+                                   f"(invoice: {fifo_usage.invoice_id}). You must rollback those sales first."
+                        )
+                    
+                    # Check if we have enough quantity
                     if batch.sisa_qty < qty_to_reduce:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"INSUFFICIENT QTY, CANNOT REDUCE. Batch has been used in sales. "
-                                f"Available: {batch.sisa_qty}, Need: {qty_to_reduce}"
+                            detail=f"INSUFFICIENT QTY: Batch has {batch.sisa_qty} units available, "
+                                   f"but need to reduce {qty_to_reduce} units."
                         )
                     
-                    # Use FIFO to consume the batch (creates reversal entry)
-                    try:
-                        pi = next((x for x in pembelian.pembelian_items if x.item_id == item_id), None)
-                        unit_price = Decimal(str(pi.unit_price)) if pi else Decimal("0")
-                        
-                        FifoService.process_sale_fifo(
-                            db=db,
-                            invoice_id=f"{pembelian.no_pembelian}-UPDATE",
-                            invoice_date=trx_date,
-                            item_id=item_id,
-                            qty_terjual=qty_to_reduce,
-                            harga_jual_per_unit=unit_price,
-                            warehouse_id=pembelian.warehouse_id
-                        )
-                    except ValueError as e:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Cannot reduce quantity: {str(e)}"
-                        )
+                    # ✅ Directly update batch (NO FifoLog creation!)
+                    batch.qty_masuk -= qty_to_reduce
+                    batch.sisa_qty -= qty_to_reduce
+                    batch.nilai_total = batch.qty_masuk * batch.harga_beli
+                    
+                    # Mark batch as closed if empty
+                    if batch.sisa_qty == 0:
+                        batch.is_open = False
 
-
-    # Commit and recalc totals if anything changed
+    # Commit and recalculate totals if anything changed
     if fields_changed or items_changed:
         db.commit()
-        calculate_pembelian_totals(db, pembelian_id,user_name, "telah diubah")
+        calculate_pembelian_totals(db, pembelian_id, user_name, "telah diubah")
         db.commit()
     else:
         db.rollback()
 
-    return await get_pembelian(pembelian_id, db)
+    return await get_pembelian(pembelian_id, db)    
     
 @router.patch("/{pembelian_id}", status_code=status.HTTP_200_OK)
 async def rollback_pembelian_status(
@@ -792,6 +798,8 @@ async def rollback_pembelian_status(
     return {
         "msg": f"Pembelian rolled back successfully. {len(batches_to_delete)} batch(es) deleted."
     }
+
+
 
 @router.post("/{pembelian_id}/finalize", response_model=PembelianResponse)
 async def finalize_pembelian_endpoint(pembelian_id: int, db: Session = Depends(get_db), user_name : str  = Depends(get_current_user_name)):
