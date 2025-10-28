@@ -41,7 +41,13 @@ def adjust_item_stock(
         warehouse_id: Optional[int] = None
 ):
     """
-    Helper function to adjust item stock using FIFO
+    Adjust item stock using FIFO.
+    
+    Creates FIFO logs to track cost impact:
+    - Adjustment OUT: Shows as loss (negative profit)
+    - Adjustment IN: Creates batch for future COGS calculation
+    
+    Use invoice_id pattern "ADJ-{no_adj}-{item_id}" to identify adjustments.
     """
     audit_service = AuditService(db)
 
@@ -52,15 +58,15 @@ def adjust_item_stock(
     old_stock = item.total_item
 
     if adjustment_type == AdjustmentTypeEnum.OUT:
-        # Consume from FIFO batches
+        # Consume from FIFO batches - creates FIFO logs for cost tracking
         try:
             total_hpp, fifo_logs = FifoService.process_sale_fifo(
                 db=db,
-                invoice_id=f"ADJ-{no_adj}-{adjustment_item_id}",
+                invoice_id=f"ADJ-{no_adj}-{adjustment_item_id}",  # ← Identifiable pattern
                 invoice_date=trx_date,
                 item_id=item_id,
                 qty_terjual=qty,
-                harga_jual_per_unit=Decimal("0"),  # No sale price for adjustments
+                harga_jual_per_unit=Decimal("0"),  # No revenue for adjustments
                 warehouse_id=warehouse_id
             )
         except ValueError as e:
@@ -71,12 +77,21 @@ def adjust_item_stock(
 
         item.total_item -= qty
         action = "dikurangi"
+        
+        audit_service.default_log(
+            entity_id=item.id,
+            entity_type=AuditEntityEnum.ITEM,
+            description=f"Stok item {item.name} {action} sebanyak {qty} "
+                       f"(dari {old_stock} menjadi {item.total_item}) - "
+                       f"Adjustment: {no_adj}. Total HPP affected: {total_hpp}",
+            user_name=user_name
+        )
 
     else:  # IN
         # Create new FIFO batch
         FifoService.create_batch_from_purchase(
-            source_id=item_id,
-            source_type=SourceTypeEnum.IN,
+            source_id=str(adjustment_item_id),
+            source_type=SourceTypeEnum.IN,  # Or create ADJUSTMENT_IN enum
             db=db,
             item_id=item_id,
             warehouse_id=warehouse_id,
@@ -87,19 +102,17 @@ def adjust_item_stock(
 
         item.total_item += qty
         action = "ditambahkan"
-
-    new_stock = item.total_item
-
-    audit_service.default_log(
-        entity_id=item.id,
-        entity_type=AuditEntityEnum.ITEM,
-        description=f"Stok item {item.name} {action} sebanyak {qty} (dari {old_stock} menjadi {new_stock}) - Adjustment: {no_adj}",
-        user_name=user_name
-    )
+        
+        audit_service.default_log(
+            entity_id=item.id,
+            entity_type=AuditEntityEnum.ITEM,
+            description=f"Stok item {item.name} {action} sebanyak {qty} "
+                       f"(dari {old_stock} menjadi {item.total_item}) - "
+                       f"Adjustment: {no_adj}. Cost basis: {adjustment_price} per unit",
+            user_name=user_name
+        )
 
     db.flush()
-
-
 @router.post("", response_model=StockAdjustmentResponse)
 def create_stock_adjustment(
         adjustment_data: StockAdjustmentCreate,

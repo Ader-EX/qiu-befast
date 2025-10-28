@@ -675,13 +675,21 @@ async def update_pembelian(
         db.rollback()
 
     return await get_pembelian(pembelian_id, db)
+    
 @router.patch("/{pembelian_id}", status_code=status.HTTP_200_OK)
-async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get_db), user_name: str = Depends(get_current_user_name)):
+async def rollback_pembelian_status(
+    pembelian_id: int, 
+    db: Session = Depends(get_db), 
+    user_name: str = Depends(get_current_user_name)
+):
     """
     Rolls back the status of a purchase ('Pembelian') to 'DRAFT'
-    Creates reversal entries instead of deleting batches (maintains audit trail).
+    Deletes BatchStock entries if they haven't been used in any sales.
+    
+    NOTE: FIFO logs should ONLY track sales (outgoing), not purchases (incoming).
+    BatchStock tracks purchases, FifoLog tracks sales and profit/loss.
     """
-    from models.BatchStock import BatchStock
+    from models.BatchStock import BatchStock, FifoLog
     
     audit_service = AuditService(db)
 
@@ -695,11 +703,27 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
     if not pembelian:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pembelian not found")
 
-    if pembelian.status_pembelian in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
-        trx_date = pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date
+    if pembelian.status_pembelian not in (StatusPembelianEnum.ACTIVE, StatusPembelianEnum.COMPLETED):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Can only rollback ACTIVE or COMPLETED pembelians. Current status: {pembelian.status_pembelian}"
+        )
+
+    trx_date = pembelian.sales_date.date() if isinstance(pembelian.sales_date, datetime) else pembelian.sales_date
+    
+    batches_to_delete = []
+    
+    # Step 1: Find and validate all batches FIRST before making any changes
+    for pembelian_item in pembelian.pembelian_items:
+        # Find the batch created by this pembelian using source_id
+        batch = db.query(BatchStock).filter(
+            BatchStock.source_id == str(pembelian.id),
+            BatchStock.source_type == SourceTypeEnum.PEMBELIAN,
+            BatchStock.item_id == pembelian_item.item_id
+        ).first()
         
-        for pembelian_item in pembelian.pembelian_items:
-            # Find the batch created by this pembelian
+        # Fallback: try matching by characteristics if source_id not found
+        if not batch:
             batch = db.query(BatchStock).filter(
                 BatchStock.item_id == pembelian_item.item_id,
                 BatchStock.warehouse_id == pembelian.warehouse_id,
@@ -707,71 +731,67 @@ async def rollback_pembelian_status(pembelian_id: int, db: Session = Depends(get
                 BatchStock.qty_masuk == pembelian_item.qty,
                 BatchStock.harga_beli == pembelian_item.unit_price
             ).first()
-            
-            if not batch:
-                db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Batch not found for item {pembelian_item.item_id}. Cannot rollback."
-                )
-            
-            # Check if batch has enough qty to rollback (has it been used?)
-            if batch.sisa_qty < pembelian_item.qty:
-                db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"INSUFFICIENT QTY, CANNOT ROLLBACK. Batch for item {pembelian_item.item_id} "
-                           f"has been partially used in sales (sisa: {batch.sisa_qty}, need: {pembelian_item.qty})"
-                )
-            
-            # Create reversal by "consuming" the batch (like a sale)
-            # This reduces batch.sisa_qty and creates audit trail
-            invoice_id = f"{pembelian.no_pembelian}-ROLLBACK"
-            
-            try:
-                # Process as a "sale" to consume the batch (reversal)
-                FifoService.process_sale_fifo(
-                    db=db,
-                    invoice_id=invoice_id,
-                    invoice_date=trx_date,
-                    item_id=pembelian_item.item_id,
-                    qty_terjual=pembelian_item.qty,
-                    harga_jual_per_unit=pembelian_item.unit_price,  # Use purchase price
-                    warehouse_id=pembelian.warehouse_id
-                )
-            except ValueError as e:
-                db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Cannot rollback: {str(e)}"
-                )
-            
-            # Reduce item stock
-            update_item_stock(db, pembelian_item.item_id, -pembelian_item.qty)
         
-        # Update status back to DRAFT
-        pembelian.status_pembelian = StatusPembelianEnum.DRAFT
+        if not batch:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Batch not found for item {pembelian_item.item_id}. Cannot rollback."
+            )
+        
+        # Check if this batch has been used in ANY sales (check FifoLog)
+        fifo_usage = db.query(FifoLog).filter(
+            FifoLog.id_batch == batch.id_batch
+        ).first()
+        
+        if fifo_usage:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"CANNOT ROLLBACK: Batch {batch.id_batch} for item {pembelian_item.item_id} "
+                       f"has been used in sales (invoice: {fifo_usage.invoice_id}). "
+                       f"You must rollback those sales first."
+            )
+        
+        # Alternative check: verify sisa_qty matches qty_masuk (batch hasn't been touched)
+        if batch.sisa_qty != batch.qty_masuk:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"CANNOT ROLLBACK: Batch {batch.id_batch} for item {pembelian_item.item_id} "
+                       f"has been partially used (original: {batch.qty_masuk}, remaining: {batch.sisa_qty}). "
+                       f"Rollback dependent sales first."
+            )
+        
+        batches_to_delete.append((batch, pembelian_item))
+    
+    # Step 2: All validations passed - safe to delete batches and update stock
+    for batch, pembelian_item in batches_to_delete:
+        # Delete the batch (no FIFO logs needed - purchases don't create FIFO logs)
+        db.delete(batch)
+        
+        # Reduce item stock (reverse the addition from finalization)
+        update_item_stock(db, pembelian_item.item_id, -pembelian_item.qty)
+    
+    # Step 3: Update status back to DRAFT
+    pembelian.status_pembelian = StatusPembelianEnum.DRAFT
 
-        # Clear snapshot fields
-        pembelian.warehouse_name = None
-        pembelian.vendor_name = None
-        pembelian.vendor_address = None
-        pembelian.top_name = None
-        pembelian.currency_name = None
+    # Clear snapshot fields
+    pembelian.warehouse_name = None
+    pembelian.vendor_name = None
+    pembelian.vendor_address = None
+    pembelian.top_name = None
+    pembelian.currency_name = None
     
     audit_service.default_log(
         entity_id=pembelian.id,
         entity_type=AuditEntityEnum.PEMBELIAN,
-        description=f"Pembelian {pembelian.no_pembelian} rolled back (reversal entries created)",
+        description=f"Pembelian {pembelian.no_pembelian} rolled back to DRAFT (batches deleted)",
         user_name=user_name
     )
 
     db.commit()
 
     return {
-        "msg": "Pembelian rolled back successfully (reversal entries created)"
+        "msg": f"Pembelian rolled back successfully. {len(batches_to_delete)} batch(es) deleted."
     }
-
 
 @router.post("/{pembelian_id}/finalize", response_model=PembelianResponse)
 async def finalize_pembelian_endpoint(pembelian_id: int, db: Session = Depends(get_db), user_name : str  = Depends(get_current_user_name)):

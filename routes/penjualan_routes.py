@@ -258,6 +258,7 @@ def update_item_stock(db: Session, item_id: int, qty_change: int) -> None:
                    f"Current: {item.total_item}, Change: {qty_change}"
         )
     item.total_item = new_total
+
 def finalize_penjualan(db: Session, penjualan_id: int, user_name: str) -> None:
     """
     Finalize SALES using FIFO:
@@ -867,6 +868,8 @@ async def update_penjualan(
 
     return await get_penjualan(penjualan_id, db)
 
+
+
 @router.patch("/{penjualan_id}", status_code=status.HTTP_200_OK)
 async def rollback_penjualan_status(
         penjualan_id: int,
@@ -938,6 +941,7 @@ async def rollback_penjualan_status(
         "reversal_id": result.get('reversal_id'),
         "items_rolled_back": result.get('items_rolled_back')
     }
+
     
 @router.post("/{penjualan_id}/finalize", response_model=PenjualanResponse)
 async def finalize_penjualan_endpoint(penjualan_id: int, db: Session = Depends(get_db), user_name : str = Depends(get_current_user_name)):
