@@ -480,34 +480,7 @@ async def download_laba_rugi(
         cell = ws.cell(row=total_row, column=col_idx)
         cell.font = Font(bold=True)
 
-    # Add notes section with detailed batch calculations
-    ws.append([])
-    ws.append([])
-    ws.append(["Notes:"])
-    notes_header_row = ws.max_row
-    ws.cell(row=notes_header_row, column=1).font = Font(bold=True)
-    ws.append([])
-
-    # Write batch detail notes (only for non-cancelled invoices)
-    for (inv_date, inv_id, item_name), batches in invoice_batches.items():
-        ws.append([f"Perhitungan HPP pada tanggal {inv_date.strftime('%d/%m/%Y')} - {inv_id} ({item_name}):"])
-        current_row = ws.max_row
-        ws.cell(row=current_row, column=1).font = Font(bold=True)
-        
-        # Build formula string
-        formula_parts = []
-        for b in batches:
-            if b['qty'] != 0:  # Only show non-zero quantities
-                formula_parts.append(f"(Batch-{b['batch_id']}: {b['qty']}qty × Rp {b['harga_beli']:,.2f})")
-        
-        if formula_parts:  # Only add if there are non-zero parts
-            formula_str = " + ".join(formula_parts)
-            total_hpp = sum(b['hpp'] for b in batches)
-            
-            ws.append([f"Rumus FIFO = {formula_str}"])
-            ws.append([f"Total HPP = Rp {total_hpp:,.2f}"])
-            ws.append([])
-
+    
     # Format columns
     ws.column_dimensions['A'].width = 12
     ws.column_dimensions['B'].width = 20
