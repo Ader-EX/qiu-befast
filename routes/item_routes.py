@@ -475,7 +475,7 @@ def _update_existing_item(db: Session, item_data: Dict[str, Any], existing_item_
         if difference > 0:
             # Stock increase - create FIFO batch
             FifoService.create_batch_from_purchase(
-                source_id=item.id,
+                source_id=str(item.id),
                 source_type=SourceTypeEnum.ITEM,
                 db=db,
                 item_id=item.id,
@@ -525,7 +525,7 @@ def _create_new_item(db: Session, item_data: Dict[str, Any], audit_service: Audi
         qty = item_data['total_item']
         
         FifoService.create_batch_from_purchase(
-            source_id=new_item.id,
+            source_id=str(new_item.id),
             source_type=SourceTypeEnum.ITEM,
             db=db,
             item_id=new_item.id,
