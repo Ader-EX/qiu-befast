@@ -132,12 +132,12 @@ async def get_dashboard_statistics(db: Session = Depends(get_db)):
     
 
 
-
 @router.get("/laba-rugi", status_code=status.HTTP_200_OK, response_model=LabaRugiResponse)
 async def get_laba_rugi(
     from_date: datetime = Query(..., description="Start datetime (ISO-8601)"),
     to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
     item_id: Optional[int] = Query(None, description="Filter by specific item"),
+    include_adjustments: bool = Query(False, description="Include stock adjustments (damaged goods, theft, etc.)"),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records"),
     db: Session = Depends(get_db),
@@ -145,7 +145,16 @@ async def get_laba_rugi(
     """
     Get Laba Rugi (Profit & Loss) report based on FIFO logs.
     Shows detailed breakdown by invoice with HPP calculation.
-    Automatically nets out rollback transactions - if original + rollback = 0, both are hidden.
+    
+    Automatically filters out:
+    - Rollback transactions (netted out with originals - if sum = 0, both hidden)
+    - Stock adjustments by default (set include_adjustments=true to show cost of lost/damaged inventory)
+    
+    Report shows:
+    - Qty Terjual: Total quantity sold
+    - HPP: Cost of goods sold (FIFO-based)
+    - Total Penjualan: Sales revenue
+    - Laba Kotor: Gross profit (revenue - COGS)
     """
     if to_date is None:
         to_date = datetime.now()
@@ -175,16 +184,20 @@ async def get_laba_rugi(
             FifoLog.invoice_date >= from_date_only,
             FifoLog.invoice_date <= to_date_only,
         )
-        .group_by(
-            FifoLog.invoice_date,
-            base_invoice_case,
-            FifoLog.item_id,
-            Item.code,
-            Item.name,
-            FifoLog.harga_jual,
-        )
-        .order_by(FifoLog.invoice_date.asc(), base_invoice_case.asc())
     )
+    
+    # Exclude adjustments by default (they represent losses, not sales)
+    if not include_adjustments:
+        query = query.filter(~FifoLog.invoice_id.like("ADJ-%"))
+    
+    query = query.group_by(
+        FifoLog.invoice_date,
+        base_invoice_case,
+        FifoLog.item_id,
+        Item.code,
+        Item.name,
+        FifoLog.harga_jual,
+    ).order_by(FifoLog.invoice_date.asc(), base_invoice_case.asc())
 
     # Apply optional item filter
     if item_id is not None:
@@ -194,6 +207,7 @@ async def get_laba_rugi(
     all_results = query.all()
     
     # Filter out entries where everything nets to zero (fully rolled back)
+    # This happens when original sale + rollback cancel each other out
     results = [
         row for row in all_results
         if not (
@@ -244,7 +258,9 @@ async def get_laba_rugi(
         grand_total_laba += laba_kotor
         total_qty += qty
 
-    title = f"Laporan Laba Rugi {from_date:%d/%m/%Y} - {to_date:%d/%m/%Y}"
+    # Generate title with adjustment indicator
+    title_suffix = " (termasuk penyesuaian stok)" if include_adjustments else ""
+    title = f"Laporan Laba Rugi {from_date:%d/%m/%Y} - {to_date:%d/%m/%Y}{title_suffix}"
 
     return LabaRugiResponse(
         title=title,
@@ -257,7 +273,6 @@ async def get_laba_rugi(
         total_laba_kotor=grand_total_laba,
         total=total_count,
     )
-
 
 @router.get(
     "/laba-rugi/download",
