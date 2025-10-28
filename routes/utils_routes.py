@@ -274,6 +274,7 @@ async def get_laba_rugi(
         total=total_count,
     )
 
+ 
 @router.get(
     "/laba-rugi/download",
     status_code=status.HTTP_200_OK,
@@ -283,12 +284,14 @@ async def download_laba_rugi(
     from_date: datetime = Query(..., description="Start datetime (ISO-8601)"),
     to_date: Optional[datetime] = Query(None, description="End datetime (inclusive)"),
     item_id: Optional[int] = Query(None, description="Filter by specific item"),
+    include_adjustments: bool = Query(False, description="Include stock adjustments (damaged goods, theft, etc.)"),
     db: Session = Depends(get_db),
 ):
     """
     Download profit and loss report (Laba Rugi) as XLSX file with FIFO detail.
     Shows detailed breakdown by invoice with HPP calculation per batch.
     Automatically nets out rollback transactions.
+    Excludes stock adjustments by default (set include_adjustments=true to show inventory losses).
     """
     if to_date is None:
         to_date = datetime.now()
@@ -318,16 +321,20 @@ async def download_laba_rugi(
             FifoLog.invoice_date >= from_date_only,
             FifoLog.invoice_date <= to_date_only,
         )
-        .group_by(
-            FifoLog.invoice_date,
-            base_invoice_case,
-            FifoLog.item_id,
-            Item.code,
-            Item.name,
-            FifoLog.harga_jual,
-        )
-        .order_by(FifoLog.invoice_date.asc(), base_invoice_case.asc())
     )
+    
+    # Exclude adjustments by default
+    if not include_adjustments:
+        query = query.filter(~FifoLog.invoice_id.like("ADJ-%"))
+    
+    query = query.group_by(
+        FifoLog.invoice_date,
+        base_invoice_case,
+        FifoLog.item_id,
+        Item.code,
+        Item.name,
+        FifoLog.harga_jual,
+    ).order_by(FifoLog.invoice_date.asc(), base_invoice_case.asc())
 
     if item_id is not None:
         query = query.filter(FifoLog.item_id == item_id)
@@ -353,7 +360,15 @@ async def download_laba_rugi(
             FifoLog.invoice_date >= from_date_only,
             FifoLog.invoice_date <= to_date_only,
         )
-        .order_by(FifoLog.invoice_date.asc(), FifoLog.invoice_id.asc())
+    )
+    
+    # Exclude adjustments from notes too
+    if not include_adjustments:
+        fifo_logs_query = fifo_logs_query.filter(~FifoLog.invoice_id.like("ADJ-%"))
+    
+    fifo_logs_query = fifo_logs_query.order_by(
+        FifoLog.invoice_date.asc(), 
+        FifoLog.invoice_id.asc()
     )
 
     if item_id is not None:
@@ -387,7 +402,8 @@ async def download_laba_rugi(
     ws.title = "Laba Rugi"
 
     # Title
-    ws.append([f"Laporan Laba Rugi"])
+    title_suffix = " (termasuk penyesuaian stok)" if include_adjustments else ""
+    ws.append([f"Laporan Laba Rugi{title_suffix}"])
     ws.append([f"Periode: {from_date:%d/%m/%Y} - {to_date:%d/%m/%Y}"])
     ws.append([])
 
@@ -406,8 +422,10 @@ async def download_laba_rugi(
     ]
     ws.append(headers)
 
-    # Make headers bold
-    for cell in ws[4]:
+    # Make headers bold - FIX: Access cells correctly
+    header_row = ws.max_row
+    for col_idx, _ in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx)
         cell.font = Font(bold=True)
 
     # Data rows
@@ -456,22 +474,25 @@ async def download_laba_rugi(
         float(grand_total_laba),
     ])
     
-    # Make total row bold
+    # Make total row bold - FIX: Access cells correctly
     total_row = ws.max_row
-    for cell in ws[total_row]:
+    for col_idx in range(1, 11):  # 10 columns
+        cell = ws.cell(row=total_row, column=col_idx)
         cell.font = Font(bold=True)
 
     # Add notes section with detailed batch calculations
     ws.append([])
     ws.append([])
     ws.append(["Notes:"])
-    ws[ws.max_row]["A"].font = Font(bold=True)
+    notes_header_row = ws.max_row
+    ws.cell(row=notes_header_row, column=1).font = Font(bold=True)
     ws.append([])
 
     # Write batch detail notes (only for non-cancelled invoices)
     for (inv_date, inv_id, item_name), batches in invoice_batches.items():
         ws.append([f"Perhitungan HPP pada tanggal {inv_date.strftime('%d/%m/%Y')} - {inv_id} ({item_name}):"])
-        ws[ws.max_row]["A"].font = Font(bold=True)
+        current_row = ws.max_row
+        ws.cell(row=current_row, column=1).font = Font(bold=True)
         
         # Build formula string
         formula_parts = []
@@ -489,7 +510,7 @@ async def download_laba_rugi(
 
     # Format columns
     ws.column_dimensions['A'].width = 12
-    ws.column_dimensions['B'].width = 15
+    ws.column_dimensions['B'].width = 20
     ws.column_dimensions['C'].width = 12
     ws.column_dimensions['D'].width = 25
     ws.column_dimensions['E'].width = 12
@@ -500,29 +521,40 @@ async def download_laba_rugi(
     ws.column_dimensions['J'].width = 15
 
     # Apply number formatting for currency columns
-    for row in ws.iter_rows(min_row=5, max_row=total_row):
-        # HPP per unit (F)
-        if row[5].value and isinstance(row[5].value, (int, float)):
-            row[5].number_format = '#,##0.00'
-        # Total HPP (G)
-        if row[6].value and isinstance(row[6].value, (int, float)):
-            row[6].number_format = '#,##0.00'
-        # Harga Jual (H)
-        if row[7].value and isinstance(row[7].value, (int, float)):
-            row[7].number_format = '#,##0.00'
-        # Total Penjualan (I)
-        if row[8].value and isinstance(row[8].value, (int, float)):
-            row[8].number_format = '#,##0.00'
-        # Laba Kotor (J)
-        if row[9].value and isinstance(row[9].value, (int, float)):
-            row[9].number_format = '#,##0.00'
+    # Start from data row (header_row + 1) to total_row
+    for row_idx in range(header_row + 1, total_row + 1):
+        # HPP per unit (F - column 6)
+        cell_f = ws.cell(row=row_idx, column=6)
+        if cell_f.value and isinstance(cell_f.value, (int, float)):
+            cell_f.number_format = '#,##0.00'
+        
+        # Total HPP (G - column 7)
+        cell_g = ws.cell(row=row_idx, column=7)
+        if cell_g.value and isinstance(cell_g.value, (int, float)):
+            cell_g.number_format = '#,##0.00'
+        
+        # Harga Jual (H - column 8)
+        cell_h = ws.cell(row=row_idx, column=8)
+        if cell_h.value and isinstance(cell_h.value, (int, float)):
+            cell_h.number_format = '#,##0.00'
+        
+        # Total Penjualan (I - column 9)
+        cell_i = ws.cell(row=row_idx, column=9)
+        if cell_i.value and isinstance(cell_i.value, (int, float)):
+            cell_i.number_format = '#,##0.00'
+        
+        # Laba Kotor (J - column 10)
+        cell_j = ws.cell(row=row_idx, column=10)
+        if cell_j.value and isinstance(cell_j.value, (int, float)):
+            cell_j.number_format = '#,##0.00'
 
     # Save to buffer
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
 
-    filename = f"laba_rugi_{from_date:%Y%m%d}_{to_date:%Y%m%d}.xlsx"
+    adj_suffix = "_with_adjustments" if include_adjustments else ""
+    filename = f"laba_rugi_{from_date:%Y%m%d}_{to_date:%Y%m%d}{adj_suffix}.xlsx"
 
     return StreamingResponse(
         output,
@@ -530,7 +562,7 @@ async def download_laba_rugi(
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"'
         },
-    )
+    ) 
       
 @router.get(
     "/penjualan",
