@@ -1273,13 +1273,17 @@ async def get_stock_adjustment_report(
         )
     )
     
-    # For OUT events, group by base_invoice to find items with net activity
     base_invoice_case = func.replace(FifoLog.invoice_id, '-ROLLBACK', '')
     items_out_subq = (
         db.query(
             FifoLog.item_id,
             base_invoice_case.label('base_invoice'),
-            func.sum(FifoLog.qty_terpakai).label('net_qty')
+            func.sum(
+                case(
+                    (FifoLog.invoice_id.like("%-ROLLBACK"), -FifoLog.qty_terpakai),
+                    else_=FifoLog.qty_terpakai
+                )
+            ).label('net_qty')
         )
         .join(Item, Item.id == FifoLog.item_id)
         .filter(
@@ -1336,7 +1340,12 @@ async def get_stock_adjustment_report(
         db.query(
             FifoLog.item_id,
             base_invoice_case.label('base_invoice'),
-            func.sum(FifoLog.qty_terpakai).label('net_qty')
+            func.sum(
+                case(
+                    (FifoLog.invoice_id.like("%-ROLLBACK"), -FifoLog.qty_terpakai),
+                    else_=FifoLog.qty_terpakai
+                )
+            ).label('net_qty')
         )
         .filter(
             FifoLog.item_id.in_(paged_item_ids),
@@ -1400,8 +1409,18 @@ async def get_stock_adjustment_report(
             FifoLog.id_batch,
             FifoLog.invoice_date.label("event_date"),
             base_invoice_case.label("base_invoice_id"),
-            func.sum(FifoLog.qty_terpakai).label("net_qty"),
-            func.sum(FifoLog.total_hpp).label("total_hpp"),
+            func.sum(
+                case(
+                    (FifoLog.invoice_id.like("%-ROLLBACK"), -FifoLog.qty_terpakai),
+                    else_=FifoLog.qty_terpakai
+                )
+            ).label("net_qty"),
+            func.sum(
+                case(
+                    (FifoLog.invoice_id.like("%-ROLLBACK"), -FifoLog.total_hpp),
+                    else_=FifoLog.total_hpp
+                )
+            ).label("total_hpp"),
         )
         .join(Item, Item.id == FifoLog.item_id)
         .filter(
