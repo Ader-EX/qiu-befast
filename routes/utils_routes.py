@@ -1234,6 +1234,7 @@ def _D(x) -> Decimal:
     if isinstance(x, Decimal): return x
     if x is None: return Decimal("0")
     return Decimal(str(x))
+    
 @router.get(
     "/stock-adjustment",
     status_code=status.HTTP_200_OK,
@@ -1500,8 +1501,20 @@ async def get_stock_adjustment_report(
 
         running = opening_qty.get(iid, 0)
         last_cost = last_cost_per_item.get(iid, Decimal("0"))
+        
+        # Track per-item batch counter
+        batch_counter = 1
+        batch_id_to_display = {}  # Map actual batch_id to display batch number
 
         for ev in events:
+            # Assign display batch number for IN events
+            if ev["kind"] == "IN" and ev["id_batch"] not in batch_id_to_display:
+                batch_id_to_display[ev["id_batch"]] = batch_counter
+                batch_counter += 1
+            
+            # Get display batch number
+            display_batch = batch_id_to_display.get(ev["id_batch"], "N/A")
+            
             if ev["kind"] == "IN":
                 qty_in = ev["qty"]
                 qty_out = 0
@@ -1528,7 +1541,7 @@ async def get_stock_adjustment_report(
             row = StockAdjustmentReportRow(
                 date=datetime.combine(ev["date"], time.min),
                 no_transaksi=str(ev["no"]),
-                batch=f"BATCH-{ev.get('id_batch')}" if ev.get('id_batch') else "N/A",
+                batch=f"BATCH-{display_batch}" if display_batch != "N/A" else "N/A",
                 item_code=ev["item_code"] or "N/A",
                 item_name=ev["item_name"] or "N/A",
                 qty_masuk=_D(qty_in),
@@ -1569,6 +1582,8 @@ def _get_source_doc_number(
     """
     Get proper document number based on source type.
     Returns actual document numbers from related tables.
+    
+    Note: SourceTypeEnum has: PEMBELIAN, PENJUALAN, IN, OUT, ITEM
     """
     if not source_type or not source_id:
         print(f"DEBUG: Missing source info - type={source_type}, id={source_id}")
@@ -1587,21 +1602,23 @@ def _get_source_doc_number(
             print(f"DEBUG: PEMBELIAN result = {result}")
             return result
         
-        elif source_type == SourceTypeEnum.IN or source_type == SourceTypeEnum.OUT:
-            doc = db.query(StockAdjustment.no_adjustment).filter(
-                StockAdjustment.id == source_id
-            ).first()
-            result = doc.no_adjustment if doc else f"ADJ-{source_id}-NOTFOUND"
-            print(f"DEBUG: ADJUSTMENT result = {result}")
-            return result
-        
         elif source_type == SourceTypeEnum.PENJUALAN:
-          
+            from models.Penjualan import Penjualan
             doc = db.query(Penjualan.no_penjualan).filter(
                 Penjualan.id == source_id
             ).first()
             result = doc.no_penjualan if doc else f"PENJUALAN-{source_id}-NOTFOUND"
             print(f"DEBUG: PENJUALAN result = {result}")
+            return result
+        
+        elif source_type == SourceTypeEnum.IN or source_type == SourceTypeEnum.OUT:
+            # IN/OUT are stock adjustments
+        
+            doc = db.query(StockAdjustment.no_adjustment).filter(
+                StockAdjustment.id == source_id
+            ).first()
+            result = doc.no_adjustment if doc else f"ADJ-{source_id}-NOTFOUND"
+            print(f"DEBUG: ADJUSTMENT ({source_type.value}) result = {result}")
             return result
         
         elif source_type == SourceTypeEnum.ITEM:
