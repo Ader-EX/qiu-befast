@@ -1234,7 +1234,7 @@ def _D(x) -> Decimal:
     if isinstance(x, Decimal): return x
     if x is None: return Decimal("0")
     return Decimal(str(x))
-    
+
 @router.get(
     "/stock-adjustment",
     status_code=status.HTTP_200_OK,
@@ -1505,15 +1505,38 @@ async def get_stock_adjustment_report(
         # Track per-item batch counter
         batch_counter = 1
         batch_id_to_display = {}  # Map actual batch_id to display batch number
+        
+        # PRE-SCAN: Collect all unique batch_ids for this item (chronologically)
+        # This includes batches from before the report period that are used in OUT events
+        all_batch_ids = []
+        seen_batches = set()
+        
+        for ev in events:
+            if ev.get("id_batch") and ev["id_batch"] not in seen_batches:
+                all_batch_ids.append(ev["id_batch"])
+                seen_batches.add(ev["id_batch"])
+        
+        # Get batch creation dates for proper ordering (oldest first)
+        if all_batch_ids:
+            batch_dates = (
+                db.query(BatchStock.id_batch, BatchStock.tanggal_masuk)
+                .filter(
+                    BatchStock.id_batch.in_(all_batch_ids),
+                    BatchStock.item_id == iid
+                )
+                .order_by(BatchStock.tanggal_masuk.asc(), BatchStock.id_batch.asc())
+                .all()
+            )
+            
+            # Assign sequential display numbers based on creation order
+            for batch_id, _ in batch_dates:
+                if batch_id not in batch_id_to_display:
+                    batch_id_to_display[batch_id] = batch_counter
+                    batch_counter += 1
 
         for ev in events:
-            # Assign display batch number for IN events
-            if ev["kind"] == "IN" and ev["id_batch"] not in batch_id_to_display:
-                batch_id_to_display[ev["id_batch"]] = batch_counter
-                batch_counter += 1
-            
             # Get display batch number
-            display_batch = batch_id_to_display.get(ev["id_batch"], "N/A")
+            display_batch = batch_id_to_display.get(ev.get("id_batch"), "N/A")
             
             if ev["kind"] == "IN":
                 qty_in = ev["qty"]
@@ -1569,8 +1592,6 @@ async def get_stock_adjustment_report(
         data=items_payload,
         total=total_count,
     )
-
-
 # Helper functions (add these to your module)
 
 def _get_source_doc_number(
