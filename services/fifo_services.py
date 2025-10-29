@@ -41,7 +41,7 @@ class FifoService:
         ).all()
         
         if not original_logs:
-            raise ValueError(f"Sale {invoice_id} not found or already rolled back")
+            raise ValueError(f"Sale {invoice_id} not found ")
         
         # 2. Check if already rolled back
         existing_rollback = db.query(FifoLog).filter(
@@ -51,8 +51,6 @@ class FifoService:
             )
         ).first()
         
-        if existing_rollback:
-            raise ValueError(f"Sale {invoice_id} has already been rolled back")
         
         # 3. PRE-CHECK: Verify each batch has sufficient qty to rollback
         insufficient_batches = []

@@ -10,7 +10,7 @@ from fastapi import FastAPI,  APIRouter
 from fastapi.params import Depends, Query
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from sqlalchemy import String, and_, cast, extract, func, literal, or_, union_all
+from sqlalchemy import String, and_, case, cast, extract, func, literal, or_, union_all
 from sqlalchemy.orm import Session, aliased
 from starlette import status
 
@@ -24,6 +24,7 @@ from models.Customer import Customer
 from models.Item import Item
 from models.Pembelian import Pembelian, PembelianItem, StatusPembelianEnum
 from models.Penjualan import Penjualan, PenjualanItem
+from models.StockAdjustment import StockAdjustment
 from models.Vendor import Vendor
 from schemas.PaginatedResponseSchemas import PaginatedResponse
 from database import  get_db
@@ -1234,8 +1235,6 @@ def _D(x) -> Decimal:
     if x is None: return Decimal("0")
     return Decimal(str(x))
 
-# ---------- JSON endpoint
-
 @router.get(
     "/stock-adjustment",
     status_code=status.HTTP_200_OK,
@@ -1252,6 +1251,7 @@ async def get_stock_adjustment_report(
     """
     Build stock adjustment from BatchStock (IN) + FifoLog (OUT).
     Shows per-item merged movements with running balance and prices.
+    Now includes proper source document references and rollback netting.
     """
     start_dt, end_dt_excl, effective_to = _dt_bounds(from_date, to_date)
     start_date: date = start_dt.date()
@@ -1272,15 +1272,30 @@ async def get_stock_adjustment_report(
             *item_filter,
         )
     )
-    items_out = (
-        db.query(FifoLog.item_id)
+    
+    # For OUT events, group by base_invoice to find items with net activity
+    base_invoice_case = func.replace(FifoLog.invoice_id, '-ROLLBACK', '')
+    items_out_subq = (
+        db.query(
+            FifoLog.item_id,
+            base_invoice_case.label('base_invoice'),
+            func.sum(FifoLog.qty_terpakai).label('net_qty')
+        )
         .join(Item, Item.id == FifoLog.item_id)
         .filter(
             FifoLog.invoice_date >= start_date,
             FifoLog.invoice_date < end_date_excl,
             *item_filter,
         )
+        .group_by(FifoLog.item_id, base_invoice_case)
+        .subquery()
     )
+    
+    # Only items where net_qty != 0 (not fully cancelled)
+    items_out = db.query(items_out_subq.c.item_id).filter(
+        func.abs(items_out_subq.c.net_qty) > 0.01
+    )
+    
     active_item_ids = {rid[0] for rid in items_in.union(items_out).distinct().all()}
 
     total_count = len(active_item_ids)  # total items with activity
@@ -1305,8 +1320,7 @@ async def get_stock_adjustment_report(
     )
     paged_item_ids = [row.id for row in ordered_items]
 
-    # 2) Opening balance per item (before start_date)
-    #    opening = sum(batches before) - sum(fifo before)
+    # 2) Opening balance per item (before start_date) - WITH ROLLBACK NETTING
     pre_in_rows = (
         db.query(BatchStock.item_id, func.coalesce(func.sum(BatchStock.qty_masuk), 0))
         .filter(
@@ -1316,17 +1330,38 @@ async def get_stock_adjustment_report(
         .group_by(BatchStock.item_id)
         .all()
     )
-    pre_out_rows = (
-        db.query(FifoLog.item_id, func.coalesce(func.sum(FifoLog.qty_terpakai), 0))
+    
+    # Net out rollbacks for opening balance
+    pre_out_subq = (
+        db.query(
+            FifoLog.item_id,
+            base_invoice_case.label('base_invoice'),
+            func.sum(FifoLog.qty_terpakai).label('net_qty')
+        )
         .filter(
             FifoLog.item_id.in_(paged_item_ids),
             FifoLog.invoice_date < start_date,
         )
-        .group_by(FifoLog.item_id)
+        .group_by(FifoLog.item_id, base_invoice_case)
+        .subquery()
+    )
+    
+    pre_out_rows = (
+        db.query(
+            pre_out_subq.c.item_id,
+            func.sum(
+                case(
+                    (func.abs(pre_out_subq.c.net_qty) > 0.01, pre_out_subq.c.net_qty),
+                    else_=0
+                )
+            )
+        )
+        .group_by(pre_out_subq.c.item_id)
         .all()
     )
+    
     pre_in_map = {r[0]: int(r[1]) for r in pre_in_rows}
-    pre_out_map = {r[0]: int(r[1]) for r in pre_out_rows}
+    pre_out_map = {r[0]: int(r[1] or 0) for r in pre_out_rows}
 
     opening_qty: Dict[int, int] = {
         iid: pre_in_map.get(iid, 0) - pre_out_map.get(iid, 0)
@@ -1334,6 +1369,7 @@ async def get_stock_adjustment_report(
     }
 
     # 3) Pull IN/OUT events inside window for paged items
+    # Get source document info for IN events
     in_events = (
         db.query(
             BatchStock.item_id,
@@ -1343,6 +1379,8 @@ async def get_stock_adjustment_report(
             BatchStock.tanggal_masuk.label("event_date"),
             BatchStock.qty_masuk,
             BatchStock.harga_beli,
+            BatchStock.source_id,
+            BatchStock.source_type,
         )
         .join(Item, Item.id == BatchStock.item_id)
         .filter(
@@ -1353,6 +1391,7 @@ async def get_stock_adjustment_report(
         .all()
     )
 
+    # OUT events with rollback netting - group by base_invoice
     out_events = (
         db.query(
             FifoLog.item_id,
@@ -1360,15 +1399,23 @@ async def get_stock_adjustment_report(
             Item.name.label("item_name"),
             FifoLog.id_batch,
             FifoLog.invoice_date.label("event_date"),
-            FifoLog.qty_terpakai,
-            FifoLog.harga_modal,  # HPP per unit for that batch usage
-            FifoLog.invoice_id,
+            base_invoice_case.label("base_invoice_id"),
+            func.sum(FifoLog.qty_terpakai).label("net_qty"),
+            func.sum(FifoLog.total_hpp).label("total_hpp"),
         )
         .join(Item, Item.id == FifoLog.item_id)
         .filter(
             FifoLog.item_id.in_(paged_item_ids),
             FifoLog.invoice_date >= start_date,
             FifoLog.invoice_date < end_date_excl,
+        )
+        .group_by(
+            FifoLog.item_id,
+            Item.code,
+            Item.name,
+            FifoLog.id_batch,
+            FifoLog.invoice_date,
+            base_invoice_case
         )
         .all()
     )
@@ -1394,7 +1441,13 @@ async def get_stock_adjustment_report(
     # Compose events: IN and OUT
     per_item_events: Dict[int, List[dict]] = {iid: [] for iid in paged_item_ids}
 
+    # Process IN events with proper source document reference
     for ev in in_events:
+        # Debug: print source info to identify issue
+        print(f"DEBUG: batch_id={ev.id_batch}, source_type={ev.source_type}, source_id={ev.source_id}")
+        
+        doc_no = _get_source_doc_number(db, ev.source_type, ev.source_id, ev.id_batch)
+        
         per_item_events[ev.item_id].append({
             "kind": "IN",
             "date": ev.event_date,
@@ -1403,21 +1456,33 @@ async def get_stock_adjustment_report(
             "id_batch": ev.id_batch,
             "qty": int(ev.qty_masuk),
             "unit_cost": _D(ev.harga_beli),
-            "ref": ev.id_batch,  # use batch as transaction no surrogate
-            "no": f"BATCH-{ev.id_batch}",
+            "ref": ev.id_batch,
+            "no": doc_no,
+            "source_type": ev.source_type.value if ev.source_type else "UNKNOWN"
         })
 
+    # Process OUT events (already netted with rollbacks)
     for ev in out_events:
+        net_qty = ev.net_qty or 0
+        
+        # Skip fully cancelled transactions
+        if abs(float(net_qty)) < 0.01:
+            continue
+        
+        # Calculate weighted average HPP
+        avg_hpp = (ev.total_hpp / net_qty) if net_qty > 0 else Decimal('0')
+        
         per_item_events[ev.item_id].append({
             "kind": "OUT",
             "date": ev.event_date,
             "item_code": ev.item_code,
             "item_name": ev.item_name,
             "id_batch": ev.id_batch,
-            "qty": int(ev.qty_terpakai),
-            "unit_cost": _D(ev.harga_modal),  # HPP per unit actually used
-            "ref": ev.invoice_id,
-            "no": ev.invoice_id,
+            "qty": abs(int(net_qty)),
+            "unit_cost": abs(_D(avg_hpp)),
+            "ref": ev.base_invoice_id,
+            "no": ev.base_invoice_id,
+            "source_type": _determine_source_type_from_invoice(ev.base_invoice_id)
         })
 
     # Sort events per item (date, then IN before OUT to reflect stock arrival first)
@@ -1428,7 +1493,6 @@ async def get_stock_adjustment_report(
     for iid in paged_item_ids:
         events = per_item_events[iid]
         if not events:
-            # No rows in the window for this item (rare if active set correct)
             continue
 
         # Fetch item identity
@@ -1437,8 +1501,43 @@ async def get_stock_adjustment_report(
 
         running = opening_qty.get(iid, 0)
         last_cost = last_cost_per_item.get(iid, Decimal("0"))
+        
+        # Track per-item batch counter
+        batch_counter = 1
+        batch_id_to_display = {}  # Map actual batch_id to display batch number
+        
+        # PRE-SCAN: Collect all unique batch_ids for this item (chronologically)
+        # This includes batches from before the report period that are used in OUT events
+        all_batch_ids = []
+        seen_batches = set()
+        
+        for ev in events:
+            if ev.get("id_batch") and ev["id_batch"] not in seen_batches:
+                all_batch_ids.append(ev["id_batch"])
+                seen_batches.add(ev["id_batch"])
+        
+        # Get batch creation dates for proper ordering (oldest first)
+        if all_batch_ids:
+            batch_dates = (
+                db.query(BatchStock.id_batch, BatchStock.tanggal_masuk)
+                .filter(
+                    BatchStock.id_batch.in_(all_batch_ids),
+                    BatchStock.item_id == iid
+                )
+                .order_by(BatchStock.tanggal_masuk.asc(), BatchStock.id_batch.asc())
+                .all()
+            )
+            
+            # Assign sequential display numbers based on creation order
+            for batch_id, _ in batch_dates:
+                if batch_id not in batch_id_to_display:
+                    batch_id_to_display[batch_id] = batch_counter
+                    batch_counter += 1
 
         for ev in events:
+            # Get display batch number
+            display_batch = batch_id_to_display.get(ev.get("id_batch"), "N/A")
+            
             if ev["kind"] == "IN":
                 qty_in = ev["qty"]
                 qty_out = 0
@@ -1465,7 +1564,7 @@ async def get_stock_adjustment_report(
             row = StockAdjustmentReportRow(
                 date=datetime.combine(ev["date"], time.min),
                 no_transaksi=str(ev["no"]),
-                batch=f"BATCH-{ev.get('id_batch')}" if ev.get("id_batch") else "N/A",
+                batch=f"BATCH-{display_batch}" if display_batch != "N/A" else "N/A",
                 item_code=ev["item_code"] or "N/A",
                 item_name=ev["item_name"] or "N/A",
                 qty_masuk=_D(qty_in),
@@ -1493,8 +1592,104 @@ async def get_stock_adjustment_report(
         data=items_payload,
         total=total_count,
     )
+# Helper functions (add these to your module)
 
-# ---------- XLSX download
+def _get_source_doc_number(
+    db: Session,
+    source_type: SourceTypeEnum,
+    source_id: str,
+    batch_id: int
+) -> str:
+    """
+    Get proper document number based on source type.
+    Returns actual document numbers from related tables.
+    
+    Note: SourceTypeEnum has: PEMBELIAN, PENJUALAN, IN, OUT, ITEM
+    """
+    if not source_type or not source_id:
+        print(f"DEBUG: Missing source info - type={source_type}, id={source_id}")
+        return f"BATCH-{batch_id}"
+    
+    try:
+        # Debug output
+        print(f"DEBUG: Looking up {source_type.value} with ID {source_id}")
+        
+        if source_type == SourceTypeEnum.PEMBELIAN:
+            from models.Pembelian import Pembelian
+            doc = db.query(Pembelian.no_pembelian).filter(
+                Pembelian.id == source_id
+            ).first()
+            result = doc.no_pembelian if doc else f"PEMBELIAN-{source_id}-NOTFOUND"
+            print(f"DEBUG: PEMBELIAN result = {result}")
+            return result
+        
+        elif source_type == SourceTypeEnum.PENJUALAN:
+            from models.Penjualan import Penjualan
+            doc = db.query(Penjualan.no_penjualan).filter(
+                Penjualan.id == source_id
+            ).first()
+            result = doc.no_penjualan if doc else f"PENJUALAN-{source_id}-NOTFOUND"
+            print(f"DEBUG: PENJUALAN result = {result}")
+            return result
+        
+        elif source_type == SourceTypeEnum.IN or source_type == SourceTypeEnum.OUT:
+            # IN/OUT are stock adjustments
+        
+            doc = db.query(StockAdjustment.no_adjustment).filter(
+                StockAdjustment.id == source_id
+            ).first()
+            result = doc.no_adjustment if doc else f"ADJ-{source_id}-NOTFOUND"
+            print(f"DEBUG: ADJUSTMENT ({source_type.value}) result = {result}")
+            return result
+        
+        elif source_type == SourceTypeEnum.ITEM:
+            from models.Item import Item
+            # source_id for ITEM type is the item_id (integer), convert it
+            try:
+                item_id_int = int(source_id)
+                doc = db.query(Item.code).filter(
+                    Item.id == item_id_int
+                ).first()
+                result = doc.code if doc else f"ITEM-{source_id}-NOTFOUND"
+                print(f"DEBUG: ITEM result = {result}")
+                return result
+            except (ValueError, TypeError) as ve:
+                print(f"DEBUG: Error converting item_id: {ve}")
+                return f"ITEM-{source_id}"
+        
+        else:
+            print(f"DEBUG: Unknown source_type: {source_type}")
+            return f"BATCH-{batch_id}"
+            
+    except Exception as e:
+        # Fallback to batch ID if query fails
+        print(f"ERROR getting source doc number: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"BATCH-{batch_id}"
+
+
+def _determine_source_type_from_invoice(invoice_id: str) -> str:
+    """
+    Determine source type from invoice ID prefix.
+    Customize based on your invoice numbering convention.
+    """
+    if not invoice_id:
+        return "UNKNOWN"
+    
+    prefix = invoice_id.split('-')[0].upper()
+    
+    prefix_map = {
+        'ADJ': 'ADJUSTMENT',
+        'INV': 'PENJUALAN',
+        'SALE': 'PENJUALAN',
+        'SO': 'SALES_ORDER',
+        'PO': 'PURCHASE_ORDER',
+        'RET': 'RETURN',
+        'RTN': 'RETURN',
+    }
+    
+    return prefix_map.get(prefix, 'PENJUALAN')  # Default to PENJUALAN for invoices
 
 @router.get(
     "/stock-adjustment/download",
