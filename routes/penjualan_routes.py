@@ -1076,14 +1076,15 @@ async def get_totals(penjualan_id: int, db: Session = Depends(get_db)):
 async def recalc_totals(penjualan_id: int, db: Session = Depends(get_db)):
     data = calculate_penjualan_totals(db, penjualan_id)
     return TotalsResponse(**data)
-
+    
 @router.delete("/{penjualan_id}", response_model=SuccessResponse)
 async def delete_penjualan(penjualan_id: int, db: Session = Depends(get_db)):
     """
     Delete Penjualan:
-      - If DRAFT and no payments -> HARD DELETE (doc + lines + files + kode_lambung).
-      - Else -> SOFT DELETE (archive) + also soft-delete kode_lambung.
+      - If DRAFT and no payments -> HARD DELETE (doc + lines + files).
+      - Else -> SOFT DELETE (archive).
     """
+    # CRITICAL: Fetch with explicit ID check first
     penjualan = (
         db.query(Penjualan)
         .options(
@@ -1095,44 +1096,64 @@ async def delete_penjualan(penjualan_id: int, db: Session = Depends(get_db)):
         .filter(Penjualan.id == penjualan_id)
         .first()
     )
+    
     if not penjualan:
         raise HTTPException(status_code=404, detail="Penjualan not found")
 
     validate_draft_status(penjualan)  # if you require DRAFT for hard delete
 
     has_payments = bool(penjualan.pembayaran_detail_rel)
-    kode_lambung = penjualan.kode_lambung_rel  # may be None
+    kode_lambung = penjualan.kode_lambung_rel
 
     # --- Path A: HARD DELETE (DRAFT & no payments) ---
     if penjualan.status_penjualan.name == "DRAFT" and not has_payments:
         try:
-            # delete files
+            # Delete files first
             for att in penjualan.attachments:
                 if att.file_path and os.path.exists(att.file_path):
                     try:
                         os.remove(att.file_path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"Error deleting file {att.file_path}: {e}")
 
-            # delete child rows
-            db.query(PenjualanItem).filter(
-                PenjualanItem.penjualan_id == penjualan_id
-            ).delete(synchronize_session=False)
+            # SAFE DELETE: Use the loaded relationship objects directly
+            # This ensures we only delete children of THIS penjualan
+            for item in list(penjualan.penjualan_items):
+                db.delete(item)
+            
+            for att in list(penjualan.attachments):
+                db.delete(att)
 
-            db.query(AllAttachment).filter(
-                AllAttachment.penjualan_id == penjualan_id
-            ).delete(synchronize_session=False)
-
-            # IMPORTANT: detach FK, then delete kode_lambung (1-1 lifecycle)
+            # Handle KodeLambung carefully - check if it's used by other Penjualans
             if kode_lambung:
-                penjualan.kode_lambung_id = None
-                db.flush()        # ensure FK cleared before deleting parent row
-                db.delete(kode_lambung)
+                # Count OTHER penjualans using this kode_lambung
+                other_usage = (
+                    db.query(func.count(Penjualan.id))
+                    .filter(
+                        and_(
+                            Penjualan.kode_lambung_id == kode_lambung.id,
+                            Penjualan.id != penjualan_id,  # Exclude current
+                            Penjualan.is_deleted == False
+                        )
+                    )
+                    .scalar()
+                )
+                
+                # Only delete KodeLambung if no other Penjualans use it
+                if other_usage == 0:
+                    penjualan.kode_lambung_id = None
+                    db.flush()
+                    db.delete(kode_lambung)
+                else:
+                    # Just detach, don't delete
+                    penjualan.kode_lambung_id = None
 
-            # delete header
+            # Delete the penjualan header last
             db.delete(penjualan)
             db.commit()
+            
             return SuccessResponse(message="Penjualan (DRAFT) deleted successfully")
+            
         except Exception as e:
             db.rollback()
             raise HTTPException(status_code=500, detail=f"Error deleting penjualan: {str(e)}")
@@ -1142,14 +1163,12 @@ async def delete_penjualan(penjualan_id: int, db: Session = Depends(get_db)):
         penjualan.is_deleted = True
         penjualan.deleted_at = datetime.utcnow()
 
-        # Mirror soft-delete to kode_lambung so the 1-1 stays consistent
-        if kode_lambung:
-            kode_lambung.is_deleted = True
-            kode_lambung.deleted_at = datetime.utcnow()
-
+        # DON'T soft-delete the kode_lambung - other Penjualans might use it
+        # Only soft-delete if it's truly 1-1 and not reused
+        
         db.commit()
         return SuccessResponse(
-            message="Penjualan archived (soft deleted). Items, payments, and kode_lambung preserved (soft deleted)."
+            message="Penjualan archived (soft deleted). Items and payments preserved."
         )
     except Exception as e:
         db.rollback()
