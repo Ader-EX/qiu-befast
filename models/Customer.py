@@ -16,13 +16,11 @@ class Customer(Base,SoftDeleteMixin):
 
     currency_id = Column(Integer, ForeignKey("currencies.id"),nullable=False)
     created_at = Column(DateTime, default=datetime.now(), nullable=False)
-
-   
+ 
     curr_rel = relationship("Currency", back_populates="cust_rel")
-    kode_lambung_rel = relationship("KodeLambung", back_populates="customer_rel" )
-    # pembelians = relationship("Pembelian",cascade="all, delete", back_populates="customer_rel")
-    penjualans = relationship("Penjualan",cascade="all, delete", back_populates="customer_rel")
-    pembayarans = relationship("Pembayaran",cascade="all, delete", back_populates="customer_rel")
-    pengembalians = relationship("Pengembalian",cascade="all, delete", back_populates="customer_rel")
+    kode_lambung_rel = relationship("KodeLambung", back_populates="customer_rel")
+    penjualans = relationship("Penjualan", back_populates="customer_rel")
+    pembayarans = relationship("Pembayaran", back_populates="customer_rel")
+    pengembalians = relationship("Pengembalian", back_populates="customer_rel")
 
 
