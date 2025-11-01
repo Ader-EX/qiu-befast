@@ -205,7 +205,7 @@ def validate_item_exists(db: Session, item_id: int) -> Item:
     if not item:
         raise HTTPException(status_code=404, detail=f"Item with ID {item_id} not found")
     return item
-
+    
 def validate_item_stock(db: Session, item_id: int, requested_qty: int, warehouse_id: Optional[int] = None) -> None:
     """Ensure stock is sufficient based on FIFO batches."""
     from models.BatchStock import BatchStock
@@ -215,10 +215,10 @@ def validate_item_stock(db: Session, item_id: int, requested_qty: int, warehouse
     
     if requested_qty < 1:
         raise HTTPException(status_code=400, detail="qty must be >= 1")
-
+    
     # Calculate total available stock from open FIFO batches
     query = db.query(
-        func.sum(BatchStock.sisa_qty).label('total_available')
+        func.sum(BatchStock.sisa_qty)  # Remove .label() when using scalar()
     ).filter(
         and_(
             BatchStock.item_id == item_id,
@@ -232,8 +232,8 @@ def validate_item_stock(db: Session, item_id: int, requested_qty: int, warehouse
         query = query.filter(BatchStock.warehouse_id == warehouse_id)
     
     result = query.scalar()
-    available = result if result else 0
-
+    available = result if result is not None else 0  
+    
     if available < requested_qty:
         raise HTTPException(
             status_code=400,

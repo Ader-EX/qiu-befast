@@ -83,7 +83,7 @@ def adjust_item_stock(
             entity_type=AuditEntityEnum.ITEM,
             description=f"Stok item {item.name} {action} sebanyak {qty} "
                        f"(dari {old_stock} menjadi {item.total_item}) - "
-                       f"Adjustment: {no_adj}. Total HPP affected: {total_hpp}",
+                       f"Adjustment: {no_adj}",
             user_name=user_name
         )
 
