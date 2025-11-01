@@ -13,7 +13,7 @@ class KodeLambung(Base,SoftDeleteMixin):
     name = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=datetime.now, nullable=False)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
-    customer_rel = relationship("Customer", cascade="all, delete", back_populates="kode_lambung_rel")
+    customer_rel = relationship("Customer",back_populates="kode_lambung_rel")
     penjualans = relationship("Penjualan", back_populates="kode_lambung_rel")
 
     def __str__(self):
