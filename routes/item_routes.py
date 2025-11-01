@@ -1289,6 +1289,8 @@ def _process_row(
         'vendor_id': vendor_id,
         'is_active': True
     }
+
+    
 @router.put("/{item_id}", response_model=ItemResponse)
 async def update_item(
         request: Request,
