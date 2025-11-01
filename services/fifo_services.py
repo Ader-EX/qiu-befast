@@ -376,7 +376,7 @@ class FifoService:
         db.refresh(batch)
         
         return batch
-    
+        
     @staticmethod
     def get_open_batches(
         db: Session,
@@ -385,7 +385,10 @@ class FifoService:
     ) -> List[BatchStock]:
         """
         Ambil semua batch yang masih OPEN, sorted by tanggal_masuk ASC (FIFO).
+        Includes batches with warehouse_id=NULL (unassigned stock).
         """
+        from sqlalchemy import or_
+        
         query = db.query(BatchStock).filter(
             and_(
                 BatchStock.item_id == item_id,
@@ -395,7 +398,13 @@ class FifoService:
         )
         
         if warehouse_id is not None:
-            query = query.filter(BatchStock.warehouse_id == warehouse_id)
+            # Include both: specific warehouse AND unassigned (NULL) warehouse
+            query = query.filter(
+                or_(
+                    BatchStock.warehouse_id == warehouse_id,
+                    BatchStock.warehouse_id.is_(None)
+                )
+            )
         
         # FIFO: oldest first
         query = query.order_by(BatchStock.tanggal_masuk.asc(), BatchStock.id_batch.asc())

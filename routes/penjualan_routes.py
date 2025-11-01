@@ -207,9 +207,12 @@ def validate_item_exists(db: Session, item_id: int) -> Item:
     return item
     
 def validate_item_stock(db: Session, item_id: int, requested_qty: int, warehouse_id: Optional[int] = None) -> None:
-    """Ensure stock is sufficient based on FIFO batches."""
+    """
+    Ensure stock is sufficient based on FIFO batches.
+    Includes batches with warehouse_id=NULL (unassigned stock) in availability check.
+    """
     from models.BatchStock import BatchStock
-    from sqlalchemy import func, and_
+    from sqlalchemy import func, and_, or_
     
     item_data = db.query(Item).filter(Item.id == item_id).first()
     
@@ -217,8 +220,9 @@ def validate_item_stock(db: Session, item_id: int, requested_qty: int, warehouse
         raise HTTPException(status_code=400, detail="qty must be >= 1")
     
     # Calculate total available stock from open FIFO batches
+    # Include both: batches for specific warehouse AND unassigned batches (warehouse_id=NULL)
     query = db.query(
-        func.sum(BatchStock.sisa_qty)  # Remove .label() when using scalar()
+        func.sum(BatchStock.sisa_qty)
     ).filter(
         and_(
             BatchStock.item_id == item_id,
@@ -227,9 +231,14 @@ def validate_item_stock(db: Session, item_id: int, requested_qty: int, warehouse
         )
     )
     
-    # Filter by warehouse if specified
+    # Filter by warehouse: include both the specified warehouse AND NULL warehouse
     if warehouse_id:
-        query = query.filter(BatchStock.warehouse_id == warehouse_id)
+        query = query.filter(
+            or_(
+                BatchStock.warehouse_id == warehouse_id,
+                BatchStock.warehouse_id.is_(None)  # Include unassigned stock
+            )
+        )
     
     result = query.scalar()
     available = result if result is not None else 0  
@@ -1076,7 +1085,7 @@ async def get_totals(penjualan_id: int, db: Session = Depends(get_db)):
 async def recalc_totals(penjualan_id: int, db: Session = Depends(get_db)):
     data = calculate_penjualan_totals(db, penjualan_id)
     return TotalsResponse(**data)
-    
+
 @router.delete("/{penjualan_id}", response_model=SuccessResponse)
 async def delete_penjualan(penjualan_id: int, db: Session = Depends(get_db)):
     """
