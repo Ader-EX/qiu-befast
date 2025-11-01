@@ -18,10 +18,12 @@ class Vendor(Base, SoftDeleteMixin):
     created_at = Column(Date, default=datetime.now(), nullable=False)
     
     # Relationships
-    curr_rel = relationship("Currency",cascade="all, delete", back_populates="vend_rel")
-    item_rel = relationship("Item",cascade="all, delete", back_populates="vendor_rel")
-    top_rel = relationship("TermOfPayment",cascade="all, delete", back_populates="vend_rel")
-    pembelians = relationship("Pembelian",cascade="all, delete", back_populates="vend_rel")
-    pembayarans = relationship("Pembayaran",cascade="all, delete", back_populates="vend_rel")
-    pengembalians = relationship("Pengembalian",cascade="all, delete", back_populates="vend_rel")
+    curr_rel = relationship("Currency", back_populates="vend_rel")
+    item_rel = relationship("Item", back_populates="vendor_rel")
+    top_rel = relationship("TermOfPayment", back_populates="vend_rel")
+    
+    # These are fine - Vendor owns these, so cascade makes sense
+    pembelians = relationship("Pembelian", back_populates="vend_rel")
+    pembayarans = relationship("Pembayaran", back_populates="vend_rel")
+    pengembalians = relationship("Pengembalian", back_populates="vend_rel")
 

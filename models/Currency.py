@@ -17,8 +17,7 @@ class Currency(Base,SoftDeleteMixin):
     created_at = Column(DateTime, default=datetime.now(), nullable=False)
 
     # Relationships
-    vend_rel = relationship("Vendor", cascade="all, delete", back_populates="curr_rel")
-    cust_rel = relationship("Customer", cascade="all, delete", back_populates="curr_rel")
-    
-    pembayarans = relationship("Pembayaran", cascade="all, delete", back_populates="curr_rel")
-    pengembalians = relationship("Pengembalian", cascade="all, delete", back_populates="curr_rel")
+    vend_rel = relationship("Vendor", back_populates="curr_rel")
+    cust_rel = relationship("Customer", back_populates="curr_rel")
+    pembayarans = relationship("Pembayaran", back_populates="curr_rel")
+    pengembalians = relationship("Pengembalian", back_populates="curr_rel")
